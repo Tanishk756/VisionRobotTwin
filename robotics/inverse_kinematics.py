@@ -25,6 +25,7 @@ class IKStatus(Enum):
     OUT_OF_LIMITS = auto()
     UNREACHABLE = auto()
     INVALID_TARGET = auto()
+    RESIDUAL_TOO_HIGH = auto()
     IK_ERROR = auto()
 
 
@@ -63,6 +64,8 @@ class GenericIKSolver:
         min_reach_m: float = 0.10,
         default_ee_orientation: Tuple[float, float, float, float] = (1.0, 0.0, 0.0, 0.0),
         damping_constant: float = 0.01,
+        max_residual_position_m: float = 0.06,
+        max_residual_orientation_rad: Optional[float] = 0.50,
     ):
         self.client_id = physics_client_id
         self.robot_id = robot_id
@@ -76,6 +79,8 @@ class GenericIKSolver:
         self.max_reach_m = max_reach_m
         self.min_reach_m = min_reach_m
         self.default_ee_orientation = default_ee_orientation
+        self.max_residual_position_m = max_residual_position_m
+        self.max_residual_orientation_rad = max_residual_orientation_rad
 
         # Count actual movable DOFs (revolute + prismatic) for null-space vector sizing in PyBullet
         movable_joint_count = 0
@@ -192,13 +197,57 @@ class GenericIKSolver:
                 # Apply minor numerical clamping strictly within valid limits
                 arm_poses[idx] = float(np.clip(val, low, high))
 
+            # 3. State-Preserving Forward Kinematics (FK) Residual Measurement
+            saved_states = p.getJointStates(self.robot_id, self.arm_joint_indices, physicsClientId=self.client_id)
+            try:
+                for j_idx, angle in zip(self.arm_joint_indices, arm_poses):
+                    p.resetJointState(self.robot_id, j_idx, targetValue=angle, targetVelocity=0.0, physicsClientId=self.client_id)
+
+                link_state = p.getLinkState(self.robot_id, self.ee_link_index, computeForwardKinematics=True, physicsClientId=self.client_id)
+                fk_pos = np.array(link_state[0], dtype=np.float64)
+                fk_orn = np.array(link_state[1], dtype=np.float64)
+
+                target_pos_arr = np.array(pos, dtype=np.float64)
+                residual_pos_m = float(np.linalg.norm(target_pos_arr - fk_pos))
+
+                target_orn_arr = np.array(orn, dtype=np.float64)
+                dot = float(np.abs(np.dot(target_orn_arr / np.linalg.norm(target_orn_arr), fk_orn / np.linalg.norm(fk_orn))))
+                residual_orn_rad = float(2.0 * np.arccos(np.clip(dot, -1.0, 1.0)))
+            finally:
+                for j_idx, state in zip(self.arm_joint_indices, saved_states):
+                    p.resetJointState(self.robot_id, j_idx, targetValue=state[0], targetVelocity=state[1], physicsClientId=self.client_id)
+
+            # 4. Residual Tolerance Gate
+            if residual_pos_m > self.max_residual_position_m:
+                return IKResult(
+                    success=False,
+                    joint_positions=arm_poses,
+                    status=IKStatus.RESIDUAL_TOO_HIGH,
+                    status_message=f"IK Cartesian residual ({residual_pos_m*1000:.1f} mm) exceeds limit ({self.max_residual_position_m*1000:.1f} mm)",
+                    residual_position_m=residual_pos_m,
+                    residual_orientation_rad=residual_orn_rad,
+                    solve_time_ms=solve_time_ms,
+                )
+
+            if self.max_residual_orientation_rad is not None and target_orientation is not None:
+                if residual_orn_rad > self.max_residual_orientation_rad:
+                    return IKResult(
+                        success=False,
+                        joint_positions=arm_poses,
+                        status=IKStatus.RESIDUAL_TOO_HIGH,
+                        status_message=f"IK angular residual ({np.degrees(residual_orn_rad):.1f} deg) exceeds limit ({np.degrees(self.max_residual_orientation_rad):.1f} deg)",
+                        residual_position_m=residual_pos_m,
+                        residual_orientation_rad=residual_orn_rad,
+                        solve_time_ms=solve_time_ms,
+                    )
+
             return IKResult(
                 success=True,
                 joint_positions=arm_poses,
                 status=IKStatus.SOLUTION_RETURNED,
                 status_message="SOLUTION_RETURNED",
-                residual_position_m=0.0,
-                residual_orientation_rad=0.0,
+                residual_position_m=residual_pos_m,
+                residual_orientation_rad=residual_orn_rad,
                 solve_time_ms=solve_time_ms,
             )
 

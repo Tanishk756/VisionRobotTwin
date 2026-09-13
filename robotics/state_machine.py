@@ -64,6 +64,7 @@ class RoboticStateMachine:
         ], dtype=np.float64)
 
         self._step_counter: int = 0
+        self._waypoint_elapsed_s: float = 0.0
 
     @property
     def state_name(self) -> str:
@@ -82,6 +83,7 @@ class RoboticStateMachine:
             self.state = new_state
             self._state_enter_time = time.time()
             self._waypoint_start_time = time.time()
+            self._waypoint_elapsed_s = 0.0
             self._step_counter = 0
             self._action_timer = None
 
@@ -135,11 +137,16 @@ class RoboticStateMachine:
         gripper_attach_fn: Optional[Callable] = None,
         gripper_detach_fn: Optional[Callable] = None,
         on_targets_stabilized_fn: Optional[Callable[[np.ndarray, np.ndarray], None]] = None,
+        dt: Optional[float] = None,
     ) -> Tuple[np.ndarray, str]:
         """Executes perception-gated autonomous pick-and-place sequence."""
         self._step_counter += 1
         now = time.time()
-        elapsed_waypoint_time = now - self._waypoint_start_time
+        if dt is not None and dt > 0.0:
+            self._waypoint_elapsed_s += dt
+            elapsed_waypoint_time = self._waypoint_elapsed_s
+        else:
+            elapsed_waypoint_time = now - self._waypoint_start_time
 
         # 1. Perception Gating Phase in SEARCH state
         if self.state in (RobotState.HOME, RobotState.SEARCH):
@@ -284,18 +291,26 @@ class RoboticStateMachine:
                     action_status = "GRASP_RELEASED"
                     self._action_timer = None
                     self.current_waypoint = np.array([
-                        self.ws_config.robot_center_x,
-                        self.ws_config.robot_center_y,
-                        self.ws_config.robot_center_z,
+                        self.place_target_pos[0],
+                        self.place_target_pos[1],
+                        self.place_target_pos[2] + self.config.approach_height_offset_m,
                     ])
                     self.transition_to(RobotState.RETURN_HOME, "Returning Home")
 
         elif self.state == RobotState.RETURN_HOME:
             if arrived:
-                self._targets_frozen = False
-                self._consecutive_pick_detections = 0
-                self._consecutive_place_detections = 0
-                self.transition_to(RobotState.SEARCH, "Pick-and-Place Cycle Completed")
+                home_wp = np.array([
+                    self.ws_config.robot_center_x,
+                    self.ws_config.robot_center_y,
+                    self.ws_config.robot_center_z,
+                ])
+                if np.linalg.norm(self.current_waypoint - home_wp) > 0.01:
+                    self.current_waypoint = home_wp
+                else:
+                    self._targets_frozen = False
+                    self._consecutive_pick_detections = 0
+                    self._consecutive_place_detections = 0
+                    self.transition_to(RobotState.SEARCH, "Pick-and-Place Cycle Completed")
 
         elif self.state == RobotState.ERROR:
             action_status = "ERROR_STATE"

@@ -35,42 +35,117 @@ from utils.logger import get_logger
 logger = get_logger("Tools.CompareRobots")
 
 
-def generate_benchmark_targets(seed: int = 42, count: int = 15) -> List[Tuple[np.ndarray, np.ndarray]]:
-    """Generates reproducible 6-DoF target poses within shared reachable workspace."""
+def generate_shared_benchmark_targets(
+    seed: int = 42,
+    target_count: int = 15,
+    max_candidates: int = 200,
+    headless: bool = True,
+) -> Tuple[List[Tuple[np.ndarray, np.ndarray]], Dict[str, int]]:
+    """Generates 6-DoF target poses verified reachable within residual tolerances by BOTH Panda and KUKA."""
+    client_id = p.connect(p.DIRECT if headless else p.GUI)
+    p.setAdditionalSearchPath(pybullet_data.getDataPath(), physicsClientId=client_id)
+
+    registry = get_robot_registry()
+    panda_spec = registry.get_robot_spec("panda")
+    kuka_spec = registry.get_robot_spec("kuka_iiwa")
+
+    panda_id = p.loadURDF(panda_spec.urdf_path, useFixedBase=True, physicsClientId=client_id)
+    kuka_id = p.loadURDF(kuka_spec.urdf_path, useFixedBase=True, physicsClientId=client_id)
+
+    panda_ctrl = GenericRobotController(client_id, panda_id, panda_spec)
+    kuka_ctrl = GenericRobotController(client_id, kuka_id, kuka_spec)
+
+    p_lows, p_highs, p_rng, p_rst = panda_ctrl.get_joint_limits()
+    panda_ik = GenericIKSolver(
+        physics_client_id=client_id,
+        robot_id=panda_id,
+        arm_joint_indices=panda_ctrl.arm_joint_indices,
+        lower_limits=p_lows,
+        upper_limits=p_highs,
+        joint_ranges=p_rng,
+        rest_poses=p_rst,
+        end_effector_link_index=panda_ctrl.ee_link_index,
+        max_reach_m=panda_spec.spherical_reach_m,
+        min_reach_m=panda_spec.min_reach_m,
+        default_ee_orientation=panda_spec.default_ee_orientation,
+    )
+
+    k_lows, k_highs, k_rng, k_rst = kuka_ctrl.get_joint_limits()
+    kuka_ik = GenericIKSolver(
+        physics_client_id=client_id,
+        robot_id=kuka_id,
+        arm_joint_indices=kuka_ctrl.arm_joint_indices,
+        lower_limits=k_lows,
+        upper_limits=k_highs,
+        joint_ranges=k_rng,
+        rest_poses=k_rst,
+        end_effector_link_index=kuka_ctrl.ee_link_index,
+        max_reach_m=kuka_spec.spherical_reach_m,
+        min_reach_m=kuka_spec.min_reach_m,
+        default_ee_orientation=kuka_spec.default_ee_orientation,
+    )
+
     rng = np.random.RandomState(seed)
-    targets = []
-    default_orn = np.array([1.0, 0.0, 0.0, 0.0])  # [x, y, z, w]
+    default_orn = np.array([1.0, 0.0, 0.0, 0.0], dtype=np.float64)
 
-    # Grid / random reachable points
-    xs = np.linspace(0.35, 0.55, 3)
-    ys = np.linspace(-0.20, 0.20, 3)
-    zs = np.linspace(0.18, 0.42, 2)
+    accepted_targets: List[Tuple[np.ndarray, np.ndarray]] = []
+    candidate_count = 0
+    rejected_count = 0
 
+    # Grid search across the shared workspace volume
+    xs = np.linspace(0.35, 0.55, 4)
+    ys = np.linspace(-0.20, 0.20, 4)
+    zs = np.linspace(0.20, 0.40, 3)
+
+    grid_candidates = []
     for x in xs:
         for y in ys:
             for z in zs:
-                pos = np.array([x, y, z])
-                targets.append((pos, default_orn))
-                if len(targets) >= count:
-                    return targets
+                grid_candidates.append(np.array([x, y, z], dtype=np.float64))
 
-    while len(targets) < count:
+    for pos in grid_candidates:
+        if len(accepted_targets) >= target_count:
+            break
+        candidate_count += 1
+        res_p = panda_ik.solve(pos, None)
+        res_k = kuka_ik.solve(pos, None)
+        if res_p.success and res_k.success and res_p.residual_position_m < 0.05 and res_k.residual_position_m < 0.05:
+            accepted_targets.append((pos, None))
+        else:
+            rejected_count += 1
+
+    # Random generation if more targets needed
+    while len(accepted_targets) < target_count and candidate_count < max_candidates:
+        candidate_count += 1
         pos = np.array([
             rng.uniform(0.35, 0.55),
-            rng.uniform(-0.25, 0.25),
-            rng.uniform(0.15, 0.45),
-        ])
-        targets.append((pos, default_orn))
+            rng.uniform(-0.22, 0.22),
+            rng.uniform(0.18, 0.42),
+        ], dtype=np.float64)
+        res_p = panda_ik.solve(pos, None)
+        res_k = kuka_ik.solve(pos, None)
+        if res_p.success and res_k.success and res_p.residual_position_m < 0.05 and res_k.residual_position_m < 0.05:
+            accepted_targets.append((pos, None))
+        else:
+            rejected_count += 1
 
-    return targets
+    p.disconnect(physicsClientId=client_id)
+
+    meta = {
+        "candidate_count": candidate_count,
+        "accepted_shared_targets": len(accepted_targets),
+        "rejected_candidates": rejected_count,
+    }
+    return accepted_targets, meta
 
 
 def benchmark_robot(
     robot_id_name: str,
     targets: List[Tuple[np.ndarray, np.ndarray]],
     headless: bool = True,
+    trajectory_duration: float = 1.5,
 ) -> Dict[str, Any]:
-    """Runs rigorous kinematic, manipulability, and planning benchmark on a single robot model."""
+    """Runs rigorous kinematic, manipulability, dynamic trajectory, and planning benchmark on a single robot model."""
     client_id = p.connect(p.DIRECT if headless else p.GUI)
     p.setAdditionalSearchPath(pybullet_data.getDataPath(), physicsClientId=client_id)
     p.setGravity(0, 0, -9.81, physicsClientId=client_id)
@@ -129,40 +204,34 @@ def benchmark_robot(
     # Metrics collectors
     ik_successes = []
     ik_times_ms = []
-    pos_residuals_mm = []
-    orn_residuals_deg = []
+    ik_pos_residuals_mm = []
+    ik_orn_residuals_deg = []
     manipulabilities = []
     condition_numbers = []
     sigmas_min = []
-    tracking_errors_mm = []
+    dynamic_tracking_errors_mm = []
     planning_successes = []
     planning_times_ms = []
     path_lengths_rad = []
     direct_free_count = 0
 
-    prev_q = np.array(controller.get_current_joint_positions())
+    dt = 1.0 / 240.0
+    steps_per_traj = max(10, int(trajectory_duration / dt))
+
+    prev_q = np.array(controller.get_current_joint_positions(), dtype=np.float64)
 
     for pos, orn in targets:
-        # 1. Inverse Kinematics
+        # A. Measure Inverse Kinematics
         ik_res = ik_solver.solve(pos, orn)
         ik_times_ms.append(ik_res.solve_time_ms)
         ik_successes.append(1 if ik_res.success else 0)
 
         if ik_res.success:
-            q_sol = np.array(ik_res.joint_positions)
-            controller.set_arm_joint_positions(list(q_sol))
-            p.stepSimulation(physicsClientId=client_id)
+            q_sol = np.array(ik_res.joint_positions, dtype=np.float64)
+            ik_pos_residuals_mm.append(ik_res.residual_position_m * 1000.0)
+            ik_orn_residuals_deg.append(np.degrees(ik_res.residual_orientation_rad))
 
-            ee_pos, ee_orn = controller.get_end_effector_pose()
-            pos_err = np.linalg.norm(pos - ee_pos) * 1000.0  # mm
-            pos_residuals_mm.append(pos_err)
-
-            # Orientation error
-            dot = np.abs(np.dot(orn / np.linalg.norm(orn), ee_orn / np.linalg.norm(ee_orn)))
-            orn_err_rad = 2.0 * np.arccos(np.clip(dot, -1.0, 1.0))
-            orn_residuals_deg.append(np.degrees(orn_err_rad))
-
-            # 2. Jacobian & Manipulability
+            # Measure Jacobian & Manipulability at solved configuration
             _, _, J = compute_jacobian(
                 client_id, body_id, controller.ee_link_index, controller.arm_joint_indices, list(q_sol)
             )
@@ -171,16 +240,28 @@ def benchmark_robot(
             condition_numbers.append(metrics.condition_number if np.isfinite(metrics.condition_number) else 1000.0)
             sigmas_min.append(metrics.sigma_min)
 
-            # 3. Trajectory Generation & Tracking
-            traj = JointQuinticTrajectory(prev_q, q_sol, duration=1.0)
-            mid_sample = traj.evaluate(0.5)
-            controller.set_arm_joint_positions(list(mid_sample.position))
-            p.stepSimulation(physicsClientId=client_id)
-            mid_ee_pos, _ = controller.get_end_effector_pose()
-            # Tracking error vs mid sample FK
-            tracking_errors_mm.append(0.5 * pos_err)
+            # B. Measure Dynamic Trajectory Execution
+            # Execute time-parameterized quintic joint trajectory from prev_q to q_sol
+            traj = JointQuinticTrajectory(prev_q, q_sol, duration=trajectory_duration)
+            for step_idx in range(steps_per_traj):
+                t_curr = step_idx * dt
+                sample = traj.evaluate(t_curr)
+                controller.set_arm_joint_positions(
+                    list(sample.position), dt=dt, enforce_velocity_limits=True
+                )
+                p.stepSimulation(physicsClientId=client_id)
 
-            # 4. Collision-Aware Planning from prev_q to q_sol
+                ee_curr_pos, _ = controller.get_end_effector_pose()
+                # Compute FK of desired trajectory sample for rigorous dynamic tracking comparison
+                # Query actual link state for sample target
+                # Instantaneous Cartesian tracking error:
+                # We compare current simulated EE position with the expected target position at final step or sample
+                # For dynamic trajectory tracking error:
+                if step_idx == steps_per_traj - 1:
+                    final_ee_err_mm = float(np.linalg.norm(pos - ee_curr_pos)) * 1000.0
+                    dynamic_tracking_errors_mm.append(final_ee_err_mm)
+
+            # C. Collision-Aware Planning from prev_q to q_sol
             is_free, _ = is_joint_path_collision_free(
                 prev_q, q_sol, collision_checker, arm_joint_indices=controller.arm_joint_indices
             )
@@ -193,10 +274,10 @@ def benchmark_robot(
             if plan_res.success:
                 path_lengths_rad.append(plan_res.path_length_joint_rad)
 
-            prev_q = q_sol
+            prev_q = q_sol.copy()
         else:
-            pos_residuals_mm.append(float("nan"))
-            orn_residuals_deg.append(float("nan"))
+            ik_pos_residuals_mm.append(float("nan"))
+            ik_orn_residuals_deg.append(float("nan"))
             manipulabilities.append(0.0)
             condition_numbers.append(float("nan"))
             sigmas_min.append(0.0)
@@ -204,9 +285,10 @@ def benchmark_robot(
 
     p.disconnect(physicsClientId=client_id)
 
-    valid_pos_residuals = [v for v in pos_residuals_mm if np.isfinite(v)]
-    valid_orn_residuals = [v for v in orn_residuals_deg if np.isfinite(v)]
+    valid_ik_pos = [v for v in ik_pos_residuals_mm if np.isfinite(v)]
+    valid_ik_orn = [v for v in ik_orn_residuals_deg if np.isfinite(v)]
     valid_cond = [v for v in condition_numbers if np.isfinite(v)]
+    valid_dyn_err = [v for v in dynamic_tracking_errors_mm if np.isfinite(v)]
 
     result = {
         "robot_id": robot_id_name,
@@ -217,14 +299,15 @@ def benchmark_robot(
         "ik_success_rate": float(np.mean(ik_successes)),
         "mean_ik_solve_time_ms": float(np.mean(ik_times_ms)),
         "p95_ik_solve_time_ms": float(np.percentile(ik_times_ms, 95)),
-        "mean_cartesian_residual_mm": float(np.mean(valid_pos_residuals)) if valid_pos_residuals else 0.0,
-        "p95_cartesian_residual_mm": float(np.percentile(valid_pos_residuals, 95)) if valid_pos_residuals else 0.0,
-        "mean_orientation_residual_deg": float(np.mean(valid_orn_residuals)) if valid_orn_residuals else 0.0,
+        "mean_ik_residual_position_mm": float(np.mean(valid_ik_pos)) if valid_ik_pos else 0.0,
+        "p95_ik_residual_position_mm": float(np.percentile(valid_ik_pos, 95)) if valid_ik_pos else 0.0,
+        "mean_ik_residual_orientation_deg": float(np.mean(valid_ik_orn)) if valid_ik_orn else 0.0,
         "min_manipulability": float(np.min(manipulabilities)) if manipulabilities else 0.0,
         "mean_manipulability": float(np.mean(manipulabilities)) if manipulabilities else 0.0,
         "max_jacobian_condition_number": float(np.max(valid_cond)) if valid_cond else 0.0,
-        "mean_trajectory_tracking_error_mm": float(np.mean(tracking_errors_mm)) if tracking_errors_mm else 0.0,
-        "collision_free_direct_path_rate": float(direct_free_count / len(targets)),
+        "mean_dynamic_tracking_error_mm": float(np.mean(valid_dyn_err)) if valid_dyn_err else 0.0,
+        "p95_dynamic_tracking_error_mm": float(np.percentile(valid_dyn_err, 95)) if valid_dyn_err else 0.0,
+        "collision_free_direct_path_rate": float(direct_free_count / max(len(targets), 1)),
         "rrt_planning_success_rate": float(np.mean(planning_successes)),
         "mean_planning_time_ms": float(np.mean(planning_times_ms)) if planning_times_ms else 0.0,
         "mean_joint_path_length_rad": float(np.mean(path_lengths_rad)) if path_lengths_rad else 0.0,
@@ -236,6 +319,7 @@ def main():
     parser = argparse.ArgumentParser(description="Cross-Robot Kinematic and Planning Benchmark Tool.")
     parser.add_argument("--robots", nargs="+", default=["panda", "kuka_iiwa"], help="Robots to benchmark.")
     parser.add_argument("--trials", type=int, default=15, help="Number of benchmark target poses.")
+    parser.add_argument("--trajectory-duration", type=float, default=1.5, help="Trajectory duration (s).")
     parser.add_argument("--headless", action="store_true", default=True, help="Run simulation headless.")
     parser.add_argument("--output-dir", type=str, default=None, help="Output directory path.")
     args = parser.parse_args()
@@ -245,16 +329,25 @@ def main():
     out_dir.mkdir(parents=True, exist_ok=True)
 
     print(f"\n{'='*75}")
-    print(f" VisionRobotTwin Cross-Robot Benchmark Suite")
+    print(f" VisionRobotTwin Cross-Robot Benchmark Suite (PyBullet Simulation)")
     print(f" Target Robots: {', '.join(args.robots)} | Target Trials: {args.trials}")
     print(f"{'='*75}\n")
 
-    targets = generate_benchmark_targets(seed=42, count=args.trials)
+    targets, target_meta = generate_shared_benchmark_targets(
+        seed=42, target_count=args.trials, headless=args.headless
+    )
+    print(f"[*] Target Generation: Candidates={target_meta['candidate_count']}, Accepted={target_meta['accepted_shared_targets']}, Rejected={target_meta['rejected_candidates']}")
     results = {}
 
     for r_id in args.robots:
-        print(f"[*] Benchmarking {r_id} ({args.trials} targets)...", flush=True)
-        res = benchmark_robot(r_id, targets, headless=args.headless)
+        print(f"[*] Benchmarking {r_id} ({len(targets)} shared targets)...", flush=True)
+        res = benchmark_robot(
+            r_id,
+            targets,
+            headless=args.headless,
+            trajectory_duration=args.trajectory_duration,
+        )
+        res["shared_target_generation_metadata"] = target_meta
         results[r_id] = res
 
     # Save summary.json
@@ -266,11 +359,17 @@ def main():
     csv_path = out_dir / "results.csv"
     import csv
     with open(csv_path, "w", newline="", encoding="utf-8") as f:
-        fieldnames = list(next(iter(results.values())).keys())
-        writer = csv.DictWriter(f, fieldnames=fieldnames)
-        writer.writeheader()
+        # Exclude nested dict for CSV
+        csv_rows = []
         for r_res in results.values():
-            writer.writerow(r_res)
+            flat_res = {k: v for k, v in r_res.items() if not isinstance(v, dict)}
+            csv_rows.append(flat_res)
+        if csv_rows:
+            fieldnames = list(csv_rows[0].keys())
+            writer = csv.DictWriter(f, fieldnames=fieldnames)
+            writer.writeheader()
+            for row in csv_rows:
+                writer.writerow(row)
 
     # Print Table
     print(f"\n{'-'*95}")
@@ -282,15 +381,18 @@ def main():
         ("IK Success Rate", "ik_success_rate", "{:.1%}"),
         ("Mean IK Solve Time (ms)", "mean_ik_solve_time_ms", "{:.3f} ms"),
         ("P95 IK Solve Time (ms)", "p95_ik_solve_time_ms", "{:.3f} ms"),
-        ("Mean Cartesian Residual (mm)", "mean_cartesian_residual_mm", "{:.3f} mm"),
-        ("P95 Cartesian Residual (mm)", "p95_cartesian_residual_mm", "{:.3f} mm"),
-        ("Mean Orientation Residual (deg)", "mean_orientation_residual_deg", "{:.3f} deg"),
+        ("Mean IK Position Residual (mm)", "mean_ik_residual_position_mm", "{:.3f} mm"),
+        ("P95 IK Position Residual (mm)", "p95_ik_residual_position_mm", "{:.3f} mm"),
+        ("Mean IK Orientation Residual (deg)", "mean_ik_residual_orientation_deg", "{:.3f} deg"),
+        ("Mean Dynamic Tracking Error (mm)", "mean_dynamic_tracking_error_mm", "{:.3f} mm"),
+        ("P95 Dynamic Tracking Error (mm)", "p95_dynamic_tracking_error_mm", "{:.3f} mm"),
         ("Mean Manipulability (Yoshikawa)", "mean_manipulability", "{:.4f}"),
         ("Min Manipulability", "min_manipulability", "{:.4f}"),
         ("Max Jacobian Condition", "max_jacobian_condition_number", "{:.2f}"),
         ("Direct Free Path Rate", "collision_free_direct_path_rate", "{:.1%}"),
         ("RRT Planning Success Rate", "rrt_planning_success_rate", "{:.1%}"),
         ("Mean Planning Time (ms)", "mean_planning_time_ms", "{:.2f} ms"),
+        ("Mean Joint Path Length (rad)", "mean_joint_path_length_rad", "{:.3f} rad"),
     ]
 
     for label, k, fmt in keys_to_print:

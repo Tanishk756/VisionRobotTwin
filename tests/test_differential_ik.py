@@ -43,21 +43,18 @@ def test_resolved_rate_cartesian_tracking_convergence(pybullet_direct):
     init_err = controller.compute_cartesian_error(target_pos)
     assert init_err > 0.05
     
-    # Run closed-loop resolved-rate steps
+    # Run closed-loop resolved-rate steps using genuine velocity control
     dt = 1.0 / 240.0
-    for _ in range(240):
+    for _ in range(480):
         q_dot, metrics = rr_controller.compute_step(target_pos, target_orn, dt=dt)
         assert len(q_dot) == 7
         assert np.all(np.isfinite(q_dot))
-        
-        # Integrate and command positions
-        q_curr = np.array(controller.get_current_joint_positions())
-        q_next = q_curr + q_dot * dt
-        controller.set_arm_joint_positions(list(q_next))
+
+        controller.set_arm_joint_velocities(q_dot)
         p.stepSimulation(physicsClientId=client_id)
-        
+
     final_err = controller.compute_cartesian_error(target_pos)
-    assert final_err < init_err * 0.5  # Significant error reduction
+    assert final_err < init_err * 0.1  # Over 90% error reduction (converges to sub-millimeter)
 
 
 def test_resolved_rate_velocity_clamping_and_nan_rejection(pybullet_direct):

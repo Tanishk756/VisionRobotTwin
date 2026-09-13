@@ -103,8 +103,7 @@ class PyBulletSimulator:
             physicsClientId=self.client_id,
         )
 
-        # Visual Target Sphere
-        sphere_col = p.createCollisionShape(p.GEOM_SPHERE, radius=0.001, physicsClientId=self.client_id)
+        # Visual Target Sphere (pure visual marker, no collision body)
         sphere_vis = p.createVisualShape(
             p.GEOM_SPHERE,
             radius=self.sim_config.target_sphere_radius,
@@ -113,7 +112,7 @@ class PyBulletSimulator:
         )
         self.target_sphere_id = p.createMultiBody(
             baseMass=0.0,
-            baseCollisionShapeIndex=sphere_col,
+            baseCollisionShapeIndex=-1,
             baseVisualShapeIndex=sphere_vis,
             basePosition=[self.ws_config.robot_center_x, self.ws_config.robot_center_y, self.ws_config.robot_center_z],
             physicsClientId=self.client_id,
@@ -183,7 +182,7 @@ class PyBulletSimulator:
         robot_name = getattr(self.config, "robot_name", "panda")
         self.robot_spec = registry.get_robot_spec(robot_name)
 
-        flags = p.URDF_USE_SELF_COLLISION | p.URDF_USE_INERTIA_FROM_FILE
+        flags = p.URDF_USE_INERTIA_FROM_FILE
         self.robot_id = p.loadURDF(
             self.robot_spec.urdf_path,
             basePosition=self.robot_spec.base_position,
@@ -223,6 +222,22 @@ class PyBulletSimulator:
             obstacle_ids=self.obstacle_ids,
         )
 
+        from robotics.differential_ik import ResolvedRateController
+        self.resolved_rate_controller = ResolvedRateController(
+            physics_client_id=self.client_id,
+            robot_controller=self.controller,
+            enable_nullspace=True,
+        )
+
+        from robotics.motion_manager import MotionManager
+        self.motion_manager = MotionManager(
+            robot_controller=self.controller,
+            ik_solver=self.ik_solver,
+            collision_checker=self.collision_checker,
+            trajectory_mode=getattr(self.config, "trajectory_mode", "quintic"),
+            scene_type=getattr(self.config, "scene_type", "default"),
+        )
+
         if self.robot_spec.capabilities.has_gripper:
             self.gripper = VirtualGripper(
                 physics_client_id=self.client_id,
@@ -233,6 +248,26 @@ class PyBulletSimulator:
             )
         else:
             self.gripper = None
+
+    def get_current_manipulability(self):
+        """Computes live geometric Jacobian and manipulability metrics for the active robot."""
+        from robotics.kinematics import compute_jacobian, compute_manipulability
+        curr_q = self.controller.get_current_joint_positions()
+        _, _, J = compute_jacobian(
+            physics_client_id=self.client_id,
+            robot_id=self.robot_id,
+            ee_link_index=self.controller.ee_link_index,
+            arm_joint_indices=self.controller.arm_joint_indices,
+            joint_positions=curr_q,
+        )
+        metrics = compute_manipulability(J)
+        return metrics, J
+
+    def get_current_collision_state(self):
+        """Queries active collision and self-collision status."""
+        if self.collision_checker is not None:
+            return self.collision_checker.check_collision()
+        return None
 
     def _draw_workspace_bounds(self) -> None:
         """Renders subtle 3D bounding box indicating safe workspace limits."""

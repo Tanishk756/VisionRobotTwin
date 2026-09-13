@@ -41,8 +41,10 @@ def benchmark_controller(
     controller_type: str,
     trajectories: List[Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]],
     headless: bool = True,
+    trajectory_duration: float = 2.0,
+    tolerance_pos_mm: float = 5.0,
 ) -> Dict[str, Any]:
-    """Runs trajectory tracking benchmark for a given controller type."""
+    """Runs trajectory tracking and convergence benchmark for a given controller type."""
     client_id = p.connect(p.DIRECT if headless else p.GUI)
     p.setAdditionalSearchPath(pybullet_data.getDataPath(), physicsClientId=client_id)
     p.setGravity(0, 0, -9.81, physicsClientId=client_id)
@@ -80,62 +82,95 @@ def benchmark_controller(
 
     pos_errors_mm = []
     orn_errors_deg = []
-    joint_velocities = []
-    joint_travel_rad = 0.0
+    final_pos_errors_mm = []
+    final_orn_errors_deg = []
+    settled_flags = []
+    times_to_tolerance_s = []
+
+    measured_peak_joint_velocities = []
+    finite_diff_peak_joint_velocities = []
+    total_joint_travel_rad = 0.0
     manipulabilities = []
     singularity_warnings = 0
-    total_time_s = 0.0
+    total_benchmark_time_s = 0.0
 
     dt = 1.0 / 240.0
-    steps_per_traj = 120  # 0.5s per trajectory
+    steps_per_traj = max(10, int(trajectory_duration / dt))
 
     for p_start, q_start, p_goal, q_goal in trajectories:
-        # Reset robot to start pose using IK
+        # 1. Fair and identical initialization:
+        # Solve IK for start pose and directly initialize simulator state
         ik_init = ik_solver.solve(p_start, q_start)
-        if ik_init.success:
-            controller.set_arm_joint_positions(list(ik_init.joint_positions))
-        p.stepSimulation(physicsClientId=client_id)
+        if not ik_init.success:
+            continue
 
-        traj = CartesianSE3Trajectory(p_start, q_start, p_goal, q_goal, duration=steps_per_traj * dt)
-        prev_q = np.array(controller.get_current_joint_positions())
+        q_init = list(ik_init.joint_positions)
+        # Directly reset joint positions to start configuration
+        for j_idx, pos in zip(controller.arm_joint_indices, q_init):
+            p.resetJointState(body_id, j_idx, float(pos), targetVelocity=0.0, physicsClientId=client_id)
+        controller.set_arm_joint_velocities([0.0] * len(controller.arm_joint_indices))
 
+        # Settle simulation state
+        for _ in range(5):
+            p.stepSimulation(physicsClientId=client_id)
+
+        rr_controller.reset()
+
+        traj = CartesianSE3Trajectory(p_start, q_start, p_goal, q_goal, duration=trajectory_duration)
+        prev_q = np.array(controller.get_current_joint_positions(), dtype=np.float64)
+
+        time_to_tol = None
+        traj_pos_errors = []
+        traj_orn_errors = []
+
+        # Start timer AFTER initialization is complete
         t_start = time.perf_counter()
 
-        for step in range(steps_per_traj):
-            t_curr = step * dt
+        for step_idx in range(steps_per_traj):
+            t_curr = step_idx * dt
             sample = traj.evaluate(t_curr)
 
             if controller_type == "ik":
-                # IK position control
+                # IK position control with velocity rate limiting
                 res = ik_solver.solve(sample.position, sample.orientation)
                 if res.success:
-                    controller.set_arm_joint_positions(list(res.joint_positions))
+                    controller.set_arm_joint_positions(
+                        list(res.joint_positions), dt=dt, enforce_velocity_limits=True
+                    )
             elif controller_type == "resolved-rate":
-                # Resolved-rate differential velocity control
+                # Genuine velocity control command
                 q_dot, m_metrics = rr_controller.compute_step(sample.position, sample.orientation, dt=dt)
                 if m_metrics.near_singularity:
                     singularity_warnings += 1
-
-                curr_q = np.array(controller.get_current_joint_positions())
-                q_next = curr_q + q_dot * dt
-                controller.set_arm_joint_positions(list(q_next))
+                controller.set_arm_joint_velocities(q_dot)
 
             p.stepSimulation(physicsClientId=client_id)
 
-            # Record metrics
+            # Record simulated pose metrics
             curr_pos, curr_orn = controller.get_end_effector_pose()
-            pos_err = np.linalg.norm(sample.position - curr_pos) * 1000.0  # mm
-            pos_errors_mm.append(pos_err)
+            pos_err_mm = float(np.linalg.norm(sample.position - curr_pos)) * 1000.0
+            pos_errors_mm.append(pos_err_mm)
+            traj_pos_errors.append(pos_err_mm)
 
             dot = np.abs(np.dot(sample.orientation / np.linalg.norm(sample.orientation), curr_orn / np.linalg.norm(curr_orn)))
-            orn_err = np.degrees(2.0 * np.arccos(np.clip(dot, -1.0, 1.0)))
-            orn_errors_deg.append(orn_err)
+            orn_err_deg = float(np.degrees(2.0 * np.arccos(np.clip(dot, -1.0, 1.0))))
+            orn_errors_deg.append(orn_err_deg)
+            traj_orn_errors.append(orn_err_deg)
 
-            curr_q_vec = np.array(controller.get_current_joint_positions())
-            q_dot_est = (curr_q_vec - prev_q) / dt
-            joint_velocities.append(np.max(np.abs(q_dot_est)))
-            joint_travel_rad += float(np.sum(np.abs(curr_q_vec - prev_q)))
-            prev_q = curr_q_vec
+            if time_to_tol is None and pos_err_mm <= tolerance_pos_mm:
+                time_to_tol = t_curr
+
+            # Real PyBullet measured joint velocity
+            meas_vels = controller.get_current_joint_velocities()
+            if len(meas_vels) > 0:
+                measured_peak_joint_velocities.append(float(np.max(np.abs(meas_vels))))
+
+            # Finite-difference velocity diagnostic
+            curr_q_vec = np.array(controller.get_current_joint_positions(), dtype=np.float64)
+            q_dot_fd = (curr_q_vec - prev_q) / dt
+            finite_diff_peak_joint_velocities.append(float(np.max(np.abs(q_dot_fd))))
+            total_joint_travel_rad += float(np.sum(np.abs(curr_q_vec - prev_q)))
+            prev_q = curr_q_vec.copy()
 
             # Manipulability
             _, _, J = compute_jacobian(
@@ -144,22 +179,37 @@ def benchmark_controller(
             m = compute_manipulability(J)
             manipulabilities.append(m.manipulability)
 
-        total_time_s += (time.perf_counter() - t_start)
+        total_benchmark_time_s += (time.perf_counter() - t_start)
+
+        final_pos_err = traj_pos_errors[-1] if traj_pos_errors else 0.0
+        final_orn_err = traj_orn_errors[-1] if traj_orn_errors else 0.0
+        final_pos_errors_mm.append(final_pos_err)
+        final_orn_errors_deg.append(final_orn_err)
+        settled_flags.append(final_pos_err <= tolerance_pos_mm)
+        times_to_tolerance_s.append(time_to_tol if time_to_tol is not None else float("nan"))
 
     p.disconnect(physicsClientId=client_id)
+
+    valid_tol_times = [t for t in times_to_tolerance_s if np.isfinite(t)]
 
     return {
         "controller_name": controller_type.upper(),
         "robot_name": robot_name,
         "total_trajectories": len(trajectories),
-        "mean_position_tracking_error_mm": float(np.mean(pos_errors_mm)),
-        "p95_position_tracking_error_mm": float(np.percentile(pos_errors_mm, 95)),
-        "mean_orientation_error_deg": float(np.mean(orn_errors_deg)),
-        "peak_joint_velocity_radps": float(np.max(joint_velocities)) if joint_velocities else 0.0,
-        "total_joint_travel_rad": float(joint_travel_rad),
+        "trajectory_duration_s": float(trajectory_duration),
+        "mean_position_tracking_error_mm": float(np.mean(pos_errors_mm)) if pos_errors_mm else 0.0,
+        "p95_position_tracking_error_mm": float(np.percentile(pos_errors_mm, 95)) if pos_errors_mm else 0.0,
+        "final_position_error_mm": float(np.mean(final_pos_errors_mm)) if final_pos_errors_mm else 0.0,
+        "mean_orientation_error_deg": float(np.mean(orn_errors_deg)) if orn_errors_deg else 0.0,
+        "final_orientation_error_deg": float(np.mean(final_orn_errors_deg)) if final_orn_errors_deg else 0.0,
+        "settled_within_tolerance_rate": float(np.mean(settled_flags)) if settled_flags else 0.0,
+        "mean_time_to_tolerance_s": float(np.mean(valid_tol_times)) if valid_tol_times else None,
+        "measured_peak_joint_velocity_radps": float(np.max(measured_peak_joint_velocities)) if measured_peak_joint_velocities else 0.0,
+        "finite_difference_peak_joint_velocity_radps": float(np.max(finite_diff_peak_joint_velocities)) if finite_diff_peak_joint_velocities else 0.0,
+        "total_joint_travel_rad": float(total_joint_travel_rad),
         "min_manipulability": float(np.min(manipulabilities)) if manipulabilities else 0.0,
         "singularity_warning_count": int(singularity_warnings),
-        "total_benchmark_time_s": float(total_time_s),
+        "total_benchmark_time_s": float(total_benchmark_time_s),
     }
 
 
@@ -167,6 +217,7 @@ def main():
     parser = argparse.ArgumentParser(description="Cross-Controller (IK vs Resolved-Rate) Benchmark Tool.")
     parser.add_argument("--robot", type=str, default="panda", help="Robot model (panda or kuka_iiwa).")
     parser.add_argument("--trials", type=int, default=10, help="Number of test trajectories.")
+    parser.add_argument("--trajectory-duration", type=float, default=2.0, help="Duration of each benchmark trajectory (s).")
     parser.add_argument("--headless", action="store_true", default=True, help="Run simulation headless.")
     parser.add_argument("--output-dir", type=str, default=None, help="Output directory path.")
     args = parser.parse_args()
@@ -176,24 +227,30 @@ def main():
     out_dir.mkdir(parents=True, exist_ok=True)
 
     print(f"\n{'='*75}")
-    print(f" VisionRobotTwin Controller Benchmark Suite ({args.robot.upper()})")
-    print(f" Comparing: IK Position vs Resolved-Rate Jacobian Control")
+    print(f" VisionRobotTwin Controller Benchmark Suite ({args.robot.upper()}) [PyBullet Simulation]")
+    print(f" Comparing: IK Position vs Resolved-Rate Jacobian Control (Duration: {args.trajectory_duration:.1f}s)")
     print(f"{'='*75}\n")
 
-    # Generate benchmark trajectories
+    # Generate reproducible benchmark trajectories
     rng = np.random.RandomState(42)
     trajectories = []
     for _ in range(args.trials):
         p0 = np.array([rng.uniform(0.35, 0.45), rng.uniform(-0.15, 0.15), rng.uniform(0.20, 0.35)])
-        p1 = p0 + np.array([rng.uniform(-0.08, 0.08), rng.uniform(-0.08, 0.08), rng.uniform(-0.05, 0.08)])
+        p1 = p0 + np.array([rng.uniform(-0.06, 0.06), rng.uniform(-0.06, 0.06), rng.uniform(-0.04, 0.06)])
         q0 = np.array([1.0, 0.0, 0.0, 0.0])
         q1 = np.array([0.9238795, 0.3826834, 0.0, 0.0])  # ~45 deg roll
         trajectories.append((p0, q0, p1, q1))
 
     results = {}
     for c_type in ["ik", "resolved-rate"]:
-        print(f"[*] Benchmarking {c_type.upper()} controller ({args.trials} trajectories)...", flush=True)
-        res = benchmark_controller(args.robot, c_type, trajectories, headless=args.headless)
+        print(f"[*] Benchmarking {c_type.upper()} controller ({args.trials} trajectories @ {args.trajectory_duration:.1f}s)...", flush=True)
+        res = benchmark_controller(
+            args.robot,
+            c_type,
+            trajectories,
+            headless=args.headless,
+            trajectory_duration=args.trajectory_duration,
+        )
         results[c_type] = res
 
     # Save summary.json
@@ -213,13 +270,16 @@ def main():
 
     # Print Table
     print(f"\n{'-'*85}")
-    print(f"{'Metric':<35} | {'IK Position':<22} | {'Resolved-Rate':<22}")
+    print(f"{'Metric':<38} | {'IK Position':<20} | {'Resolved-Rate':<20}")
     print(f"{'-'*85}")
     keys_to_print = [
         ("Mean Pos Tracking Error (mm)", "mean_position_tracking_error_mm", "{:.3f} mm"),
         ("P95 Pos Tracking Error (mm)", "p95_position_tracking_error_mm", "{:.3f} mm"),
+        ("Final Pos Error (mm)", "final_position_error_mm", "{:.3f} mm"),
         ("Mean Orientation Error (deg)", "mean_orientation_error_deg", "{:.3f} deg"),
-        ("Peak Joint Velocity (rad/s)", "peak_joint_velocity_radps", "{:.3f} rad/s"),
+        ("Final Orientation Error (deg)", "final_orientation_error_deg", "{:.3f} deg"),
+        ("Settled Within 5mm Rate", "settled_within_tolerance_rate", "{:.1%}"),
+        ("Measured Peak Joint Vel (rad/s)", "measured_peak_joint_velocity_radps", "{:.3f} rad/s"),
         ("Total Joint Travel (rad)", "total_joint_travel_rad", "{:.3f} rad"),
         ("Min Manipulability", "min_manipulability", "{:.4f}"),
         ("Singularity Warnings", "singularity_warning_count", "{:d}"),
@@ -231,7 +291,7 @@ def main():
         rr_val = results.get("resolved-rate", {}).get(k, "N/A")
         ik_str = fmt.format(ik_val) if isinstance(ik_val, (int, float, bool)) else str(ik_val)
         rr_str = fmt.format(rr_val) if isinstance(rr_val, (int, float, bool)) else str(rr_val)
-        print(f"{label:<35} | {ik_str:<22} | {rr_str:<22}")
+        print(f"{label:<38} | {ik_str:<20} | {rr_str:<20}")
     print(f"{'-'*85}")
     print(f"\n[+] Benchmark complete. Artifacts exported to: {out_dir}\n")
 
