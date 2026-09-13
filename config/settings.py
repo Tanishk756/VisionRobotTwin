@@ -20,7 +20,9 @@ class CameraConfig:
     fps: int = 30
     auto_exposure: bool = True
     buffer_size: int = 1
-    synthetic_mode: bool = False  # Enabled if physical camera is absent or requested
+    synthetic_mode: bool = False  # Explicitly forced via --synthetic
+    allow_synthetic_fallback: bool = False  # If False, raises error on camera open or mid-stream disconnect
+    max_consecutive_read_failures: int = 30  # Number of failed read() attempts before disconnecting
 
 
 @dataclass
@@ -60,16 +62,22 @@ class FilterConfig:
 class TransformConfig:
     """SE(3) coordinate transformation parameters.
     
-    Transforms the detected marker pose in the camera optical frame C
-    into the robot base coordinate frame B:
+    Transforms the detected marker pose in camera optical frame C
+    into robot base coordinate frame B:
       T_base_marker = T_base_camera @ T_camera_marker
     """
-    # Camera placed in front of robot looking slightly downward:
+    transform_mode: str = "relative"  # 'relative' (intuitive teleoperation) or 'se3' (rigid transformation)
+    is_calibrated_extrinsics: bool = False  # Flag denoting nominal vs calibrated hand-eye extrinsics
+
+    # Nominal Camera placed in front of robot looking slightly downward:
     # Camera frame: X right, Y down, Z forward
     # Robot base frame: X forward, Y left, Z up
     camera_position_in_robot_base: Tuple[float, float, float] = (0.70, 0.0, 0.40)
-    # Pitch camera 15 degrees down looking toward robot center
+    # Pitch camera ~15 degrees down looking toward robot center
     camera_euler_rpy_rad: Tuple[float, float, float] = (np.pi, 0.26, 0.0)
+
+    # Tool orientation offset to keep Franka gripper pointing downward [x, y, z, w]
+    tool_orientation_offset: Tuple[float, float, float, float] = (1.0, 0.0, 0.0, 0.0)
 
 
 @dataclass
@@ -88,19 +96,20 @@ class WorkspaceConfig:
     cam_center_y: float = 0.0
     cam_center_z: float = 0.45
 
-    # Scale factor from physical marker motion to robot motion
+    # Scale factor from physical marker motion to robot motion (for relative mode)
     scale_x: float = 1.2
     scale_y: float = 1.2
     scale_z: float = 1.2
 
-    # Cartesian offsets to place mapped center into accessible robot volume
+    # Cartesian center to place mapped interaction volume in accessible workspace
     robot_center_x: float = 0.50
     robot_center_y: float = 0.00
     robot_center_z: float = 0.35
 
-    # Velocity and step limits for safety
-    max_cartesian_step_m: float = 0.025  # Max delta allowed per control cycle
-    max_cartesian_velocity_mps: float = 0.40  # Max target speed
+    # Velocity and step limits for safety (time-based slew rate limiter)
+    max_cartesian_step_m: float = 0.035  # Absolute maximum delta guard per cycle
+    max_cartesian_velocity_mps: float = 0.40  # Max Cartesian target speed (m/s)
+    max_angular_velocity_radps: float = 1.57  # Max Angular target rate (rad/s)
 
 
 @dataclass
@@ -109,15 +118,14 @@ class RobotConfig:
     urdf_path: str = "franka_panda/panda.urdf"
     base_position: Tuple[float, float, float] = (0.0, 0.0, 0.0)
     base_orientation: Tuple[float, float, float, float] = (0.0, 0.0, 0.0, 1.0)
-    end_effector_link_index: int = 11  # Panda hand / gripper link
+    end_effector_link_index: int = 11  # Panda hand / grasptarget link
     
     # Rest / Home joint angles (rad)
     home_joint_positions: List[float] = field(
         default_factory=lambda: [0.0, -0.785, 0.0, -2.356, 0.0, 1.571, 0.785, 0.04, 0.04]
     )
     
-    # Default end-effector orientation: gripper pointing straight down
-    # Quaternion [x, y, z, w] representing roll=pi, pitch=0, yaw=0
+    # Default end-effector orientation: gripper pointing straight down [x, y, z, w]
     default_ee_orientation: Tuple[float, float, float, float] = (1.0, 0.0, 0.0, 0.0)
 
     # Controller gains and limits
@@ -131,6 +139,8 @@ class RobotConfig:
 class SimulationConfig:
     """PyBullet physics simulation parameters."""
     time_step: float = 1.0 / 240.0
+    target_physics_hz: float = 240.0
+    max_substeps_per_frame: int = 20
     gui: bool = True
     gravity: Tuple[float, float, float] = (0.0, 0.0, -9.81)
     target_sphere_radius: float = 0.022
@@ -147,13 +157,16 @@ class SimulationConfig:
 @dataclass
 class StateMachineConfig:
     """State machine transitions and timeout parameters."""
-    lost_tracking_hold_timeout_s: float = 0.6  # Remain in HOLD during brief occlusions
-    lost_tracking_search_timeout_s: float = 2.5  # Transition to SEARCH if marker absent
-    approach_height_offset_m: float = 0.14     # Clearance above object before pick/place
-    pick_descent_height_m: float = 0.035       # Final grasp height
-    waypoint_tolerance_m: float = 0.018        # Cartesian convergence threshold
-    grasp_action_delay_s: float = 0.6          # Pause time to attach/detach virtual grasp
-    max_step_count_per_phase: int = 400
+    lost_tracking_search_timeout_s: float = 2.5 # Transition from HOLD to SEARCH if absent > 2.5s
+    approach_height_offset_m: float = 0.14      # Clearance above object before pick/place
+    pick_descent_height_m: float = 0.035        # Final grasp height
+    waypoint_tolerance_m: float = 0.020         # Cartesian convergence arrival threshold
+    grasp_action_delay_s: float = 0.6           # Pause time to attach/detach grasp
+    grasp_distance_threshold_m: float = 0.055   # Maximum allowable distance for physical grasp constraint (5.5 cm)
+    consecutive_detection_threshold: int = 5    # Required consecutive frames to freeze pick/place targets
+    waypoint_timeout_s: float = 10.0            # Max duration allowed to reach waypoint before triggering ERROR
+    max_step_count_per_phase: int = 500         # Secondary iteration guard (triggers ERROR if exceeded)
+    auto_demo: bool = False                     # If True, allows un-gated fallback demo coordinates for tests
 
 
 @dataclass
@@ -169,9 +182,11 @@ class AppConfig:
     simulation: SimulationConfig = field(default_factory=SimulationConfig)
     state_machine: StateMachineConfig = field(default_factory=StateMachineConfig)
     
-    # App-level flags
+    # App-level operational flags
     mode: str = "manual"  # 'manual' or 'auto'
+    control_mode: str = "6dof"  # '6dof' (position + orientation) or '3dof' (position only)
     debug: bool = False
+    max_frames: int = 0  # 0 = infinite interactive, >0 = bounded for automated testing/CI
     log_file: Path = Path("logs/vision_robot_twin.log")
     screenshots_dir: Path = Path("screenshots")
     demo_data_dir: Path = Path("demo/data")

@@ -4,10 +4,10 @@ Implements rigorous Lie group SE(3) representations for coordinate frame transfo
 - Camera Optical Frame (C)
 - ArUco Marker Frame (M)
 - Robot Base Frame (B)
-- Robot End-Effector Frame (E)
+- Robot End-Effector Tool Frame (E)
 
-Ensures exact mathematical correctness for composition, inversion, translation extraction,
-and SO(3) rotations via Euler angles (RPY) and unit quaternions [x, y, z, w].
+Ensures exact mathematical correctness for composition, analytical inversion,
+translation extraction, and SO(3) rotations via Euler angles (RPY) and unit quaternions [x, y, z, w].
 """
 
 import math
@@ -48,6 +48,28 @@ def rotation_matrix_to_quaternion(rot_mat: np.ndarray) -> np.ndarray:
     """Converts a 3x3 rotation matrix to a normalized unit quaternion [x, y, z, w]."""
     rot = Rotation.from_matrix(rot_mat)
     return rot.as_quat()
+
+
+def multiply_quaternions(
+    q1_xyzw: Union[np.ndarray, list, tuple],
+    q2_xyzw: Union[np.ndarray, list, tuple],
+) -> np.ndarray:
+    """Computes Hamilton quaternion product q_result = q1 * q2."""
+    r1 = Rotation.from_quat(q1_xyzw)
+    r2 = Rotation.from_quat(q2_xyzw)
+    r_res = r1 * r2
+    return r_res.as_quat()
+
+
+def compute_angular_distance(
+    q1_xyzw: Union[np.ndarray, list, tuple],
+    q2_xyzw: Union[np.ndarray, list, tuple],
+) -> float:
+    """Calculates shortest geodesic angular distance between two quaternions in radians."""
+    r1 = Rotation.from_quat(q1_xyzw)
+    r2 = Rotation.from_quat(q2_xyzw)
+    relative_rot = r1.inv() * r2
+    return float(relative_rot.magnitude())
 
 
 def create_homogeneous_matrix(
@@ -115,20 +137,13 @@ def compose_transforms(*transforms: np.ndarray) -> np.ndarray:
 
 
 def is_valid_se3(T: np.ndarray, tol: float = 1e-4) -> bool:
-    """Validates whether a 4x4 matrix is a mathematically valid SE(3) transformation:
-    1. Shape is (4, 4)
-    2. Bottom row is [0, 0, 0, 1]
-    3. Rotation submatrix R is orthogonal (R @ R^T = I)
-    4. det(R) = +1 (proper rotation, no reflection)
-    """
+    """Validates whether a 4x4 matrix is a mathematically valid SE(3) transformation."""
     if T.shape != (4, 4):
         return False
 
-    # Check bottom row
     if not np.allclose(T[3, :], [0.0, 0.0, 0.0, 1.0], atol=tol):
         return False
 
-    # Check SO(3) rotation submatrix
     R = T[:3, :3]
     if not np.allclose(R @ R.T, np.eye(3), atol=tol):
         return False

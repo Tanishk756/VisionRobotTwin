@@ -23,12 +23,20 @@ class CameraCalibration:
         dist_coeffs: np.ndarray,
         image_size: Tuple[int, int],
         reprojection_error: Optional[float] = None,
+        rms_reprojection_error_px: Optional[float] = None,
+        mean_reprojection_error_px: Optional[float] = None,
         is_calibrated: bool = False,
     ):
         self.camera_matrix = np.asarray(camera_matrix, dtype=np.float64)
         self.dist_coeffs = np.asarray(dist_coeffs, dtype=np.float64)
         self.image_size = image_size  # (width, height)
-        self.reprojection_error = reprojection_error
+        self.rms_reprojection_error_px = (
+            rms_reprojection_error_px
+            if rms_reprojection_error_px is not None
+            else reprojection_error
+        )
+        self.reprojection_error = self.rms_reprojection_error_px  # Compatibility alias
+        self.mean_reprojection_error_px = mean_reprojection_error_px
         self.is_calibrated = is_calibrated
 
         if self.camera_matrix.shape != (3, 3):
@@ -75,6 +83,8 @@ class CameraCalibration:
             dist_coeffs=dist_coeffs,
             image_size=(width, height),
             reprojection_error=None,
+            rms_reprojection_error_px=None,
+            mean_reprojection_error_px=None,
             is_calibrated=False,
         )
 
@@ -90,17 +100,25 @@ class CameraCalibration:
             camera_matrix = data["camera_matrix"]
             dist_coeffs = data["dist_coeffs"]
             image_size = tuple(data["image_size"]) if "image_size" in data else (1280, 720)
-            rep_err = float(data["reprojection_error"]) if "reprojection_error" in data else None
+            rms_err = None
+            if "rms_reprojection_error_px" in data:
+                rms_err = float(data["rms_reprojection_error_px"])
+            elif "reprojection_error" in data:
+                rms_err = float(data["reprojection_error"])
+
+            mean_err = float(data["mean_reprojection_error_px"]) if "mean_reprojection_error_px" in data else None
 
             logger.info(
                 f"Successfully loaded camera calibration from {path} "
-                f"(RMS Reprojection Error: {rep_err:.4f} px)" if rep_err else f"from {path}"
+                f"(RMS Reprojection Error: {rms_err:.4f} px)" if rms_err is not None else f"from {path}"
             )
             return cls(
                 camera_matrix=camera_matrix,
                 dist_coeffs=dist_coeffs,
                 image_size=image_size,
-                reprojection_error=rep_err,
+                reprojection_error=rms_err,
+                rms_reprojection_error_px=rms_err,
+                mean_reprojection_error_px=mean_err,
                 is_calibrated=True,
             )
         except Exception as e:
@@ -112,13 +130,17 @@ class CameraCalibration:
         path = Path(file_path)
         try:
             path.parent.mkdir(parents=True, exist_ok=True)
-            np.savez_compressed(
-                str(path),
-                camera_matrix=self.camera_matrix,
-                dist_coeffs=self.dist_coeffs,
-                image_size=np.array(self.image_size),
-                reprojection_error=self.reprojection_error if self.reprojection_error is not None else 0.0,
-            )
+            save_dict = {
+                "camera_matrix": self.camera_matrix,
+                "dist_coeffs": self.dist_coeffs,
+                "image_size": np.array(self.image_size),
+                "reprojection_error": self.rms_reprojection_error_px if self.rms_reprojection_error_px is not None else 0.0,
+                "rms_reprojection_error_px": self.rms_reprojection_error_px if self.rms_reprojection_error_px is not None else 0.0,
+            }
+            if self.mean_reprojection_error_px is not None:
+                save_dict["mean_reprojection_error_px"] = self.mean_reprojection_error_px
+
+            np.savez_compressed(str(path), **save_dict)
             logger.info(f"Saved calibration parameters to {path}")
             return True
         except Exception as e:

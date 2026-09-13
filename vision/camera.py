@@ -1,8 +1,8 @@
 """Camera capture abstraction and synthetic frame generator.
 
 Handles physical webcam capture with configurable parameters, backend selection,
-frame validation, and seamless fallback to synthetic ArUco marker animation
-when physical cameras are unavailable or when running automated CI/tests.
+frame validation, and explicit synthetic ArUco marker animation mode.
+Prevents silent masking of physical camera failures unless explicitly configured.
 """
 
 import time
@@ -15,6 +15,11 @@ from config.settings import CameraConfig, ArUcoConfig
 from utils.logger import get_logger
 
 logger = get_logger("Vision.Camera")
+
+
+class CameraStreamError(RuntimeError):
+    """Raised when camera stream disconnects or continuously fails to deliver frames."""
+    pass
 
 
 class SyntheticFrameGenerator:
@@ -41,48 +46,17 @@ class SyntheticFrameGenerator:
             cv2.aruco.generateImageMarker(self.dictionary, mid, marker_px, img, 1)
             self.marker_imgs[mid] = img
 
-    def get_frame(self, marker_id: int = 0, state: str = "MANUAL") -> np.ndarray:
-        """Renders a 3-channel background frame with perspective-warped ArUco marker."""
-        t = time.time() - self._start_time
-        frame = np.full((self.height, self.width, 3), 32, dtype=np.uint8)
-
-        # Draw a textured workspace background (table grid)
-        grid_size = 40
-        for y in range(0, self.height, grid_size):
-            cv2.line(frame, (0, y), (self.width, y), (42, 42, 48), 1)
-        for x in range(0, self.width, grid_size):
-            cv2.line(frame, (x, 0), (x, self.height), (42, 42, 48), 1)
-
-        # Synthetic motion trajectory (smooth Lissajous or circular path)
-        if state == "MANUAL":
-            center_x = self.width / 2.0 + 220.0 * math.sin(t * 0.8)
-            center_y = self.height / 2.0 + 120.0 * math.cos(t * 1.2)
-            scale = 1.0 + 0.25 * math.sin(t * 0.5)  # Simulates depth (Z) movement
-            angle = math.degrees(math.sin(t * 0.4) * 0.35)
-            active_id = marker_id
-        elif state in ("APPROACH", "PICK"):
-            # Move towards pick target (ID 1)
-            center_x = self.width / 2.0 - 180.0
-            center_y = self.height / 2.0 + 60.0
-            scale = 1.1
-            angle = 0.0
-            active_id = 1
-        elif state in ("MOVE_TO_PLACE", "PLACE"):
-            # Move towards place target (ID 2)
-            center_x = self.width / 2.0 + 180.0
-            center_y = self.height / 2.0 + 60.0
-            scale = 1.1
-            angle = 0.0
-            active_id = 2
-        else:
-            center_x = self.width / 2.0
-            center_y = self.height / 2.0
-            scale = 1.0
-            angle = 0.0
-            active_id = marker_id
-
-        # Overlay active marker
-        marker_img = self.marker_imgs.get(active_id, self.marker_imgs[0])
+    def _draw_marker_on_canvas(
+        self,
+        frame: np.ndarray,
+        marker_id: int,
+        center_x: float,
+        center_y: float,
+        scale: float = 1.0,
+        angle: float = 0.0,
+    ) -> None:
+        """Draws a single ArUco marker onto the target frame with border."""
+        marker_img = self.marker_imgs.get(marker_id, self.marker_imgs[0])
         m_h, m_w = marker_img.shape
         scaled_w = int(m_w * scale)
         scaled_h = int(m_h * scale)
@@ -98,7 +72,6 @@ class SyntheticFrameGenerator:
             borderValue=255,
         )
 
-        # Paste into canvas
         x1 = int(center_x - scaled_w / 2)
         y1 = int(center_y - scaled_h / 2)
         x2 = x1 + scaled_w
@@ -116,14 +89,100 @@ class SyntheticFrameGenerator:
             )
             frame[y1:y2, x1:x2] = cv2.cvtColor(rotated_m, cv2.COLOR_GRAY2BGR)
 
-        # Synthetic mode banner
+    def get_frame(self, marker_id: int = 0, state: str = "MANUAL") -> np.ndarray:
+        """Renders a 3-channel background frame with perspective-warped ArUco marker(s)."""
+        t = time.time() - self._start_time
+        frame = np.full((self.height, self.width, 3), 32, dtype=np.uint8)
+
+        # Draw a textured workspace background (table grid)
+        grid_size = 40
+        for y in range(0, self.height, grid_size):
+            cv2.line(frame, (0, y), (self.width, y), (42, 42, 48), 1)
+        for x in range(0, self.width, grid_size):
+            cv2.line(frame, (x, 0), (x, self.height), (42, 42, 48), 1)
+
+        # Synthetic motion trajectory / marker layout
+        if state == "MANUAL":
+            center_x = self.width / 2.0 + 180.0 * math.sin(t * 0.8)
+            center_y = self.height / 2.0 + 100.0 * math.cos(t * 1.2)
+            scale = 1.0 + 0.20 * math.sin(t * 0.5)  # Simulates depth (Z) movement
+            angle = math.degrees(math.sin(t * 0.4) * 0.30)
+            self._draw_marker_on_canvas(frame, marker_id, center_x, center_y, scale, angle)
+        elif state in ("HOME", "SEARCH", "RETURN_HOME"):
+            # In AUTO SEARCH / gating: Render BOTH Pick Marker (ID 1) and Place Marker (ID 2)
+            self._draw_marker_on_canvas(
+                frame,
+                marker_id=self.aruco_config.pick_marker_id,
+                center_x=self.width / 2.0 - 180.0,
+                center_y=self.height / 2.0 + 40.0,
+                scale=1.05,
+                angle=0.0,
+            )
+            self._draw_marker_on_canvas(
+                frame,
+                marker_id=self.aruco_config.place_marker_id,
+                center_x=self.width / 2.0 + 180.0,
+                center_y=self.height / 2.0 + 40.0,
+                scale=1.05,
+                angle=0.0,
+            )
+        elif state in ("APPROACH", "PICK", "LIFT"):
+            # Render Pick marker (ID 1) and Place marker (ID 2) on table
+            self._draw_marker_on_canvas(
+                frame,
+                marker_id=self.aruco_config.pick_marker_id,
+                center_x=self.width / 2.0 - 180.0,
+                center_y=self.height / 2.0 + 40.0,
+                scale=1.05,
+                angle=0.0,
+            )
+            self._draw_marker_on_canvas(
+                frame,
+                marker_id=self.aruco_config.place_marker_id,
+                center_x=self.width / 2.0 + 180.0,
+                center_y=self.height / 2.0 + 40.0,
+                scale=1.05,
+                angle=0.0,
+            )
+        elif state in ("MOVE_TO_PLACE", "PLACE"):
+            # Render Place marker (ID 2) and Pick marker (ID 1)
+            self._draw_marker_on_canvas(
+                frame,
+                marker_id=self.aruco_config.pick_marker_id,
+                center_x=self.width / 2.0 - 180.0,
+                center_y=self.height / 2.0 + 40.0,
+                scale=1.05,
+                angle=0.0,
+            )
+            self._draw_marker_on_canvas(
+                frame,
+                marker_id=self.aruco_config.place_marker_id,
+                center_x=self.width / 2.0 + 180.0,
+                center_y=self.height / 2.0 + 40.0,
+                scale=1.05,
+                angle=0.0,
+            )
+        else:
+            self._draw_marker_on_canvas(
+                frame,
+                marker_id=marker_id,
+                center_x=self.width / 2.0,
+                center_y=self.height / 2.0,
+                scale=1.0,
+                angle=0.0,
+            )
+
+        # Synthetic mode banner (Unmistakable watermark)
+        banner_text = "[SYNTHETIC INPUT STREAM - SIMULATION ONLY]"
+        cv2.rectangle(frame, (10, self.height - 35), (self.width - 10, self.height - 5), (0, 60, 180), -1)
+        cv2.rectangle(frame, (10, self.height - 35), (self.width - 10, self.height - 5), (0, 160, 255), 1)
         cv2.putText(
             frame,
-            "[SYNTHETIC CAMERA STREAM - LIVE SIMULATION]",
-            (self.width // 2 - 210, self.height - 55),
+            banner_text,
+            (self.width // 2 - 220, self.height - 15),
             cv2.FONT_HERSHEY_SIMPLEX,
-            0.50,
-            (100, 200, 255),
+            0.52,
+            (255, 255, 255),
             1,
             cv2.LINE_AA,
         )
@@ -131,7 +190,7 @@ class SyntheticFrameGenerator:
 
 
 class Camera:
-    """Robust camera interface with automatic physical capture and synthetic fallback."""
+    """Robust camera interface with strict separation between physical and synthetic operation."""
 
     def __init__(self, config: CameraConfig, aruco_config: Optional[ArUcoConfig] = None):
         self.config = config
@@ -139,21 +198,38 @@ class Camera:
         self.cap: Optional[cv2.VideoCapture] = None
         self.is_synthetic = config.synthetic_mode
         self._synthetic_gen: Optional[SyntheticFrameGenerator] = None
+        self._consecutive_read_failures: int = 0
+        self.max_consecutive_read_failures: int = config.max_consecutive_read_failures
 
         if not self.is_synthetic:
             self._open_physical_camera()
 
         if self.cap is None or not self.cap.isOpened():
-            logger.warning(
-                f"Webcam at index {self.config.camera_index} is unavailable. "
-                "Switching automatically to Synthetic Frame Generator for real-time simulation."
-            )
-            self.is_synthetic = True
-            self._synthetic_gen = SyntheticFrameGenerator(
-                width=self.config.width,
-                height=self.config.height,
-                aruco_config=self.aruco_config,
-            )
+            if self.is_synthetic:
+                logger.info("Initialized explicit Synthetic Camera Stream.")
+                self._synthetic_gen = SyntheticFrameGenerator(
+                    width=self.config.width,
+                    height=self.config.height,
+                    aruco_config=self.aruco_config,
+                )
+            elif self.config.allow_synthetic_fallback:
+                logger.warning(
+                    f"Physical camera at index {self.config.camera_index} is unavailable. "
+                    "Fallback enabled: switching to Synthetic Frame Generator."
+                )
+                self.is_synthetic = True
+                self._synthetic_gen = SyntheticFrameGenerator(
+                    width=self.config.width,
+                    height=self.config.height,
+                    aruco_config=self.aruco_config,
+                )
+            else:
+                err_msg = (
+                    f"Physical camera could not be opened at index {self.config.camera_index}. "
+                    "To run in simulation without hardware, use the '--synthetic' flag or '--allow-synthetic-fallback'."
+                )
+                logger.error(err_msg)
+                raise RuntimeError(err_msg)
 
     def _open_physical_camera(self) -> None:
         """Attempts to open physical webcam device using DirectShow or MSMF backends."""
@@ -193,17 +269,29 @@ class Camera:
         if self.cap is not None and self.cap.isOpened():
             ret, frame = self.cap.read()
             if ret and frame is not None and frame.size > 0:
+                self._consecutive_read_failures = 0
                 return True, frame
 
-            logger.warning("Frame capture failed from physical camera. Falling back to synthetic generator.")
-            self.is_synthetic = True
-            if self._synthetic_gen is None:
-                self._synthetic_gen = SyntheticFrameGenerator(
-                    width=self.config.width,
-                    height=self.config.height,
-                    aruco_config=self.aruco_config,
+            self._consecutive_read_failures += 1
+
+            if self.config.allow_synthetic_fallback:
+                logger.warning("Frame capture failed from physical camera. Falling back to synthetic generator.")
+                self.is_synthetic = True
+                if self._synthetic_gen is None:
+                    self._synthetic_gen = SyntheticFrameGenerator(
+                        width=self.config.width,
+                        height=self.config.height,
+                        aruco_config=self.aruco_config,
+                    )
+                return True, self._synthetic_gen.get_frame(marker_id=active_marker_id, state=state)
+
+            if self._consecutive_read_failures >= self.max_consecutive_read_failures:
+                err_msg = (
+                    f"Physical camera stream at index {self.config.camera_index} disconnected: "
+                    f"{self._consecutive_read_failures} consecutive frame read failures."
                 )
-            return True, self._synthetic_gen.get_frame(marker_id=active_marker_id, state=state)
+                logger.critical(err_msg)
+                raise CameraStreamError(err_msg)
 
         return False, None
 

@@ -15,9 +15,10 @@ import numpy as np
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from config.settings import CalibrationConfig
 from vision.calibration import CameraCalibration
-from utils.logger import setup_logger
+from utils.logger import setup_logger, get_logger
 
-logger = setup_logger("Tools.CalibrateCamera")
+setup_logger()
+logger = get_logger("Tools.CalibrateCamera")
 
 
 def calibrate(
@@ -123,7 +124,10 @@ def calibrate(
                 obj_points, img_points, (w, h), None, None
             )
 
-            # Compute RMS reprojection error
+            # OpenCV ret_val is the overall RMS reprojection error (px)
+            rms_reprojection_error = float(ret_val)
+
+            # Compute arithmetic mean point reprojection error across all captured images
             total_error = 0.0
             for i in range(len(obj_points)):
                 imgpoints2, _ = cv2.projectPoints(obj_points[i], rvecs[i], tvecs[i], mtx, dist)
@@ -134,9 +138,10 @@ def calibrate(
             print("\n" + "=" * 50)
             print(" CALIBRATION RESULTS")
             print("=" * 50)
-            print(f"RMS Reprojection Error: {mean_error:.4f} pixels")
-            print(f"Focal Length (fx, fy):   ({mtx[0, 0]:.2f}, {mtx[1, 1]:.2f})")
-            print(f"Principal Point (cx, cy): ({mtx[0, 2]:.2f}, {mtx[1, 2]:.2f})")
+            print(f"OpenCV RMS Reprojection Error: {rms_reprojection_error:.4f} pixels")
+            print(f"Mean Point Reprojection Error: {mean_error:.4f} pixels")
+            print(f"Focal Length (fx, fy):         ({mtx[0, 0]:.2f}, {mtx[1, 1]:.2f})")
+            print(f"Principal Point (cx, cy):       ({mtx[0, 2]:.2f}, {mtx[1, 2]:.2f})")
             print(f"Distortion Coeffs (k1,k2,p1,p2,k3): {dist.ravel()[:5]}")
             print("=" * 50)
 
@@ -144,7 +149,9 @@ def calibrate(
                 camera_matrix=mtx,
                 dist_coeffs=dist,
                 image_size=(w, h),
-                reprojection_error=mean_error,
+                reprojection_error=rms_reprojection_error,
+                rms_reprojection_error_px=rms_reprojection_error,
+                mean_reprojection_error_px=mean_error,
                 is_calibrated=True,
             )
             calib.save(output_path)

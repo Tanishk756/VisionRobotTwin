@@ -26,6 +26,9 @@ class TelemetryData:
     ik_status: str = "IDLE"
     fps: float = 0.0
     sim_fps: float = 0.0
+    physics_target_hz: float = 240.0
+    physics_substeps: int = 1
+    physics_actual_step_rate: float = 240.0
     lost_tracking_time_s: float = 0.0
     is_calibrated: bool = False
     workspace_clamped: bool = False
@@ -133,14 +136,14 @@ class TelemetryOverlay:
             cv2.LINE_AA,
         )
 
-        # FPS Stats
-        fps_text = f"FPS: {data.fps:.1f} | SIM: {data.sim_fps:.0f} Hz"
+        # FPS / Physics Stats
+        fps_text = f"CTRL: {data.fps:.1f} FPS | SIM: {data.physics_actual_step_rate:.0f} Hz ({data.physics_substeps} steps/f)"
         cv2.putText(
             frame,
             fps_text,
-            (width - 240, 37),
+            (width - 320, 37),
             cv2.FONT_HERSHEY_SIMPLEX,
-            0.48,
+            0.44,
             self.COLOR_TEXT,
             1,
             cv2.LINE_AA,
@@ -218,7 +221,7 @@ class TelemetryOverlay:
         )
 
         # IK Status Badge
-        ik_color = self.COLOR_GREEN if data.ik_status in ("OK", "CONVERGED") else (
+        ik_color = self.COLOR_GREEN if data.ik_status in ("OK", "SOLUTION_RETURNED") else (
             self.COLOR_YELLOW if data.ik_status == "IDLE" else self.COLOR_RED
         )
         cv2.putText(frame, f"IK Status: {data.ik_status}", (x + 12, y + 48), cv2.FONT_HERSHEY_SIMPLEX, 0.45, ik_color, 1, cv2.LINE_AA)
