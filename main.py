@@ -16,6 +16,7 @@ from typing import Optional, Tuple
 import cv2
 import numpy as np
 
+from visionrobottwin_version import __version__
 from config.settings import AppConfig, get_default_config
 from vision.calibration import load_or_create_calibration
 from vision.camera import Camera
@@ -36,6 +37,7 @@ def parse_arguments() -> argparse.Namespace:
         description="VisionRobotTwin: Real-Time Vision-Guided Robotic Manipulator Digital Twin",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
+    parser.add_argument("--version", action="version", version=f"VisionRobotTwin {__version__}")
     parser.add_argument("--camera", type=int, default=0, help="Camera device index")
     parser.add_argument("--width", type=int, default=1280, help="Camera width resolution")
     parser.add_argument("--height", type=int, default=720, help="Camera height resolution")

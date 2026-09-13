@@ -3,10 +3,15 @@
 > **Real-Time 6-DoF Vision-Guided Robotic Manipulation using ArUco Pose Estimation, Inverse Kinematics, and PyBullet Physics**
 
 [![Python 3.10+](https://img.shields.io/badge/Python-3.10%20%7C%203.11%20%7C%203.12-blue.svg)](https://www.python.org/)
+[![Release: v1.1.0](https://img.shields.io/badge/Release-v1.1.0-brightgreen.svg)](https://github.com/Tanishk756/VisionRobotTwin/releases/tag/v1.1.0)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 [![PyBullet](https://img.shields.io/badge/Physics-PyBullet-orange.svg)](https://pybullet.org/)
 [![OpenCV](https://img.shields.io/badge/Perception-OpenCV%204.8+-red.svg)](https://opencv.org/)
 [![CI Validation](https://github.com/Tanishk756/VisionRobotTwin/actions/workflows/tests.yml/badge.svg)](https://github.com/Tanishk756/VisionRobotTwin/actions/workflows/tests.yml)
+
+**Current Release**: `v1.1.0` | **Maintainer**: [Tanishk Singhal](https://github.com/Tanishk756) ([tanisksinghal6285@gmail.com](mailto:tanisksinghal6285@gmail.com))
+
+[Changelog](CHANGELOG.md) • [Validation Matrix](VALIDATION.md) • [Architecture](ARCHITECTURE.md) • [Portfolio Guide](PORTFOLIO.md) • [Authors](AUTHORS.md) • [Citation](CITATION.cff) • [Contributing](CONTRIBUTING.md) • [Security](SECURITY.md)
 
 ---
 
@@ -211,6 +216,7 @@ pytest -v
 - `test_pause_and_context.py`: True joint-freeze pause/HOLD, relative orientation reference reset on operator context change, bounded perception buffers.
 - `test_benchmark_pipeline.py`: Benchmark runner execution on shared frame processing pipeline.
 - `test_auto_integration.py`: Full closed-loop perception-gated pick-and-place through SEARCH state completion.
+- `test_version.py`: Canonical version metadata and CLI `--version` verification.
 
 ---
 
@@ -218,11 +224,13 @@ pytest -v
 
 | Metric / Parameter | Status | Value / Measurement |
 | :--- | :---: | :--- |
-| **Automated Tests** | **PASS** | **47 / 47 passing (47 automated unit/integration tests at v1.1)** |
+| **Automated Tests** | **PASS** | **49 / 49 passing (49 automated unit/integration tests at v1.1.0)** |
 | **Physics Scheduling** | **PASS** | **Fixed timestep: 1/240 s (240 Hz target scheduled via accumulator)** |
 | **Synthetic Pipeline Tracking** | **PASS** | **Verified in PyBullet closed-loop simulation** |
-| **Physical Webcam Benchmarks** | *NOT TESTED* | Hardware dependent (Run `tools/benchmark_live.py`) |
+| **Basic Physical Webcam Smoke Test** | **USER-CONFIRMED / PASS** | Manual Marker-0 teleoperation interaction verified on live webcam |
+| **Physical Calibrated Benchmarks** | *NOT YET MEASURED* | Hardware dependent (Run `tools/benchmark_live.py`) |
 | **Physical Camera Calibration** | *NOT TESTED* | Default pinhole fallback active until `calibrate_camera.py` run |
+| **Physical Franka Manipulator** | *NOT TESTED* | Simulation / digital twin implementation |
 
 *See [VALIDATION.md](VALIDATION.md) for full subsystem audit details.*
 
@@ -234,6 +242,7 @@ pytest -v
 VisionRobotTwin/
 │
 ├── main.py                     # Main application entry point & perception-control loop
+├── visionrobottwin_version.py  # Canonical package version definition (1.1.0)
 ├── requirements.txt            # Production dependencies
 ├── requirements-dev.txt        # Development and testing dependencies
 ├── pytest.ini                  # Pytest configuration
@@ -243,6 +252,12 @@ VisionRobotTwin/
 ├── ARCHITECTURE.md             # Deep-dive systems architecture and math specification
 ├── PORTFOLIO.md                # Robotics portfolio, interview Q&A, and resume guide
 ├── VALIDATION.md               # Strict validation report and subsystem matrix
+├── CHANGELOG.md                # Semantic version changelog
+├── RELEASE_NOTES_v1.1.0.md     # Formal release notes
+├── AUTHORS.md                  # Author and maintainer attribution
+├── CITATION.cff                # Academic and project citation metadata
+├── CONTRIBUTING.md             # Community contribution guidelines
+├── SECURITY.md                 # Security and simulation safety policy
 ├── LICENSE                     # MIT Open-Source License
 ├── .gitignore                  # Git ignore rules
 │
@@ -288,7 +303,7 @@ VisionRobotTwin/
 ├── calibration/                # Camera Calibration Storage (.npz)
 ├── screenshots/                # Captured HUD and simulation snapshots
 ├── demo/                       # 15-second animated demonstration GIF
-└── tests/                      # Comprehensive Unit & Integration Test Suite (47 tests)
+└── tests/                      # Comprehensive Unit & Integration Test Suite (49 tests)
     ├── test_auto_integration.py
     ├── test_benchmark_pipeline.py
     ├── test_camera.py
@@ -302,6 +317,7 @@ VisionRobotTwin/
     ├── test_simulation_clock.py
     ├── test_state_machine.py
     ├── test_transforms.py
+    ├── test_version.py
     └── test_workspace.py
 ```
 
