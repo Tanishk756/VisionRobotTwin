@@ -66,6 +66,13 @@ def test_direct_path_validator_free_and_blocked(pybullet_scene):
     assert is_free
     assert len(waypoints) >= 2
 
+    # A path that drives right into the obstacle
+    q_blocked_target = np.array([0.0, 0.04, 0.0, -2.38, 0.0, 2.41, 0.785])
+    is_blocked_free, _ = is_joint_path_collision_free(
+        q_start, q_blocked_target, checker, arm_joint_indices=controller.arm_joint_indices
+    )
+    assert not is_blocked_free
+
 
 def test_rrt_connect_planner_deterministic_success(pybullet_scene):
     """Verifies RRT-Connect finds a collision-free path with deterministic seed."""
@@ -105,10 +112,20 @@ def test_rrt_connect_planner_deterministic_success(pybullet_scene):
     assert result.planning_time_ms > 0.0
     assert result.path_length_joint_rad > 0.0
 
-    # Verify every waypoint in the returned path is strictly collision free
+    # Guarantee endpoint matching regardless of tree swapping
+    assert np.allclose(result.path[0], q_start, atol=1e-5)
+    assert np.allclose(result.path[-1], q_goal, atol=1e-5)
+
+    # Verify every waypoint and segment is strictly collision free
     for wpt in result.path:
         col = checker.check_collision(wpt, arm_joint_indices=controller.arm_joint_indices)
         assert not col.in_collision
+
+    for i in range(len(result.path) - 1):
+        seg_free, _ = is_joint_path_collision_free(
+            result.path[i], result.path[i + 1], checker, arm_joint_indices=controller.arm_joint_indices
+        )
+        assert seg_free
 
 
 def test_path_shortcutting_preserves_validity(pybullet_scene):
@@ -152,6 +169,8 @@ def test_path_shortcutting_preserves_validity(pybullet_scene):
 
     assert len(smoothed_path) >= 2
     assert len(smoothed_path) <= len(raw_result.path)
+    assert np.allclose(smoothed_path[0], q_start, atol=1e-5)
+    assert np.allclose(smoothed_path[-1], q_goal, atol=1e-5)
 
     # Every segment of smoothed path must remain collision-free
     for i in range(len(smoothed_path) - 1):
@@ -159,3 +178,49 @@ def test_path_shortcutting_preserves_validity(pybullet_scene):
             smoothed_path[i], smoothed_path[i + 1], checker, arm_joint_indices=controller.arm_joint_indices
         )
         assert is_free
+
+
+def test_impossible_scene_failure_and_state_restoration(pybullet_scene):
+    """Verifies planner cleanly returns failure with bounded iterations when goal is blocked by impossible obstacle."""
+    client_id, table_id, obstacle_id = pybullet_scene
+    registry = get_robot_registry()
+    spec = registry.get_robot_spec("panda")
+
+    body_id = p.loadURDF(spec.urdf_path, useFixedBase=True, physicsClientId=client_id)
+    controller = GenericRobotController(client_id, body_id, spec)
+
+    # Encase goal position inside an impenetrable obstacle
+    giant_col = p.createCollisionShape(p.GEOM_BOX, halfExtents=[0.5, 0.5, 0.5], physicsClientId=client_id)
+    giant_obs = p.createMultiBody(baseMass=0.0, baseCollisionShapeIndex=giant_col, basePosition=[0.0, 0.5, 0.5], physicsClientId=client_id)
+
+    checker = CollisionChecker(
+        physics_client_id=client_id,
+        robot_id=body_id,
+        table_id=table_id,
+        obstacle_ids=[obstacle_id, giant_obs],
+    )
+
+    lows, highs, _, _ = controller.get_joint_limits()
+    max_iter = 20
+    planner = RRTConnectPlanner(
+        lower_limits=lows,
+        upper_limits=highs,
+        collision_checker=checker,
+        arm_joint_indices=controller.arm_joint_indices,
+        max_iterations=max_iter,
+        random_seed=42,
+    )
+
+    initial_q = controller.get_current_joint_positions()
+    q_start = np.array([0.2, -0.6, 0.1, -2.0, 0.1, 1.5, 0.7])
+    # Goal inside the giant obstacle
+    q_goal_in_obs = np.array([0.0, 0.5, 0.0, -1.0, 0.0, 1.5, 0.0])
+
+    res = planner.plan(q_start, q_goal_in_obs)
+    assert not res.success
+    assert res.iterations <= max_iter
+    assert "collision" in res.reason.lower() or "iteration" in res.reason.lower() or "timeout" in res.reason.lower()
+
+    # Verify robot state was restored
+    restored_q = controller.get_current_joint_positions()
+    assert np.allclose(restored_q, initial_q, atol=1e-5)

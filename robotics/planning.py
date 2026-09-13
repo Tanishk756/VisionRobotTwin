@@ -216,15 +216,17 @@ class RRTConnectPlanner:
         # 3. Bidirectional RRT-Connect
         tree_start = [_RRTNode(start)]
         tree_goal = [_RRTNode(goal)]
+        tree_a = tree_start
+        tree_b = tree_goal
 
         for iteration in range(1, self.max_iterations + 1):
             q_rand = self._sample_random_config(goal)
 
-            status_a, new_node_a = self._extend(tree_start, q_rand)
+            status_a, new_node_a = self._extend(tree_a, q_rand)
             if status_a != "TRAPPED" and new_node_a is not None:
-                status_b, new_node_b = self._connect(tree_goal, new_node_a.config)
+                status_b, new_node_b = self._connect(tree_b, new_node_a.config)
                 if status_b == "REACHED" and new_node_b is not None:
-                    # Trees connected! Reconstruct path
+                    # Trees connected! Reconstruct path from root_a to root_b
                     path_a = []
                     curr = new_node_a
                     while curr is not None:
@@ -238,7 +240,17 @@ class RRTConnectPlanner:
                         path_b.append(curr.config)
                         curr = curr.parent
 
-                    full_path = path_a + path_b
+                    if tree_a is tree_start:
+                        full_path = path_a + path_b
+                    else:
+                        full_path = list(reversed(path_a + path_b))
+
+                    # Sanity check endpoints
+                    if not np.allclose(full_path[0], start, atol=1e-4):
+                        full_path.insert(0, start)
+                    if not np.allclose(full_path[-1], goal, atol=1e-4):
+                        full_path.append(goal)
+
                     solve_ms = (time.perf_counter() - start_time) * 1000.0
                     return PlanningResult(
                         success=True,
@@ -250,7 +262,7 @@ class RRTConnectPlanner:
                     )
 
             # Swap trees
-            tree_start, tree_goal = tree_goal, tree_start
+            tree_a, tree_b = tree_b, tree_a
 
         solve_ms = (time.perf_counter() - start_time) * 1000.0
         return PlanningResult(

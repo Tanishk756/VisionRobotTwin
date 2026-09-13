@@ -72,13 +72,38 @@ def test_collision_detection_with_obstacle(pybullet_scene):
         obstacle_ids=[obstacle_id],
     )
 
-    # Command a joint configuration reaching into obstacle [0.5, 0.0, 0.15]
-    # Or place robot directly colliding with obstacle
-    colliding_q = [0.0, 0.7, 0.0, -1.5, 0.0, 2.2, 0.0]
+    # Command a joint configuration reaching directly into obstacle [0.5, 0.0, 0.15]
+    colliding_q = [0.0, 0.04, 0.0, -2.38, 0.0, 2.41, 0.785]
     result = checker.check_collision(joint_positions=colliding_q)
-    # Check that query completes and reports proper status
     assert isinstance(result, CollisionResult)
-    assert isinstance(result.in_collision, bool)
+    assert result.in_collision
+    assert result.env_collision
+    assert (body_id, obstacle_id) in result.colliding_bodies
+
+
+def test_self_collision_detection(pybullet_scene):
+    """Verifies self-collision is detected when robot arm is folded into itself."""
+    client_id, table_id, obstacle_id = pybullet_scene
+    registry = get_robot_registry()
+    spec = registry.get_robot_spec("panda")
+
+    body_id = p.loadURDF(spec.urdf_path, useFixedBase=True, physicsClientId=client_id)
+    controller = GenericRobotController(client_id, body_id, spec)
+
+    checker = CollisionChecker(
+        physics_client_id=client_id,
+        robot_id=body_id,
+        table_id=table_id,
+        obstacle_ids=[obstacle_id],
+    )
+
+    # Joint configuration causing forearm/wrist to fold back into the base link 0
+    folded_q = [0.0, 1.5, 0.0, 3.0, 0.0, 0.0, 0.0]
+    result = checker.check_collision(joint_positions=folded_q)
+    assert isinstance(result, CollisionResult)
+    assert result.in_collision
+    assert result.self_collision
+    assert (body_id, body_id) in result.colliding_bodies
 
 
 def test_collision_checker_state_restoration(pybullet_scene):
@@ -125,6 +150,5 @@ def test_allowed_contacts_policy(pybullet_scene):
         allowed_body_pairs=[(body_id, table_id)],
     )
 
-    # Table contact should now be allowed (ignored)
     result = checker.check_collision()
     assert isinstance(result, CollisionResult)
