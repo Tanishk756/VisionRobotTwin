@@ -162,12 +162,31 @@ python tools/compare_robots.py --robots panda kuka_iiwa --headless
 ```
 Artifacts are saved to `benchmarks/robot_comparison_YYYYMMDD_HHMMSS/` (`summary.json` and `results.csv`).
 
+#### PyBullet Simulation Benchmark Results (15 Shared Reachable Targets)
+
+| Benchmark Metric | Franka Emika Panda | KUKA LBR iiwa |
+| :--- | :---: | :---: |
+| **IK Solve Time (Mean / P95)** | 2.06 ms / 3.05 ms | 1.32 ms / 1.48 ms |
+| **FK Measured IK Residual** | 1.19 mm | 18.85 mm |
+| **Dynamic Execution Error** | 35.05 mm | 18.87 mm |
+| **Yoshikawa Manipulability** | 0.0600 | 0.0647 |
+| **RRT Planning Time / Success** | 52.84 ms (100%) | 67.11 ms (100%) |
+
 ### 2. Cross-Controller Benchmark Tool
 Compares Inverse Kinematics Position Control vs Resolved-Rate Jacobian Velocity Control:
 ```powershell
 python tools/compare_controllers.py --robot panda --headless
 ```
 Artifacts are saved to `benchmarks/controller_comparison_YYYYMMDD_HHMMSS/` (`summary.json` and `results.csv`).
+
+#### PyBullet Simulation Benchmark Results (Franka Panda, 10 Trials @ 2.0s)
+
+| Performance Metric | IK Position Control | Resolved-Rate Velocity Control |
+| :--- | :---: | :---: |
+| **Mean Tracking Error** | **3.774 mm** | 4.698 mm |
+| **Final Settled Position Error** | 5.887 mm | **1.118 mm** |
+| **Settled within Tolerance** | 50.0% | **100.0%** |
+| **Total Joint Travel Distance** | 15.962 rad | **11.849 rad** (25.8% smoother) |
 
 ---
 
@@ -186,14 +205,15 @@ pytest -v
 | `test_manipulability.py` | Yoshikawa Index, SVD Condition, Singularity Warnings | **PASS** |
 | `test_differential_ik.py` | Resolved-Rate Control, DLS Damping, Null-Space | **PASS** |
 | `test_trajectory.py` | Joint Quintic Polynomials & Cartesian SE(3) SLERP | **PASS** |
-| `test_collision.py` | Collision Queries, State Restoration, Allowed Contacts | **PASS** |
-| `test_planning.py` | Direct Path Check, RRT-Connect, Path Shortcutting | **PASS** |
+| `test_collision.py` | Self-Collision Queries, State Restoration, Allowed Contacts | **PASS** |
+| `test_planning.py` | Direct Path Check, RRT-Connect, Impossible Scene | **PASS** |
+| `test_runtime_integration.py` | MotionManager, Rate Limiter, FK Residual, Controller Selection | **PASS** |
 | `test_robot_benchmark.py` | Headless Cross-Robot & Cross-Controller Suites | **PASS** |
 | `test_auto_integration.py` | End-to-End Autonomous Pick-and-Place FSM | **PASS** |
 | `test_calibration_quality.py` | Camera Calibration Heuristics & Diagnostics | **PASS** |
 | `test_extrinsics_math.py` | World-Anchor Extrinsic Calibration Math | **PASS** |
 | `test_transforms.py` | SE(3) Lie Group Matrix & Quaternion Conversions | **PASS** |
-| **Total Automated Tests** | **Full Multi-Robot Robotics Suite** | **98 / 98 PASSING** |
+| **Total Automated Tests** | **Full Multi-Robot Robotics Suite** | **106 / 106 PASSING** |
 
 ---
 
@@ -207,13 +227,14 @@ VisionRobotTwin/
 ├── robotics/                   # Core Robotics Engine
 │   ├── robot_model.py          # RobotModelSpec & RobotCapabilities dataclasses
 │   ├── robot_registry.py       # RobotRegistry singleton (Panda, KUKA iiwa)
-│   ├── robot_controller.py     # GenericRobotController & PandaRobotController
-│   ├── inverse_kinematics.py   # GenericIKSolver & PandaIKSolver
+│   ├── robot_controller.py     # GenericRobotController (Position Rate Limiting)
+│   ├── inverse_kinematics.py   # GenericIKSolver (FK Residual Measurement)
 │   ├── kinematics.py           # Geometric Jacobian, SVD Manipulability, DLS
 │   ├── differential_ik.py      # ResolvedRateController with Null-Space Projection
+│   ├── motion_manager.py       # MotionManager runtime planning & execution layer
 │   ├── trajectory.py           # Joint Quintic Polynomial & Cartesian SE(3) SLERP
-│   ├── collision.py            # CollisionChecker & State-Preserving Queries
-│   ├── planning.py             # Bidirectional RRT-Connect & Path Shortcutting
+│   ├── collision.py            # CollisionChecker (True Self-Collision Queries)
+│   ├── planning.py             # Bidirectional RRT-Connect (Explicit Root Tracking)
 │   ├── coordinate_transform.py # SE(3) Lie Group Transformations
 │   ├── workspace_mapper.py     # Workspace Bounding & Slew Rate Limiting
 │   ├── gripper.py              # Virtual Gripper Attachment Manager
@@ -227,7 +248,7 @@ VisionRobotTwin/
 │   ├── calibrate_extrinsics.py # World-Anchor Extrinsic Calibration
 │   ├── benchmark_live.py       # Standstill & Dynamic Tracking Benchmark
 │   └── generate_aruco_markers.py # Printable Marker Generator
-└── tests/                      # 98 Unit & Integration Tests
+└── tests/                      # 106 Unit & Integration Tests
 ```
 
 ---

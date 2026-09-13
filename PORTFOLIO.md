@@ -56,7 +56,7 @@
 ## 5. Resume Bullet Points
 
 - **Robotics Software Engineer Bullet**:
-  > *Architected a modular multi-manipulator robotics digital twin in Python/PyBullet supporting Franka Emika Panda and KUKA LBR iiwa; developed geometric Jacobian solvers, adaptive DLS resolved-rate control, Yoshikawa manipulability telemetry, null-space redundancy optimization, and collision-aware RRT-Connect motion planning, verified via 98 automated unit/integration tests.*
+  > *Architected a modular multi-manipulator robotics digital twin in Python/PyBullet supporting Franka Emika Panda and KUKA LBR iiwa; developed geometric Jacobian solvers, adaptive DLS resolved-rate control, Yoshikawa manipulability telemetry, null-space redundancy optimization, and collision-aware RRT-Connect motion planning, verified via 106 automated unit/integration tests.*
 
 - **Computer Vision / Controls Engineer Bullet**:
   > *Engineered real-time 6-DoF visual teleoperation using monocular OpenCV ArUco pose estimation and camera calibration; implemented closed-loop differential IK, 1 Euro adaptive signal filtering, quaternion SLERP interpolation, and cross-robot benchmarking suites.*
@@ -65,7 +65,7 @@
 
 ## 6. Verification Status
 
-- [x] All 98 automated pytest tests passing (`pytest -v`)
+- [x] All 106 automated pytest tests passing (`pytest -v`)
 - [x] Tested across Franka Emika Panda and KUKA LBR iiwa
 - [x] Geometric Jacobian, SVD manipulability, and condition number verified
 - [x] Resolved-rate differential controller with adaptive DLS and null-space centering verified

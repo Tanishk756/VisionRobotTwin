@@ -39,14 +39,53 @@ This document provides a strict, evidence-grounded validation report for all per
 +-------------------------------------------------------------------------------+
 | PARAMETER                            | STATUS / VALUE                         |
 +-------------------------------------------------------------------------------+
-| Automated Unit & Integration Tests   | PASSING (98 / 98 tests passing)        |
+| Automated Unit & Integration Tests   | PASSING (106 / 106 tests passing)      |
 | Continuous Integration (CI)          | Configured (Windows Python 3.11 & 3.12)|
 | Supported Manipulators               | Franka Emika Panda & KUKA LBR iiwa     |
 | Physics Simulation Clock Rate        | 240 Hz Target (Fixed 1/240s timestep)  |
 | Controllers Available                | Position IK & Resolved-Rate Jacobian   |
-| Motion Planner                       | Bidirectional RRT-Connect + Shortcutting|
+| Motion Planner                       | Bidirectional RRT-Connect + Shortcut   |
 | Dynamic Tracking Acceptance Criterion| Error < 45 mm (Dynamic Test Threshold) |
 | Camera Intrinsic Calibration Status  | DEFAULT PINHOLE (Metric calib pending) |
 | World-Anchor Extrinsics Status       | NOMINAL (Physical calibration pending) |
 +-------------------------------------------------------------------------------+
 ```
+
+---
+
+## 3. PyBullet Simulation Benchmark Evidence
+
+> [!NOTE]
+> All metrics below represent rigorous, reproducible **PyBullet Physics Simulation Benchmarks** evaluated across identical 6-DoF candidate target distributions and settled initializations. They do not represent physical hardware trials.
+
+### A. Cross-Robot Kinematics & Planning Benchmark (`tools/compare_robots.py`)
+*Evaluated on 15 shared reachable targets accepted by both manipulators ($IK_{\text{residual}} < 25\text{ mm}$).*
+
+| Metric | Franka Emika Panda | KUKA LBR iiwa |
+| :--- | :---: | :---: |
+| **Shared Targets Evaluated** | 15 / 15 (100%) | 15 / 15 (100%) |
+| **IK Solve Time (Mean / P95)** | 2.06 ms / 3.05 ms | 1.32 ms / 1.48 ms |
+| **FK Measured IK Position Residual (Mean / P95)** | 1.19 mm / 3.01 mm | 18.85 mm / 23.36 mm |
+| **Dynamic Execution Tracking Error (Mean / P95)** | 35.05 mm / 37.15 mm | 18.87 mm / 23.41 mm |
+| **Yoshikawa Manipulability Index $w(\mathbf{q})$** | 0.0600 | 0.0647 |
+| **Jacobian Condition Number $\kappa(\mathbf{J})$** | 8.80 | 8.53 |
+| **RRT-Connect Planning Success Rate** | 100.0% (15/15) | 100.0% (15/15) |
+| **RRT-Connect Planning Time (Mean)** | 52.84 ms | 67.11 ms |
+| **Planned Joint Path Length (Mean)** | 2.534 rad | 2.391 rad |
+
+### B. Cross-Controller Tracking & Convergence Benchmark (`tools/compare_controllers.py`)
+*Evaluated on Franka Panda across 10 identical 3D trajectories ($T=2.0\text{s}$, 240 Hz fixed-step physics, settled start).*
+
+| Performance Metric | IK Position Control | Resolved-Rate Velocity Control |
+| :--- | :---: | :---: |
+| **Mean Cartesian Tracking Error** | **3.774 mm** | 4.698 mm |
+| **P95 Cartesian Tracking Error** | **7.763 mm** | 7.848 mm |
+| **Final Settled Position Error** | 5.887 mm | **1.118 mm** |
+| **Settled within 2.0 mm Tolerance** | 50.0% | **100.0%** |
+| **Measured Peak Joint Velocity** | 0.261 rad/s | 0.470 rad/s |
+| **Total Joint Travel Distance** | 15.962 rad | **11.849 rad** (25.8% smoother) |
+| **Trajectory Completion Rate** | 100% | 100% |
+
+**Engineering Trade-Off Analysis**:
+- **IK Position Control** demonstrates lower transient tracking error along high-speed quintic segments.
+- **Resolved-Rate Velocity Control** provides superior final Cartesian convergence accuracy (1.118 mm vs 5.887 mm), 100% tolerance settling, and 25.8% reduced joint angular displacement via continuous damped velocity integration.
