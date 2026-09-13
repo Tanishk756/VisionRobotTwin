@@ -2,7 +2,7 @@
 
 Main entry point integrating real-time computer vision, ArUco 6-DoF pose estimation,
 SE(3) coordinate transformations, workspace mapping, inverse kinematics, and PyBullet
-digital twin control of a Franka Emika Panda manipulator.
+digital twin control of multi-manipulator systems (Franka Emika Panda, KUKA LBR iiwa).
 """
 
 import sys
@@ -15,8 +15,8 @@ from pathlib import Path
 from typing import Optional, Tuple
 import cv2
 import numpy as np
-
 import json
+
 from visionrobottwin_version import __version__
 from config.settings import AppConfig, get_default_config
 from vision.calibration import load_or_create_calibration
@@ -27,6 +27,7 @@ from robotics.simulator import PyBulletSimulator
 from robotics.workspace_mapper import WorkspaceMapper
 from robotics.state_machine import RoboticStateMachine, RobotState
 from utils.logger import setup_logger, get_logger
+from robotics.robot_registry import get_robot_registry, list_available_robots
 from utils.filters import PoseFilter
 from utils.fps_counter import FPSCounter
 from utils.telemetry import TelemetryOverlay, TelemetryData
@@ -40,6 +41,12 @@ def parse_arguments() -> argparse.Namespace:
     )
     parser.add_argument("--version", action="version", version=f"VisionRobotTwin {__version__}")
     parser.add_argument("--calibration-status", action="store_true", help="Print camera intrinsics and extrinsics calibration status and exit")
+    parser.add_argument("--list-robots", action="store_true", help="List supported multi-manipulator robots and exit")
+    parser.add_argument("--robot-info", type=str, default=None, metavar="ROBOT_ID", help="Print detailed specification for a robot and exit")
+    parser.add_argument("--robot", type=str, choices=list_available_robots(), default="panda", help="Select active robot manipulator")
+    parser.add_argument("--controller", type=str, choices=["ik", "resolved-rate"], default="ik", help="Motion controller algorithm")
+    parser.add_argument("--trajectory-mode", type=str, choices=["direct", "quintic"], default="quintic", help="Trajectory generation mode")
+    parser.add_argument("--scene", type=str, choices=["standard", "obstacles"], default="standard", help="Simulation obstacle scene configuration")
     parser.add_argument("--camera", type=int, default=0, help="Camera device index")
     parser.add_argument("--width", type=int, default=1280, help="Camera width resolution")
     parser.add_argument("--height", type=int, default=720, help="Camera height resolution")
@@ -55,6 +62,46 @@ def parse_arguments() -> argparse.Namespace:
     parser.add_argument("--record", action="store_true", help="Record OpenCV HUD output video to demo/recordings/")
     parser.add_argument("--record-data", action="store_true", help="Record trajectory session data to CSV")
     return parser.parse_args()
+
+
+def print_robot_list() -> None:
+    """Prints list of supported robots and capabilities."""
+    registry = get_robot_registry()
+    print("Available Robots:")
+    for robot_id in registry.list_robot_ids():
+        spec = registry.get_robot_spec(robot_id)
+        gripper_str = "Yes" if spec.capabilities.has_gripper else "No"
+        pick_place_str = "Yes" if spec.capabilities.supports_pick_place else "No"
+        print(f"  - {spec.robot_id:<12} : {spec.display_name} (7-DoF Arm, Gripper: {gripper_str}, Pick/Place: {pick_place_str})")
+
+
+def print_robot_info(robot_id: str) -> None:
+    """Prints full specification and joint limit metadata for a robot."""
+    registry = get_robot_registry()
+    try:
+        spec = registry.get_robot_spec(robot_id)
+    except ValueError as e:
+        print(f"Error: {e}", file=sys.stderr)
+        return
+
+    print("=" * 60)
+    print(f" Robot Specification: {spec.display_name}")
+    print("=" * 60)
+    print(f" Robot ID           : {spec.robot_id}")
+    print(f" URDF Source        : {spec.urdf_path}")
+    print(f" Base Position      : {spec.base_position}")
+    print(f" Base Orientation   : {spec.base_orientation}")
+    print(f" End-Effector Link  : {spec.end_effector_link_name}")
+    print(f" Spherical Reach    : {spec.spherical_reach_m:.3f} m (min: {spec.min_reach_m:.3f} m)")
+    print(f" Max Joint Force    : {spec.max_joint_force:.1f} N")
+    print(f" Max Joint Velocity : {spec.max_joint_velocity_radps:.3f} rad/s")
+    print(f" Home Configuration : {spec.home_joint_positions}")
+    print(f" Has Gripper        : {spec.capabilities.has_gripper}")
+    print(f" Supports Pick/Place: {spec.capabilities.supports_pick_place}")
+    print(f" Velocity Control   : {spec.capabilities.supports_velocity_control}")
+    print(f" Self Collision     : {spec.capabilities.supports_self_collision}")
+    print(f" Max Payload        : {spec.capabilities.max_payload_kg:.1f} kg")
+    print("=" * 60)
 
 
 def print_calibration_status() -> None:
@@ -173,7 +220,7 @@ class VisionRobotTwinApp:
         self.logger.info("=" * 70)
         self.logger.info(" INITIALIZING VISION-ROBOT DIGITAL TWIN (v1.2-dev)")
         self.logger.info(f" Python Version : {sys.version.split()[0]} | OpenCV Version: {cv2.__version__}")
-        self.logger.info(f" Mode           : {config.mode.upper()} | Control Mode: {config.control_mode.upper()} | Transform: {config.transform.transform_mode.upper()}")
+        self.logger.info(f" Robot          : {config.robot_name.upper()} | Mode: {config.mode.upper()} | Control: {config.control_mode.upper()}")
         self.logger.info(f" Camera         : {'SYNTHETIC' if config.camera.synthetic_mode else f'Index {config.camera.camera_index}'}")
         self.logger.info(f" INTRINSICS     : {intrinsics_status}")
         self.logger.info(f" EXTRINSICS     : {extrinsics_status}")
@@ -368,12 +415,15 @@ class VisionRobotTwinApp:
                     if mapped_place.is_valid:
                         p_place_robot = mapped_place.position
 
+                gripper_attach = (lambda: self.simulator.gripper.attach_object(self.simulator.pick_cube_id)) if self.simulator.gripper else (lambda: None)
+                gripper_detach = (lambda: self.simulator.gripper.detach_object()) if self.simulator.gripper else (lambda: None)
+
                 cmd_target, action_status = self.state_machine.update_auto_mode(
                     current_ee_pos=current_ee_pos,
                     marker_1_pos=p_pick_robot,
                     marker_2_pos=p_place_robot,
-                    gripper_attach_fn=lambda: self.simulator.gripper.attach_object(self.simulator.pick_cube_id),
-                    gripper_detach_fn=lambda: self.simulator.gripper.detach_object(),
+                    gripper_attach_fn=gripper_attach,
+                    gripper_detach_fn=gripper_detach,
                     on_targets_stabilized_fn=lambda p_pick, p_place: (
                         self.simulator.set_pick_object_position(p_pick),
                         self.simulator.set_place_target_position(p_place),
@@ -569,6 +619,9 @@ class VisionRobotTwinApp:
             self.state_machine.set_mode("MANUAL")
 
         elif char == "a":  # Auto Mode
+            if not self.simulator.robot_spec.capabilities.has_gripper:
+                self.logger.warning(f"Robot '{self.simulator.robot_spec.robot_id}' does not have a gripper; autonomous pick/place is unavailable.")
+                return
             self.pose_filter.reset()
             self.workspace_mapper.reset()
             self.state_machine.set_mode("AUTO")
@@ -576,7 +629,8 @@ class VisionRobotTwinApp:
         elif char == "r":  # Reset
             self.logger.info("Resetting simulation and tracking filters.")
             self.simulator.controller.reset_to_home()
-            self.simulator.gripper.detach_object()
+            if self.simulator.gripper:
+                self.simulator.gripper.detach_object()
             self.pose_filter.reset()
             self.workspace_mapper.reset()
             self.state_machine.reset()
@@ -613,13 +667,13 @@ class VisionRobotTwinApp:
             self.logger.info(f"Saved Camera HUD screenshot: {hud_path}")
 
         bullet_path = self.config.screenshots_dir / f"sim_{timestamp}.png"
-        self.simulator.capture_screenshot(bullet_path)
-        self.logger.info(f"Saved Simulation screenshot: {bullet_path}")
+        self.simulator.save_screenshot(bullet_path)
 
         # Adjacent JSON metadata
         meta = {
             "timestamp": datetime.now().isoformat(),
             "version": __version__,
+            "robot": self.config.robot_name,
             "mode": self.state_machine.mode,
             "control_mode": self.config.control_mode,
             "transform_mode": self.config.transform.transform_mode,
@@ -676,9 +730,33 @@ def main() -> int:
         print_calibration_status()
         return 0
 
+    if args.list_robots:
+        print_robot_list()
+        return 0
+
+    if args.robot_info is not None:
+        print_robot_info(args.robot_info)
+        return 0
+
+    # Validate robot capability for operational mode
+    registry = get_robot_registry()
+    try:
+        spec = registry.get_robot_spec(args.robot)
+    except ValueError as e:
+        print(f"Error: {e}", file=sys.stderr)
+        return 1
+
+    if args.mode == "auto" and not spec.capabilities.has_gripper:
+        print(f"Error: Robot '{args.robot}' does not provide a gripper; autonomous pick/place is unavailable.", file=sys.stderr)
+        return 1
+
     logger = setup_logger(debug=args.debug)
 
     config = get_default_config()
+    config.robot_name = args.robot
+    config.controller_type = args.controller
+    config.trajectory_mode = args.trajectory_mode
+    config.scene_type = args.scene
     config.camera.camera_index = args.camera
     config.camera.width = args.width
     config.camera.height = args.height

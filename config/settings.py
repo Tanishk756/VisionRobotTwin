@@ -88,7 +88,7 @@ class TransformConfig:
 
 @dataclass
 class WorkspaceConfig:
-    """Workspace bounding and scaling limits for the Franka Panda manipulator."""
+    """Workspace bounding and scaling limits for the manipulator."""
     # Robot Base Cartesian limits (meters)
     x_min: float = 0.25
     x_max: float = 0.70
@@ -189,6 +189,10 @@ class AppConfig:
     state_machine: StateMachineConfig = field(default_factory=StateMachineConfig)
     
     # App-level operational flags
+    robot_name: str = "panda"  # 'panda' or 'kuka_iiwa'
+    controller_type: str = "ik"  # 'ik' or 'resolved-rate'
+    trajectory_mode: str = "quintic"  # 'direct' or 'quintic'
+    scene_type: str = "standard"  # 'standard' or 'obstacles'
     mode: str = "manual"  # 'manual' or 'auto'
     control_mode: str = "6dof"  # '6dof' (position + orientation) or '3dof' (position only)
     debug: bool = False

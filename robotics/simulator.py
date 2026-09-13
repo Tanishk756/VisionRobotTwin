@@ -1,6 +1,7 @@
-"""PyBullet Physics Simulator Environment for Franka Emika Panda.
+"""PyBullet Physics Simulator Environment for Multi-Robot Digital Twins.
 
-Encapsulates PyBullet physics client lifecycle, URDF asset loading, visual targets,
+Encapsulates PyBullet physics client lifecycle, URDF asset loading for supported
+manipulators (Franka Emika Panda, KUKA LBR iiwa), visual targets,
 object position synchronization with perception, bounded trajectory debug line management,
 and screenshot capture.
 """
@@ -13,8 +14,10 @@ import pybullet_data
 import numpy as np
 
 from config.settings import AppConfig, SimulationConfig, WorkspaceConfig
-from robotics.robot_controller import PandaRobotController
-from robotics.inverse_kinematics import PandaIKSolver
+from robotics.robot_model import RobotModelSpec
+from robotics.robot_registry import get_robot_registry
+from robotics.robot_controller import GenericRobotController, PandaRobotController
+from robotics.inverse_kinematics import GenericIKSolver, PandaIKSolver
 from robotics.gripper import VirtualGripper
 from utils.simulation_clock import SimulationClock
 from utils.logger import get_logger
@@ -45,8 +48,9 @@ class PyBulletSimulator:
         self.pick_cube_id: int = -1
         self.place_cube_id: int = -1
 
-        self.controller: Optional[PandaRobotController] = None
-        self.ik_solver: Optional[PandaIKSolver] = None
+        self.robot_spec: Optional[RobotModelSpec] = None
+        self.controller: Optional[GenericRobotController] = None
+        self.ik_solver: Optional[GenericIKSolver] = None
         self.gripper: Optional[VirtualGripper] = None
 
         # Trajectory visualization debug lines (Strictly bounded lifecycle)
@@ -145,43 +149,53 @@ class PyBulletSimulator:
         )
 
     def _setup_robot_and_kinematics(self) -> None:
-        """Loads Franka Panda URDF and configures controller, IK solver, and gripper."""
+        """Loads Robot URDF and configures generic controller, IK solver, and gripper."""
+        registry = get_robot_registry()
+        robot_name = getattr(self.config, "robot_name", "panda")
+        self.robot_spec = registry.get_robot_spec(robot_name)
+
         flags = p.URDF_USE_SELF_COLLISION | p.URDF_USE_INERTIA_FROM_FILE
         self.robot_id = p.loadURDF(
-            self.config.robot.urdf_path,
-            basePosition=self.config.robot.base_position,
-            baseOrientation=self.config.robot.base_orientation,
-            useFixedBase=True,
+            self.robot_spec.urdf_path,
+            basePosition=self.robot_spec.base_position,
+            baseOrientation=self.robot_spec.base_orientation,
+            useFixedBase=self.robot_spec.fixed_base,
             flags=flags,
             physicsClientId=self.client_id,
         )
 
-        self.controller = PandaRobotController(
+        self.controller = GenericRobotController(
             physics_client_id=self.client_id,
             robot_id=self.robot_id,
+            spec=self.robot_spec,
             config=self.config.robot,
         )
 
         lows, highs, ranges, rests = self.controller.get_joint_limits()
-        self.ik_solver = PandaIKSolver(
+        self.ik_solver = GenericIKSolver(
             physics_client_id=self.client_id,
             robot_id=self.robot_id,
-            robot_config=self.config.robot,
             arm_joint_indices=self.controller.arm_joint_indices,
             lower_limits=lows,
             upper_limits=highs,
             joint_ranges=ranges,
             rest_poses=rests,
             end_effector_link_index=self.controller.ee_link_index,
+            max_reach_m=self.robot_spec.spherical_reach_m,
+            min_reach_m=self.robot_spec.min_reach_m,
+            default_ee_orientation=self.robot_spec.default_ee_orientation,
         )
 
-        self.gripper = VirtualGripper(
-            physics_client_id=self.client_id,
-            robot_id=self.robot_id,
-            finger_joint_indices=self.controller.finger_joint_indices,
-            ee_link_index=self.controller.ee_link_index,
-            max_grasp_distance_m=self.config.state_machine.grasp_distance_threshold_m,
-        )
+        if self.robot_spec.capabilities.has_gripper:
+            self.gripper = VirtualGripper(
+                physics_client_id=self.client_id,
+                robot_id=self.robot_id,
+                finger_joint_indices=self.controller.finger_joint_indices,
+                ee_link_index=self.controller.ee_link_index,
+                max_grasp_distance_m=self.config.state_machine.grasp_distance_threshold_m,
+            )
+        else:
+            self.gripper = None
 
     def _draw_workspace_bounds(self) -> None:
         """Renders subtle 3D bounding box indicating safe workspace limits."""
@@ -250,56 +264,36 @@ class PyBulletSimulator:
         if not self.show_trajectory or self.headless:
             return
 
+        new_pt = np.asarray(current_ee_pos, dtype=np.float64)
         if len(self._trajectory_points) > 0:
-            prev_pt = self._trajectory_points[-1]
-            dist = np.linalg.norm(current_ee_pos - prev_pt)
-            if dist > 0.005:  # Only add point if moved more than 5mm
-                line_id = p.addUserDebugLine(
-                    list(prev_pt),
-                    list(current_ee_pos),
-                    lineColorRGB=[0.1, 0.8, 0.4],
-                    lineWidth=2.0,
-                    lifeTime=0,
-                    physicsClientId=self.client_id,
-                )
-                self._trajectory_line_ids.append(line_id)
-                self._trajectory_points.append(current_ee_pos.copy())
+            last_pt = self._trajectory_points[-1]
+            if np.linalg.norm(new_pt - last_pt) < 0.005:
+                return  # Skip negligible movement
 
-                # If queue exceeds capacity, remove and free oldest debug line in PyBullet
-                while len(self._trajectory_line_ids) > self.sim_config.trajectory_history_len:
-                    old_id = self._trajectory_line_ids.popleft()
-                    try:
-                        p.removeUserDebugItem(old_id, physicsClientId=self.client_id)
-                    except Exception:
-                        pass
-        else:
-            self._trajectory_points.append(current_ee_pos.copy())
+            line_id = p.addUserDebugLine(
+                list(last_pt),
+                list(new_pt),
+                lineColorRGB=[0.1, 0.9, 0.3],
+                lineWidth=2.0,
+                physicsClientId=self.client_id,
+            )
+            self._trajectory_line_ids.append(line_id)
 
-    def clear_trajectory(self) -> None:
-        """Clears all drawn trajectory lines and frees debug items."""
-        while self._trajectory_line_ids:
-            line_id = self._trajectory_line_ids.popleft()
-            try:
-                p.removeUserDebugItem(line_id, physicsClientId=self.client_id)
-            except Exception:
-                pass
-        self._trajectory_points.clear()
+            # Evict old debug lines when exceeding history capacity
+            if len(self._trajectory_line_ids) > self.sim_config.trajectory_history_len:
+                old_id = self._trajectory_line_ids.popleft()
+                p.removeUserDebugItem(old_id, physicsClientId=self.client_id)
 
-    def toggle_trajectory(self) -> bool:
-        """Toggles trajectory visualization on/off."""
-        self.show_trajectory = not self.show_trajectory
-        if not self.show_trajectory:
-            self.clear_trajectory()
-        return self.show_trajectory
+        self._trajectory_points.append(new_pt)
 
     def step(self, wall_dt: Optional[float] = None) -> int:
-        """Advances the physics simulation by appropriate 1/240s substeps.
+        """Steps physics simulation according to fixed-timestep clock accumulator.
 
         Args:
-            wall_dt: Elapsed wall-clock time in seconds. If None, advances exactly 1 physics step.
+            wall_dt: Elapsed wall-clock time in seconds. If None, performs 1 step.
 
         Returns:
-            Number of physics substeps executed.
+            Number of physics substeps actually computed.
         """
         if wall_dt is None:
             p.stepSimulation(physicsClientId=self.client_id)
@@ -310,33 +304,61 @@ class PyBulletSimulator:
             step_fn=lambda: p.stepSimulation(physicsClientId=self.client_id),
         )
 
-    def capture_screenshot(self, output_path: Path) -> bool:
-        """Renders OpenGL view and saves screenshot image."""
+    def render_rgb(self, width: int = 640, height: int = 480) -> np.ndarray:
+        """Captures synthetic RGB frame from PyBullet simulation camera.
+
+        Returns:
+            RGB image array (H, W, 3) as uint8.
+        """
+        view_mat = p.computeViewMatrixFromYawPitchRoll(
+            cameraTargetPosition=self.sim_config.camera_target_position,
+            distance=self.sim_config.camera_distance,
+            yaw=self.sim_config.camera_yaw,
+            pitch=self.sim_config.camera_pitch,
+            roll=0.0,
+            upAxisIndex=2,
+            physicsClientId=self.client_id,
+        )
+        proj_mat = p.computeProjectionMatrixFOV(
+            fov=50.0,
+            aspect=float(width) / float(height),
+            nearVal=0.1,
+            farVal=5.0,
+            physicsClientId=self.client_id,
+        )
+        _, _, rgb_img, _, _ = p.getCameraImage(
+            width=width,
+            height=height,
+            viewMatrix=view_mat,
+            projectionMatrix=proj_mat,
+            renderer=p.ER_TINY_RENDERER,
+            physicsClientId=self.client_id,
+        )
+        rgb_arr = np.array(rgb_img, dtype=np.uint8).reshape((height, width, 4))
+        return rgb_arr[:, :, :3]  # Return RGB channels
+
+    def save_screenshot(self, output_path: Path) -> bool:
+        """Saves current PyBullet viewport image to disk."""
+        import cv2
+
         try:
-            path = Path(output_path)
-            path.parent.mkdir(parents=True, exist_ok=True)
-            w, h, rgb_img, _, _ = p.getCameraImage(
-                width=1280,
-                height=720,
-                physicsClientId=self.client_id,
-            )
-            rgb_arr = np.asarray(rgb_img, dtype=np.uint8).reshape((h, w, 4))[:, :, :3]
-            import cv2
-            bgr_arr = cv2.cvtColor(rgb_arr, cv2.COLOR_RGB2BGR)
-            cv2.imwrite(str(path), bgr_arr)
-            logger.info(f"Saved PyBullet screenshot to {path}")
+            rgb = self.render_rgb(width=1280, height=720)
+            bgr = cv2.cvtColor(rgb, cv2.COLOR_RGB2BGR)
+            output_path.parent.mkdir(parents=True, exist_ok=True)
+            cv2.imwrite(str(output_path), bgr)
+            logger.info(f"Saved PyBullet screenshot to {output_path}")
             return True
         except Exception as e:
             logger.error(f"Failed to capture PyBullet screenshot: {e}")
             return False
 
     def close(self) -> None:
-        """Disconnects PyBullet physics client safely and frees all resources."""
-        self.clear_trajectory()
+        """Disconnects physics client and cleans up simulator resources."""
         if self.client_id >= 0:
             try:
                 p.disconnect(physicsClientId=self.client_id)
                 logger.info("PyBullet physics client disconnected.")
             except Exception as e:
-                logger.warning(f"Error disconnecting PyBullet: {e}")
-            self.client_id = -1
+                logger.warning(f"Exception during PyBullet disconnect: {e}")
+            finally:
+                self.client_id = -1
