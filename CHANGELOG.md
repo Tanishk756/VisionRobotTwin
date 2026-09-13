@@ -8,6 +8,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Robot-Agnostic Multi-Manipulator Architecture**: Decoupled robot control layer into generic `RobotModelSpec`, `RobotCapabilities`, and singleton `RobotRegistry` supporting Franka Emika Panda and KUKA LBR iiwa.
+- **KUKA LBR iiwa Support**: Packaged 7-DoF KUKA iiwa manipulator integration in PyBullet with clean capability reporting (no native gripper; pick-and-place safely disabled).
+- **Generic Robot Controller**: `GenericRobotController` managing URDF inspection, joint limit discovery, and motor actuation for arbitrary serial manipulators.
+- **Generic Inverse Kinematics**: `GenericIKSolver` providing robust damped least-squares position and 6-DoF orientation IK with limit enforcement and unreachable-target handling.
+- **Geometric Jacobian Calculation**: Spatial Jacobian computation $\mathbf{J}(\mathbf{q}) \in \mathbb{R}^{6 \times n}$ verified with finite-difference numerical translation tests.
+- **Yoshikawa Manipulability & Singularity Metrics**: SVD-based computation of Yoshikawa index $w$, condition number $\kappa$, and $\sigma_{\min}$ with configurable singularity warning threshold.
+- **Adaptive DLS Resolved-Rate Cartesian Controller**: Closed-loop differential velocity control mapping spatial twists to joint velocities with smooth singularity damping scaling.
+- **Null-Space Joint Centering**: Secondary potential gradient projection onto the Jacobian null space to bias redundant 7-DoF joints towards rest posture without disturbing Cartesian tracking.
+- **Trajectory Generation**: $C^2$-continuous Joint Quintic Polynomial interpolation and Cartesian SE(3) trajectory synthesis with Quaternion SLERP.
+- **Trajectory Execution & State Management**: `TrajectoryExecutor` with lifecycle tracking, progress %, and Cartesian tracking error calculation.
+- **Simulation Collision Checking**: `CollisionChecker` supporting robot self-collision, table, and obstacle contact queries with state-preserving joint inspection.
+- **Obstacle Simulation Scene**: Optional 3D obstacles via `--scene obstacles` for collision-avoidance testing.
+- **Collision-Aware Motion Planning**: Bidirectional RRT-Connect planner in joint space with direct linear path fast-path optimization and randomized path shortcutting.
+- **Cross-Robot Comparison Benchmark**: `tools/compare_robots.py` benchmarking Panda vs KUKA iiwa across reachable targets, measuring solve latency, residuals, manipulability, and planning success.
+- **Cross-Controller Comparison Benchmark**: `tools/compare_controllers.py` benchmarking IK position control against Resolved-Rate Jacobian control on identical trajectories.
+- **Expanded CLI**: `--list-robots`, `--robot-info <name>`, `--robot <name>`, `--controller <type>`, `--trajectory-mode`, and `--scene` flags.
 - **Camera Calibration Quality Reports**: JSON report export (`calibration/camera_calibration_report.json`) and visual diagnostic residual plots (`calibration/calibration_diagnostics.png`).
 - **Calibration Sample-Quality Heuristics**: Pre-solve gating based on Laplacian variance sharpness, bounding area ratio, duplicate view rejection, and spatial/scale diversity scoring.
 - **World-Anchor Extrinsic Calibration**: Camera-to-Virtual-Robot Extrinsic Calibration via ArUco Marker ID 10 ($\mathbf{T}_{\text{robot}\to\text{camera}} = \mathbf{T}_{\text{robot}\to\text{anchor}} \cdot \mathbf{T}_{\text{camera}\to\text{anchor}}^{-1}$).

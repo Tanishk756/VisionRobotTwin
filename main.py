@@ -530,6 +530,8 @@ class VisionRobotTwinApp:
                     robot_ee_pos=(float(res.ee_position[0]), float(res.ee_position[1]), float(res.ee_position[2])) if res.ee_position is not None else None,
                     tracking_error_m=res.tracking_error_m,
                     ik_status=res.ik_status,
+                    robot_name=self.config.robot_name.upper(),
+                    controller_type=getattr(self.config, "controller_type", "ik").upper(),
                     fps=res.fps,
                     sim_fps=self.sim_fps_counter.fps,
                     physics_target_hz=self.config.simulation.target_physics_hz,
