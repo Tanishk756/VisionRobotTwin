@@ -6,7 +6,7 @@ multi-manipulator platforms (Franka Emika Panda, KUKA LBR iiwa, etc.).
 """
 
 from dataclasses import dataclass
-from typing import Dict, List, Optional, Tuple, Union
+from typing import Dict, List, Optional, Sequence, Tuple, Union
 import pybullet as p
 import numpy as np
 
@@ -137,43 +137,86 @@ class GenericRobotController:
         for joint_idx in self.finger_joint_indices:
             p.resetJointState(self.robot_id, joint_idx, 0.04, targetVelocity=0.0, physicsClientId=self.client_id)
 
-    def set_arm_joint_positions(self, target_joint_positions: List[float]) -> None:
-        """Applies position control to arm joints with torque and velocity constraints."""
+    def set_arm_joint_positions(
+        self,
+        target_joint_positions: Sequence[float],
+        dt: Optional[float] = None,
+        enforce_velocity_limits: bool = True,
+    ) -> List[float]:
+        """Applies position control to arm joints with torque and velocity constraints.
+
+        Args:
+            target_joint_positions: Desired target angles per controllable arm joint (rad).
+            dt: Optional elapsed delta time for explicit target rate limiting.
+            enforce_velocity_limits: If True and dt is provided, clamps commanded angle
+                delta per joint to [ -max_vel * dt, +max_vel * dt ].
+
+        Returns:
+            The actual commanded target positions (after rate limiting if applied).
+        """
         num_targets = min(len(target_joint_positions), len(self.arm_joint_indices))
         active_indices = self.arm_joint_indices[:num_targets]
-        active_targets = [float(target_joint_positions[i]) for i in range(num_targets)]
+        raw_targets = [float(target_joint_positions[i]) for i in range(num_targets)]
+
+        max_vels = [float(self.joints[idx].max_velocity) for idx in active_indices]
+
+        if enforce_velocity_limits and dt is not None and dt > 0.0:
+            current_positions = self.get_current_joint_positions()[:num_targets]
+            clamped_targets = []
+            for i, idx in enumerate(active_indices):
+                max_delta = max_vels[i] * dt
+                delta = float(np.clip(raw_targets[i] - current_positions[i], -max_delta, max_delta))
+                clamped_targets.append(current_positions[i] + delta)
+            active_targets = clamped_targets
+        else:
+            active_targets = raw_targets
+
         forces = [self.spec.max_joint_force] * num_targets
-        velocities = [self.spec.max_joint_velocity_radps] * num_targets
-        pos_gains = [self.spec.position_gain] * num_targets
-        vel_gains = [self.spec.velocity_gain] * num_targets
 
         p.setJointMotorControlArray(
             bodyIndex=self.robot_id,
             jointIndices=active_indices,
             controlMode=p.POSITION_CONTROL,
             targetPositions=active_targets,
-            targetVelocities=[0.0] * num_targets,
             forces=forces,
-            positionGains=pos_gains,
-            velocityGains=vel_gains,
             physicsClientId=self.client_id,
         )
+        return active_targets
 
-    def set_arm_joint_velocities(self, target_joint_velocities: List[float]) -> None:
-        """Applies velocity control to arm joints with torque constraints."""
+    def set_arm_joint_velocities(
+        self,
+        target_joint_velocities: Sequence[float],
+        max_force: Optional[float] = None,
+    ) -> List[float]:
+        """Applies velocity control to arm joints with torque constraints.
+
+        Args:
+            target_joint_velocities: Desired joint angular rates per arm joint (rad/s).
+            max_force: Optional torque limit override.
+
+        Returns:
+            The commanded joint velocities (after joint limit clamping).
+        """
         num_targets = min(len(target_joint_velocities), len(self.arm_joint_indices))
         active_indices = self.arm_joint_indices[:num_targets]
-        active_velocities = [float(target_joint_velocities[i]) for i in range(num_targets)]
-        forces = [self.spec.max_joint_force] * num_targets
+        clamped_velocities = []
+        for i, idx in enumerate(active_indices):
+            max_vel = self.joints[idx].max_velocity
+            v = float(np.clip(target_joint_velocities[i], -max_vel, max_vel))
+            clamped_velocities.append(v)
+
+        force_val = float(max_force if max_force is not None else self.spec.max_joint_force)
+        forces = [force_val] * num_targets
 
         p.setJointMotorControlArray(
             bodyIndex=self.robot_id,
             jointIndices=active_indices,
             controlMode=p.VELOCITY_CONTROL,
-            targetVelocities=active_velocities,
+            targetVelocities=clamped_velocities,
             forces=forces,
             physicsClientId=self.client_id,
         )
+        return clamped_velocities
 
     def get_current_joint_positions(self) -> List[float]:
         """Returns current positions of controllable arm joints (rad)."""

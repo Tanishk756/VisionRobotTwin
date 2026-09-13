@@ -48,6 +48,10 @@ class ResolvedRateController:
         self.joint_ranges = np.array(ranges, dtype=np.float64)
         self.rest_poses = np.array(rests, dtype=np.float64)
 
+    def reset(self) -> None:
+        """Resets internal controller state."""
+        pass
+
     def compute_step(
         self,
         target_position: Union[np.ndarray, List[float], Tuple[float, float, float]],

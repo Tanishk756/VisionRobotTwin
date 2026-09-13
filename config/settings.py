@@ -136,7 +136,7 @@ class RobotConfig:
 
     # Controller gains and limits
     max_joint_velocity_radps: float = 2.0
-    position_gain: float = 0.15
+    position_gain: float = 0.75
     velocity_gain: float = 1.0
     max_joint_force: float = 200.0
 
