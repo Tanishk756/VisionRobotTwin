@@ -161,6 +161,15 @@ class FrameResult:
     mode: str = "MANUAL"
     control_mode: str = "6dof"
     transform_mode: str = "relative"
+    controller_type: str = "IK"
+    manipulability: Optional[float] = None
+    jacobian_condition: Optional[float] = None
+    sigma_min: Optional[float] = None
+    singularity_state: str = "NORMAL"
+    collision_state: str = "CLEAR"
+    planner_state: str = "IDLE"
+    trajectory_progress_pct: Optional[float] = None
+    measured_peak_joint_velocity_radps: float = 0.0
     was_clamped: bool = False
     physics_substeps: int = 1
     fps: float = 0.0
@@ -378,6 +387,7 @@ class VisionRobotTwinApp:
         commanded_cartesian_target = None
         commanded_orientation_target = None
         ik_status = "IDLE"
+        controller_name = getattr(self.config, "controller_type", "ik").lower()
 
         if not self._is_paused:
             if self.state_machine.mode == "MANUAL":
@@ -428,38 +438,91 @@ class VisionRobotTwinApp:
                         self.simulator.set_pick_object_position(p_pick),
                         self.simulator.set_place_target_position(p_place),
                     ),
+                    dt=effective_dt,
                 )
                 commanded_cartesian_target = cmd_target
                 commanded_orientation_target = self.config.robot.default_ee_orientation
 
-            # --- PHASE 5: INVERSE KINEMATICS & MOTOR COMMAND ---
+            # --- PHASE 5: CONTROLLER SELECTION & MOTOR COMMAND ---
             if commanded_cartesian_target is not None:
                 self.simulator.set_target_visual_position(commanded_cartesian_target)
 
-                # Solve IK (3-DoF or 6-DoF depending on control_mode)
-                ik_orn = commanded_orientation_target if self.config.control_mode == "6dof" else None
-                ik_res = self.simulator.ik_solver.solve(
-                    target_position=commanded_cartesian_target,
-                    target_orientation=ik_orn,
-                )
-                ik_status = ik_res.status_message
-                if ik_res.success:
-                    self.simulator.controller.set_arm_joint_positions(ik_res.joint_positions)
+                if controller_name == "resolved-rate":
+                    # Execute genuine Resolved-Rate differential IK velocity path
+                    ik_orn = commanded_orientation_target if self.config.control_mode == "6dof" else None
+                    if (self.state_machine.mode == "MANUAL" and self.state_machine.state == RobotState.TRACK) or self.state_machine.mode == "AUTO":
+                        q_dot, m_metrics = self.simulator.resolved_rate_controller.compute_step(
+                            target_position=commanded_cartesian_target,
+                            target_orientation=ik_orn,
+                            dt=effective_dt,
+                        )
+                        self.simulator.controller.set_arm_joint_velocities(q_dot)
+                        s_state = "WARNING" if m_metrics.near_singularity else "NORMAL"
+                        ik_status = f"RR_ACTIVE ({s_state})"
+                    else:
+                        # Tracking lost or search/hold: command safe zero velocities to avoid drift
+                        self.simulator.controller.set_arm_joint_velocities(
+                            [0.0] * len(self.simulator.controller.arm_joint_indices)
+                        )
+                        ik_status = "RR_ZERO_HOLD"
+                else:
+                    # Execute standard IK position-control path with rate limiting
+                    ik_orn = commanded_orientation_target if self.config.control_mode == "6dof" else None
+                    ik_res = self.simulator.ik_solver.solve(
+                        target_position=commanded_cartesian_target,
+                        target_orientation=ik_orn,
+                    )
+                    ik_status = ik_res.status_message
+                    if ik_res.success:
+                        self.simulator.controller.set_arm_joint_positions(
+                            ik_res.joint_positions,
+                            dt=effective_dt,
+                            enforce_velocity_limits=True,
+                        )
+            else:
+                if controller_name == "resolved-rate":
+                    self.simulator.controller.set_arm_joint_velocities(
+                        [0.0] * len(self.simulator.controller.arm_joint_indices)
+                    )
+                    ik_status = "RR_IDLE"
         else:
-            if self._paused_joint_positions is not None:
-                self.simulator.controller.set_arm_joint_positions(self._paused_joint_positions)
+            # Paused (HOLD) state
+            if controller_name == "resolved-rate":
+                self.simulator.controller.set_arm_joint_velocities(
+                    [0.0] * len(self.simulator.controller.arm_joint_indices)
+                )
+            elif self._paused_joint_positions is not None:
+                self.simulator.controller.set_arm_joint_positions(
+                    self._paused_joint_positions, dt=effective_dt, enforce_velocity_limits=False
+                )
             ik_status = "HOLD (PAUSED)"
             ee_frozen_pos, _ = self.simulator.controller.get_end_effector_pose()
             commanded_cartesian_target = ee_frozen_pos
             commanded_orientation_target = self._last_commanded_target_orn.copy()
 
-        # --- PHASE 6: SIMULATION PHYSICS STEPPING ---
+        # --- PHASE 6: SIMULATION PHYSICS STEPPING & TELEMETRY ---
         substeps = self.simulator.step(wall_dt=effective_dt)
         self.sim_fps_counter.update()
 
         ee_pos, ee_orn = self.simulator.controller.get_end_effector_pose()
         self.simulator.update_trajectory_visualization(ee_pos)
         pos_error = float(np.linalg.norm(ee_pos - commanded_cartesian_target)) if commanded_cartesian_target is not None else None
+
+        # Compute live kinematics & collision diagnostics
+        m_metrics, _ = self.simulator.get_current_manipulability()
+        col_res = self.simulator.get_current_collision_state()
+        col_state = "CLEAR"
+        if col_res is not None:
+            if col_res.self_collision:
+                col_state = "SELF_COLLISION"
+            elif col_res.env_collision:
+                col_state = "ENV_COLLISION"
+
+        singularity_state = "WARNING" if (m_metrics and m_metrics.near_singularity) else "NORMAL"
+        planner_state = self.simulator.motion_manager.state_name
+        traj_pct = self.simulator.motion_manager.progress_pct
+        curr_vels = self.simulator.controller.get_current_joint_velocities()
+        peak_vel = float(np.max(np.abs(curr_vels))) if len(curr_vels) > 0 else 0.0
 
         result = FrameResult(
             success=True,
@@ -481,6 +544,15 @@ class VisionRobotTwinApp:
             mode=self.state_machine.mode,
             control_mode=self.config.control_mode,
             transform_mode=self.config.transform.transform_mode,
+            controller_type=controller_name.upper(),
+            manipulability=float(m_metrics.manipulability) if m_metrics else None,
+            jacobian_condition=float(m_metrics.condition_number) if m_metrics else None,
+            sigma_min=float(m_metrics.sigma_min) if m_metrics else None,
+            singularity_state=singularity_state,
+            collision_state=col_state,
+            planner_state=planner_state,
+            trajectory_progress_pct=traj_pct,
+            measured_peak_joint_velocity_radps=peak_vel,
             was_clamped=was_clamped,
             physics_substeps=substeps,
             fps=fps,
@@ -531,7 +603,14 @@ class VisionRobotTwinApp:
                     tracking_error_m=res.tracking_error_m,
                     ik_status=res.ik_status,
                     robot_name=self.config.robot_name.upper(),
-                    controller_type=getattr(self.config, "controller_type", "ik").upper(),
+                    controller_type=res.controller_type,
+                    manipulability=res.manipulability,
+                    jacobian_condition=res.jacobian_condition,
+                    sigma_min=res.sigma_min,
+                    singularity_state=res.singularity_state,
+                    collision_state=res.collision_state,
+                    planner_state=res.planner_state,
+                    trajectory_progress_pct=res.trajectory_progress_pct,
                     fps=res.fps,
                     sim_fps=self.sim_fps_counter.fps,
                     physics_target_hz=self.config.simulation.target_physics_hz,
@@ -604,6 +683,10 @@ class VisionRobotTwinApp:
             self.logger.info("Homing robot manipulator.")
             self.pose_filter.reset()
             self.workspace_mapper.reset()
+            # Safely command zero velocity before position reset
+            self.simulator.controller.set_arm_joint_velocities([0.0] * len(self.simulator.controller.arm_joint_indices))
+            if hasattr(self.simulator, "resolved_rate_controller"):
+                self.simulator.resolved_rate_controller.reset()
             self.simulator.controller.reset_to_home()
             self.state_machine.transition_to(RobotState.HOME, "User pressed Home")
 
@@ -611,6 +694,8 @@ class VisionRobotTwinApp:
             self._is_paused = not self._is_paused
             if self._is_paused:
                 self._paused_joint_positions = self.simulator.controller.get_current_joint_positions()
+                # Zero out velocity actuator command immediately
+                self.simulator.controller.set_arm_joint_velocities([0.0] * len(self.simulator.controller.arm_joint_indices))
             else:
                 self._paused_joint_positions = None
             self.logger.info(f"{'Paused (HOLD)' if self._is_paused else 'Resumed tracking'}.")
@@ -629,7 +714,12 @@ class VisionRobotTwinApp:
             self.state_machine.set_mode("AUTO")
 
         elif char == "r":  # Reset
-            self.logger.info("Resetting simulation and tracking filters.")
+            self.logger.info("Resetting simulation, controllers, and tracking filters.")
+            self.simulator.controller.set_arm_joint_velocities([0.0] * len(self.simulator.controller.arm_joint_indices))
+            if hasattr(self.simulator, "resolved_rate_controller"):
+                self.simulator.resolved_rate_controller.reset()
+            if hasattr(self.simulator, "motion_manager"):
+                self.simulator.motion_manager.reset()
             self.simulator.controller.reset_to_home()
             if self.simulator.gripper:
                 self.simulator.gripper.detach_object()
@@ -714,6 +804,13 @@ class VisionRobotTwinApp:
             except Exception:
                 pass
         if self.simulator:
+            if self.simulator.controller:
+                try:
+                    self.simulator.controller.set_arm_joint_velocities(
+                        [0.0] * len(self.simulator.controller.arm_joint_indices)
+                    )
+                except Exception:
+                    pass
             self.simulator.close()
         if self._csv_file:
             try:
