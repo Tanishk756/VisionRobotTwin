@@ -47,11 +47,13 @@ class PyBulletSimulator:
         self.target_sphere_id: int = -1
         self.pick_cube_id: int = -1
         self.place_cube_id: int = -1
+        self.obstacle_ids: List[int] = []
 
         self.robot_spec: Optional[RobotModelSpec] = None
         self.controller: Optional[GenericRobotController] = None
         self.ik_solver: Optional[GenericIKSolver] = None
         self.gripper: Optional[VirtualGripper] = None
+        self.collision_checker: Optional[object] = None
 
         # Trajectory visualization debug lines (Strictly bounded lifecycle)
         self.show_trajectory: bool = True
@@ -148,6 +150,33 @@ class PyBulletSimulator:
             physicsClientId=self.client_id,
         )
 
+        # Load obstacles if configured scene requires them
+        if getattr(self.config, "scene_type", "default") == "obstacles":
+            # Obstacle 1: Box obstacle in central-right workspace
+            col_obs1 = p.createCollisionShape(p.GEOM_BOX, halfExtents=[0.05, 0.05, 0.12], physicsClientId=self.client_id)
+            vis_obs1 = p.createVisualShape(p.GEOM_BOX, halfExtents=[0.05, 0.05, 0.12], rgbaColor=[0.85, 0.25, 0.25, 1.0], physicsClientId=self.client_id)
+            obs1_id = p.createMultiBody(
+                baseMass=0.0,
+                baseCollisionShapeIndex=col_obs1,
+                baseVisualShapeIndex=vis_obs1,
+                basePosition=[0.55, 0.0, 0.12],
+                physicsClientId=self.client_id,
+            )
+            self.obstacle_ids.append(obs1_id)
+
+            # Obstacle 2: Cylinder pillar in left workspace
+            col_obs2 = p.createCollisionShape(p.GEOM_CYLINDER, radius=0.04, length=0.20, physicsClientId=self.client_id)
+            vis_obs2 = p.createVisualShape(p.GEOM_CYLINDER, radius=0.04, length=0.20, rgbaColor=[0.25, 0.75, 0.35, 1.0], physicsClientId=self.client_id)
+            obs2_id = p.createMultiBody(
+                baseMass=0.0,
+                baseCollisionShapeIndex=col_obs2,
+                baseVisualShapeIndex=vis_obs2,
+                basePosition=[0.38, -0.28, 0.10],
+                physicsClientId=self.client_id,
+            )
+            self.obstacle_ids.append(obs2_id)
+            logger.info(f"Loaded {len(self.obstacle_ids)} obstacle objects into simulation scene.")
+
     def _setup_robot_and_kinematics(self) -> None:
         """Loads Robot URDF and configures generic controller, IK solver, and gripper."""
         registry = get_robot_registry()
@@ -184,6 +213,14 @@ class PyBulletSimulator:
             max_reach_m=self.robot_spec.spherical_reach_m,
             min_reach_m=self.robot_spec.min_reach_m,
             default_ee_orientation=self.robot_spec.default_ee_orientation,
+        )
+
+        from robotics.collision import CollisionChecker
+        self.collision_checker = CollisionChecker(
+            physics_client_id=self.client_id,
+            robot_id=self.robot_id,
+            table_id=self.table_id,
+            obstacle_ids=self.obstacle_ids,
         )
 
         if self.robot_spec.capabilities.has_gripper:
