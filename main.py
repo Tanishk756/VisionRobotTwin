@@ -9,9 +9,10 @@ import sys
 import time
 import argparse
 import csv
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Tuple
 import cv2
 import numpy as np
 
@@ -49,6 +50,33 @@ def parse_arguments() -> argparse.Namespace:
     parser.add_argument("--debug", action="store_true", help="Enable verbose debug logging")
     parser.add_argument("--record-data", action="store_true", help="Record trajectory session data to CSV")
     return parser.parse_args()
+
+
+@dataclass
+class FrameResult:
+    """Structured output from a single frame processing cycle."""
+    success: bool
+    frame: Optional[np.ndarray] = None
+    display_frame: Optional[np.ndarray] = None
+    detections: list = None
+    target_pose: Optional[object] = None
+    pick_pose: Optional[object] = None
+    place_pose: Optional[object] = None
+    raw_pos_cam: Optional[Tuple[float, float, float]] = None
+    filtered_pos_cam: Optional[Tuple[float, float, float]] = None
+    commanded_position: Optional[np.ndarray] = None
+    commanded_orientation: Optional[np.ndarray] = None
+    ee_position: Optional[np.ndarray] = None
+    ee_orientation: Optional[np.ndarray] = None
+    tracking_error_m: Optional[float] = None
+    ik_status: str = "IDLE"
+    state_name: str = "HOME"
+    mode: str = "MANUAL"
+    control_mode: str = "6dof"
+    transform_mode: str = "relative"
+    was_clamped: bool = False
+    physics_substeps: int = 1
+    fps: float = 0.0
 
 
 class VisionRobotTwinApp:
@@ -108,6 +136,18 @@ class VisionRobotTwinApp:
         self._is_paused = False
         self._frames_processed = 0
 
+        # Memory for 6-DoF HOLD tracking
+        self._last_commanded_target_pos: np.ndarray = np.array([
+            self.config.workspace.robot_center_x,
+            self.config.workspace.robot_center_y,
+            self.config.workspace.robot_center_z,
+        ], dtype=np.float64)
+        self._last_commanded_target_orn: np.ndarray = np.array(
+            self.config.robot.default_ee_orientation,
+            dtype=np.float64,
+        )
+        self._last_loop_time: Optional[float] = None
+
     def _init_csv_recorder(self) -> None:
         """Initializes trajectory data logger."""
         self.config.demo_data_dir.mkdir(parents=True, exist_ok=True)
@@ -126,13 +166,215 @@ class VisionRobotTwinApp:
         except Exception as e:
             self.logger.error(f"Failed to initialize CSV logger: {e}")
 
+    def process_frame(
+        self,
+        frame: Optional[np.ndarray] = None,
+        wall_dt: Optional[float] = None,
+    ) -> FrameResult:
+        """Executes a complete frame iteration: perception, filtering, mapping, IK, and physics stepping.
+
+        This unified method is shared between the interactive main application, the headless integration tests,
+        and the physical benchmark suite.
+        """
+        now = time.perf_counter()
+        if wall_dt is None:
+            effective_dt = (now - self._last_loop_time) if self._last_loop_time is not None else (1.0 / max(self.config.camera.fps, 1))
+        else:
+            effective_dt = wall_dt
+        self._last_loop_time = now
+
+        # --- PHASE 1: ACQUIRE FRAME ---
+        active_id = self.config.aruco.target_marker_id if self.state_machine.mode == "MANUAL" else (
+            self.config.aruco.pick_marker_id if self.state_machine.state in (RobotState.APPROACH, RobotState.PICK)
+            else self.config.aruco.place_marker_id
+        )
+
+        if frame is None:
+            success, raw_frame = self.camera.read(active_marker_id=active_id, state=self.state_machine.state_name)
+            if not success or raw_frame is None:
+                return FrameResult(
+                    success=False,
+                    state_name=self.state_machine.state_name,
+                    mode=self.state_machine.mode,
+                    control_mode=self.config.control_mode,
+                    transform_mode=self.config.transform.transform_mode,
+                )
+        else:
+            raw_frame = frame
+
+        fps = self.fps_counter.update()
+        display_frame = raw_frame.copy()
+
+        # --- PHASE 2: ARUCO DETECTION & POSE ESTIMATION ---
+        detections = self.aruco_detector.detect(raw_frame)
+        self.aruco_detector.draw_detections(
+            display_frame,
+            detections,
+            highlight_id=active_id if self.state_machine.mode == "MANUAL" else None,
+        )
+
+        target_pose = None
+        pick_pose = None
+        place_pose = None
+
+        for det in detections:
+            pose = self.pose_estimator.estimate_pose(det)
+            if pose is not None:
+                self.pose_estimator.draw_axes(display_frame, pose)
+                if det.id == self.config.aruco.target_marker_id:
+                    target_pose = pose
+                elif det.id == self.config.aruco.pick_marker_id:
+                    pick_pose = pose
+                elif det.id == self.config.aruco.place_marker_id:
+                    place_pose = pose
+
+        # --- PHASE 3: FILTERING & WORKSPACE MAPPING ---
+        raw_pos_cam = None
+        filt_pos_cam = None
+        target_robot_pos = None
+        target_robot_orn = None
+        was_clamped = False
+
+        if target_pose is not None:
+            raw_pos_cam = (target_pose.x, target_pose.y, target_pose.z)
+
+            # Filter 6-DoF Pose (Position + SLERP Orientation)
+            filt_pos, filt_quat = self.pose_filter.update(
+                np.array(raw_pos_cam),
+                target_pose.quaternion_xyzw,
+                timestamp=now,
+            )
+            filt_pos_cam = (float(filt_pos[0]), float(filt_pos[1]), float(filt_pos[2]))
+
+            # Map to Robot Base Coordinate Frame
+            mapped_target = self.workspace_mapper.map_camera_to_robot(
+                filt_pos,
+                filt_quat if self.config.control_mode == "6dof" else None,
+                timestamp=now,
+            )
+            if mapped_target.is_valid:
+                target_robot_pos = mapped_target.position
+                target_robot_orn = mapped_target.orientation
+                was_clamped = mapped_target.is_clamped
+                self._last_commanded_target_pos = target_robot_pos.copy()
+                self._last_commanded_target_orn = target_robot_orn.copy()
+        else:
+            self.pose_filter.reset()
+
+        # --- PHASE 4: STATE MACHINE & ROBOT CONTROL ---
+        commanded_cartesian_target = None
+        commanded_orientation_target = None
+        ik_status = "IDLE"
+
+        if not self._is_paused:
+            if self.state_machine.mode == "MANUAL":
+                cmd_target, is_tracking = self.state_machine.update_manual_mode(
+                    marker_detected=(target_pose is not None),
+                    target_pos_robot=target_robot_pos,
+                )
+                commanded_cartesian_target = cmd_target
+
+                if is_tracking and target_robot_orn is not None:
+                    commanded_orientation_target = target_robot_orn
+                    self._last_commanded_target_orn = target_robot_orn.copy()
+                elif self.state_machine.state == RobotState.HOLD:
+                    # Maintain full 6-DoF pose during HOLD (do not snap orientation)
+                    commanded_orientation_target = self._last_commanded_target_orn.copy()
+                else:
+                    # In SEARCH or HOME after prolonged loss, keep last orientation or default
+                    commanded_orientation_target = self._last_commanded_target_orn.copy()
+            else:  # AUTO MODE
+                current_ee_pos, _ = self.simulator.controller.get_end_effector_pose()
+
+                p_pick_robot = None
+                if pick_pose is not None:
+                    mapped_pick = self.workspace_mapper.map_camera_to_robot(
+                        np.array([pick_pose.x, pick_pose.y, pick_pose.z]),
+                        enforce_slew_rate=False,
+                    )
+                    if mapped_pick.is_valid:
+                        p_pick_robot = mapped_pick.position
+
+                p_place_robot = None
+                if place_pose is not None:
+                    mapped_place = self.workspace_mapper.map_camera_to_robot(
+                        np.array([place_pose.x, place_pose.y, place_pose.z]),
+                        enforce_slew_rate=False,
+                    )
+                    if mapped_place.is_valid:
+                        p_place_robot = mapped_place.position
+
+                cmd_target, action_status = self.state_machine.update_auto_mode(
+                    current_ee_pos=current_ee_pos,
+                    marker_1_pos=p_pick_robot,
+                    marker_2_pos=p_place_robot,
+                    gripper_attach_fn=lambda: self.simulator.gripper.attach_object(self.simulator.pick_cube_id),
+                    gripper_detach_fn=lambda: self.simulator.gripper.detach_object(),
+                    on_targets_stabilized_fn=lambda p_pick, p_place: (
+                        self.simulator.set_pick_object_position(p_pick),
+                        self.simulator.set_place_target_position(p_place),
+                    ),
+                )
+                commanded_cartesian_target = cmd_target
+                commanded_orientation_target = self.config.robot.default_ee_orientation
+
+            # --- PHASE 5: INVERSE KINEMATICS & MOTOR COMMAND ---
+            if commanded_cartesian_target is not None:
+                self.simulator.set_target_visual_position(commanded_cartesian_target)
+
+                # Solve IK (3-DoF or 6-DoF depending on control_mode)
+                ik_orn = commanded_orientation_target if self.config.control_mode == "6dof" else None
+                ik_res = self.simulator.ik_solver.solve(
+                    target_position=commanded_cartesian_target,
+                    target_orientation=ik_orn,
+                )
+                ik_status = ik_res.status_message
+                if ik_res.success:
+                    self.simulator.controller.set_arm_joint_positions(ik_res.joint_positions)
+
+        # --- PHASE 6: SIMULATION PHYSICS STEPPING ---
+        substeps = self.simulator.step(wall_dt=effective_dt)
+        self.sim_fps_counter.update()
+
+        ee_pos, ee_orn = self.simulator.controller.get_end_effector_pose()
+        self.simulator.update_trajectory_visualization(ee_pos)
+        pos_error = float(np.linalg.norm(ee_pos - commanded_cartesian_target)) if commanded_cartesian_target is not None else None
+
+        return FrameResult(
+            success=True,
+            frame=raw_frame,
+            display_frame=display_frame,
+            detections=detections,
+            target_pose=target_pose,
+            pick_pose=pick_pose,
+            place_pose=place_pose,
+            raw_pos_cam=raw_pos_cam,
+            filtered_pos_cam=filt_pos_cam,
+            commanded_position=commanded_cartesian_target,
+            commanded_orientation=commanded_orientation_target,
+            ee_position=ee_pos,
+            ee_orientation=ee_orn,
+            tracking_error_m=pos_error,
+            ik_status=ik_status,
+            state_name=self.state_machine.state_name,
+            mode=self.state_machine.mode,
+            control_mode=self.config.control_mode,
+            transform_mode=self.config.transform.transform_mode,
+            was_clamped=was_clamped,
+            physics_substeps=substeps,
+            fps=fps,
+        )
+
     def run(self) -> None:
         """Main real-time perception-control loop."""
         self.logger.info("Starting real-time execution loop. Press [Q] to quit.")
+        last_time = time.perf_counter()
 
         try:
             while self._is_running:
-                loop_start = time.perf_counter()
+                now = time.perf_counter()
+                loop_dt = now - last_time
+                last_time = now
                 self._frames_processed += 1
 
                 # Check max frames bound
@@ -140,186 +382,59 @@ class VisionRobotTwinApp:
                     self.logger.info(f"Reached max frames limit ({self.config.max_frames}). Exiting cleanly.")
                     break
 
-                # --- PHASE 1: CAMERA PERCEPTION ---
-                active_id = self.config.aruco.target_marker_id if self.state_machine.mode == "MANUAL" else (
-                    self.config.aruco.pick_marker_id if self.state_machine.state in (RobotState.APPROACH, RobotState.PICK)
-                    else self.config.aruco.place_marker_id
-                )
-                success, frame = self.camera.read(active_marker_id=active_id, state=self.state_machine.state_name)
-                if not success or frame is None:
+                res = self.process_frame(wall_dt=loop_dt)
+                if not res.success or res.frame is None:
                     self.logger.warning("Frame read failed.")
                     time.sleep(0.01)
                     continue
 
-                fps = self.fps_counter.update()
-                display_frame = frame.copy()
+                display_frame = res.display_frame if res.display_frame is not None else res.frame.copy()
 
-                # ArUco Detection
-                detections = self.aruco_detector.detect(frame)
-                self.aruco_detector.draw_detections(
-                    display_frame,
-                    detections,
-                    highlight_id=active_id if self.state_machine.mode == "MANUAL" else None,
+                # Telemetry HUD Rendering
+                active_id = self.config.aruco.target_marker_id if res.mode == "MANUAL" else (
+                    self.config.aruco.pick_marker_id if res.state_name in ("APPROACH", "PICK")
+                    else self.config.aruco.place_marker_id
                 )
-
-                # Find relevant markers
-                target_pose = None
-                pick_pose = None
-                place_pose = None
-
-                for det in detections:
-                    pose = self.pose_estimator.estimate_pose(det)
-                    if pose is not None:
-                        self.pose_estimator.draw_axes(display_frame, pose)
-                        if det.id == self.config.aruco.target_marker_id:
-                            target_pose = pose
-                        elif det.id == self.config.aruco.pick_marker_id:
-                            pick_pose = pose
-                        elif det.id == self.config.aruco.place_marker_id:
-                            place_pose = pose
-
-                # --- PHASE 2: POSE FILTERING & WORKSPACE MAPPING ---
-                raw_pos_cam = None
-                filt_pos_cam = None
-                marker_dist = None
-                target_robot_pos = None
-                target_robot_orn = None
-                was_clamped = False
-
-                if target_pose is not None:
-                    raw_pos_cam = (target_pose.x, target_pose.y, target_pose.z)
-                    marker_dist = target_pose.distance_m
-
-                    # Filter 6-DoF Pose (Position + SLERP Orientation)
-                    filt_pos, filt_quat = self.pose_filter.update(
-                        np.array(raw_pos_cam),
-                        target_pose.quaternion_xyzw,
-                        timestamp=loop_start,
-                    )
-                    filt_pos_cam = (float(filt_pos[0]), float(filt_pos[1]), float(filt_pos[2]))
-
-                    # Map to Robot Base Coordinate Frame
-                    mapped_target = self.workspace_mapper.map_camera_to_robot(
-                        filt_pos,
-                        filt_quat if self.config.control_mode == "6dof" else None,
-                        timestamp=loop_start,
-                    )
-                    if mapped_target.is_valid:
-                        target_robot_pos = mapped_target.position
-                        target_robot_orn = mapped_target.orientation
-                        was_clamped = mapped_target.is_clamped
-                else:
-                    self.pose_filter.reset()
-
-                # --- PHASE 3: STATE MACHINE & ROBOT CONTROL ---
-                commanded_cartesian_target = None
-                commanded_orientation_target = None
-                ik_status = "IDLE"
-
-                if not self._is_paused:
-                    if self.state_machine.mode == "MANUAL":
-                        cmd_target, is_tracking = self.state_machine.update_manual_mode(
-                            marker_detected=(target_pose is not None),
-                            target_pos_robot=target_robot_pos,
-                        )
-                        commanded_cartesian_target = cmd_target
-                        commanded_orientation_target = target_robot_orn if is_tracking else self.config.robot.default_ee_orientation
-                    else:  # AUTO MODE
-                        current_ee_pos, _ = self.simulator.controller.get_end_effector_pose()
-
-                        # Map pick and place markers if observed by vision
-                        p_pick_robot = None
-                        if pick_pose is not None:
-                            mapped_pick = self.workspace_mapper.map_camera_to_robot(
-                                np.array([pick_pose.x, pick_pose.y, pick_pose.z]),
-                                enforce_slew_rate=False,
-                            )
-                            if mapped_pick.is_valid:
-                                p_pick_robot = mapped_pick.position
-
-                        p_place_robot = None
-                        if place_pose is not None:
-                            mapped_place = self.workspace_mapper.map_camera_to_robot(
-                                np.array([place_pose.x, place_pose.y, place_pose.z]),
-                                enforce_slew_rate=False,
-                            )
-                            if mapped_place.is_valid:
-                                p_place_robot = mapped_place.position
-
-                        cmd_target, action_status = self.state_machine.update_auto_mode(
-                            current_ee_pos=current_ee_pos,
-                            marker_1_pos=p_pick_robot,
-                            marker_2_pos=p_place_robot,
-                            gripper_attach_fn=lambda: self.simulator.gripper.attach_object(self.simulator.pick_cube_id),
-                            gripper_detach_fn=lambda: self.simulator.gripper.detach_object(),
-                            on_targets_stabilized_fn=lambda p_pick, p_place: (
-                                self.simulator.set_pick_object_position(p_pick),
-                                self.simulator.set_place_target_position(p_place),
-                            ),
-                        )
-                        commanded_cartesian_target = cmd_target
-                        commanded_orientation_target = self.config.robot.default_ee_orientation
-
-                    # --- PHASE 4: INVERSE KINEMATICS & MOTOR COMMAND ---
-                    if commanded_cartesian_target is not None:
-                        self.simulator.set_target_visual_position(commanded_cartesian_target)
-
-                        # Solve IK with target position and target orientation
-                        ik_res = self.simulator.ik_solver.solve(
-                            target_position=commanded_cartesian_target,
-                            target_orientation=commanded_orientation_target,
-                        )
-                        ik_status = ik_res.status_message
-                        if ik_res.success:
-                            self.simulator.controller.set_arm_joint_positions(ik_res.joint_positions)
-
-                # Step simulation physics
-                self.simulator.step()
-                sim_fps = self.sim_fps_counter.update()
-
-                # End effector forward kinematics & error telemetry
-                ee_pos, _ = self.simulator.controller.get_end_effector_pose()
-                self.simulator.update_trajectory_visualization(ee_pos)
-                pos_error = float(np.linalg.norm(ee_pos - commanded_cartesian_target)) if commanded_cartesian_target is not None else None
-
-                # --- PHASE 5: CSV TELEMETRY LOGGING ---
-                if self._csv_writer and commanded_cartesian_target is not None:
-                    self._csv_writer.writerow([
-                        f"{time.time():.4f}",
-                        self.state_machine.state_name,
-                        target_pose.marker_id if target_pose else -1,
-                        f"{commanded_cartesian_target[0]:.4f}",
-                        f"{commanded_cartesian_target[1]:.4f}",
-                        f"{commanded_cartesian_target[2]:.4f}",
-                        f"{ee_pos[0]:.4f}",
-                        f"{ee_pos[1]:.4f}",
-                        f"{ee_pos[2]:.4f}",
-                        f"{pos_error:.4f}" if pos_error else 0.0,
-                        f"{fps:.1f}",
-                    ])
-
-                # --- PHASE 6: RENDER TELEMETRY HUD & GUI DISPLAY ---
                 telem_data = TelemetryData(
-                    mode=self.state_machine.mode,
-                    state=self.state_machine.state_name if not self._is_paused else "PAUSED",
-                    marker_id=target_pose.marker_id if target_pose else (active_id if self.state_machine.mode == "AUTO" else None),
-                    tracking_active=(target_pose is not None and self.state_machine.state == RobotState.TRACK),
-                    raw_pos_cam=raw_pos_cam,
-                    filtered_pos_cam=filt_pos_cam,
-                    marker_distance_m=marker_dist,
-                    robot_target_pos=tuple(commanded_cartesian_target) if commanded_cartesian_target is not None else None,
-                    robot_ee_pos=(float(ee_pos[0]), float(ee_pos[1]), float(ee_pos[2])),
-                    tracking_error_m=pos_error,
-                    ik_status=ik_status,
-                    fps=fps,
-                    sim_fps=sim_fps,
+                    mode=res.mode,
+                    state=res.state_name if not self._is_paused else "PAUSED",
+                    marker_id=res.target_pose.marker_id if res.target_pose else (active_id if res.mode == "AUTO" else None),
+                    tracking_active=(res.target_pose is not None and res.state_name == "TRACK"),
+                    raw_pos_cam=res.raw_pos_cam,
+                    filtered_pos_cam=res.filtered_pos_cam,
+                    marker_distance_m=res.target_pose.distance_m if res.target_pose else None,
+                    robot_target_pos=tuple(res.commanded_position) if res.commanded_position is not None else None,
+                    robot_ee_pos=(float(res.ee_position[0]), float(res.ee_position[1]), float(res.ee_position[2])) if res.ee_position is not None else None,
+                    tracking_error_m=res.tracking_error_m,
+                    ik_status=res.ik_status,
+                    fps=res.fps,
+                    sim_fps=self.sim_fps_counter.fps,
+                    physics_target_hz=self.config.simulation.target_physics_hz,
+                    physics_substeps=res.physics_substeps,
+                    physics_actual_step_rate=res.physics_substeps / max(loop_dt, 1e-4),
                     lost_tracking_time_s=self.state_machine.lost_tracking_duration_s,
                     is_calibrated=self.calibration.is_calibrated,
-                    workspace_clamped=was_clamped,
+                    workspace_clamped=res.was_clamped,
                     debug_mode=self.config.debug,
                 )
 
                 self.telemetry_overlay.render(display_frame, telem_data)
+
+                # CSV Telemetry Recording
+                if self._csv_writer and res.commanded_position is not None and res.ee_position is not None:
+                    self._csv_writer.writerow([
+                        f"{time.time():.4f}",
+                        res.state_name,
+                        res.target_pose.marker_id if res.target_pose else -1,
+                        f"{res.commanded_position[0]:.4f}",
+                        f"{res.commanded_position[1]:.4f}",
+                        f"{res.commanded_position[2]:.4f}",
+                        f"{res.ee_position[0]:.4f}",
+                        f"{res.ee_position[1]:.4f}",
+                        f"{res.ee_position[2]:.4f}",
+                        f"{res.tracking_error_m:.4f}" if res.tracking_error_m else 0.0,
+                        f"{res.fps:.1f}",
+                    ])
 
                 # Only show GUI window if not headless
                 if not self.headless:

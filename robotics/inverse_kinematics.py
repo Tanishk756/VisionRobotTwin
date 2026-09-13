@@ -21,11 +21,9 @@ logger = get_logger("Robotics.IK")
 class IKStatus(Enum):
     """Categorized status for Inverse Kinematics solving."""
     SOLUTION_RETURNED = auto()
-    CONVERGED = auto()
     OUT_OF_LIMITS = auto()
     UNREACHABLE = auto()
     INVALID_TARGET = auto()
-    RESIDUAL_TOO_HIGH = auto()
     IK_ERROR = auto()
 
 
@@ -38,6 +36,10 @@ class IKResult:
     status_message: str
     position_error_m: Optional[float] = None
     orientation_error_rad: Optional[float] = None
+
+
+# Explicit numerical tolerance for joint limit boundaries (0.01 rad ~= 0.57 deg)
+JOINT_LIMIT_TOLERANCE_RAD: float = 0.01
 
 
 class PandaIKSolver:
@@ -153,22 +155,24 @@ class PandaIKSolver:
                     status_message="IK solver produced non-finite joint values",
                 )
 
-            # 2. Validate Joint Limits
-            has_limit_violation = False
+            # 2. Strict Joint Limit Validation
             for idx, (val, low, high) in enumerate(zip(arm_poses, self.lower_limits, self.upper_limits)):
-                if val < low - 0.05 or val > high + 0.05:
-                    has_limit_violation = True
+                if val < (low - JOINT_LIMIT_TOLERANCE_RAD) or val > (high + JOINT_LIMIT_TOLERANCE_RAD):
                     logger.debug(f"Joint {idx} limit exceeded: {val:.3f} not in [{low:.3f}, {high:.3f}]")
-                # Clamp safely
+                    return IKResult(
+                        success=False,
+                        joint_positions=[],
+                        status=IKStatus.OUT_OF_LIMITS,
+                        status_message=f"Joint {idx} angle ({val:.3f} rad) outside physical limits [{low:.3f}, {high:.3f}]",
+                    )
+                # Apply minor numerical clamping strictly within valid limits
                 arm_poses[idx] = float(np.clip(val, low, high))
-
-            status = IKStatus.OUT_OF_LIMITS if has_limit_violation else IKStatus.SOLUTION_RETURNED
 
             return IKResult(
                 success=True,
                 joint_positions=arm_poses,
-                status=status,
-                status_message=status.name,
+                status=IKStatus.SOLUTION_RETURNED,
+                status_message="SOLUTION_RETURNED",
             )
 
         except Exception as e:

@@ -21,7 +21,8 @@ class CameraConfig:
     auto_exposure: bool = True
     buffer_size: int = 1
     synthetic_mode: bool = False  # Explicitly forced via --synthetic
-    allow_synthetic_fallback: bool = False  # If False, raises error when physical camera fails
+    allow_synthetic_fallback: bool = False  # If False, raises error on camera open or mid-stream disconnect
+    max_consecutive_read_failures: int = 30  # Number of failed read() attempts before disconnecting
 
 
 @dataclass
@@ -75,8 +76,7 @@ class TransformConfig:
     # Pitch camera ~15 degrees down looking toward robot center
     camera_euler_rpy_rad: Tuple[float, float, float] = (np.pi, 0.26, 0.0)
 
-    # Tool orientation offset to keep Franka gripper pointing downward during SE(3) orientation tracking
-    # Default tool quaternion [x, y, z, w]
+    # Tool orientation offset to keep Franka gripper pointing downward [x, y, z, w]
     tool_orientation_offset: Tuple[float, float, float, float] = (1.0, 0.0, 0.0, 0.0)
 
 
@@ -139,6 +139,8 @@ class RobotConfig:
 class SimulationConfig:
     """PyBullet physics simulation parameters."""
     time_step: float = 1.0 / 240.0
+    target_physics_hz: float = 240.0
+    max_substeps_per_frame: int = 20
     gui: bool = True
     gravity: Tuple[float, float, float] = (0.0, 0.0, -9.81)
     target_sphere_radius: float = 0.022
@@ -155,8 +157,7 @@ class SimulationConfig:
 @dataclass
 class StateMachineConfig:
     """State machine transitions and timeout parameters."""
-    lost_tracking_hold_timeout_s: float = 0.5   # Remain in HOLD during brief occlusions
-    lost_tracking_search_timeout_s: float = 2.5 # Transition from HOLD to SEARCH if absent
+    lost_tracking_search_timeout_s: float = 2.5 # Transition from HOLD to SEARCH if absent > 2.5s
     approach_height_offset_m: float = 0.14      # Clearance above object before pick/place
     pick_descent_height_m: float = 0.035        # Final grasp height
     waypoint_tolerance_m: float = 0.020         # Cartesian convergence arrival threshold

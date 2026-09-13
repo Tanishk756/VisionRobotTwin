@@ -1,5 +1,5 @@
 @echo off
-setlocal enabledelayedexpansion
+setlocal
 
 echo ======================================================================
 echo  VisionRobotTwin: Environment Setup (v1.1)
@@ -7,7 +7,7 @@ echo ======================================================================
 
 :: Check if Python is available
 python --version >nul 2>&1
-if %ERRORLEVEL% NEQ 0 (
+if errorlevel 1 (
     echo [ERROR] Python is not installed or not found in system PATH.
     echo Please install Python 3.10, 3.11, or 3.12 and ensure 'Add to PATH' is checked.
     exit /b 1
@@ -17,45 +17,45 @@ if %ERRORLEVEL% NEQ 0 (
 if not exist .venv (
     echo [INFO] Creating Python virtual environment in .venv ...
     python -m venv .venv
-    if %ERRORLEVEL% NEQ 0 (
+    if errorlevel 1 (
         echo [ERROR] Failed to create virtual environment.
-        exit /b %ERRORLEVEL%
+        exit /b 1
     )
 )
 
 echo [INFO] Activating virtual environment ...
 call .venv\Scripts\activate.bat
-if %ERRORLEVEL% NEQ 0 (
+if errorlevel 1 (
     echo [ERROR] Failed to activate virtual environment.
-    exit /b %ERRORLEVEL%
+    exit /b 1
 )
 
 echo [INFO] Upgrading pip ...
 python -m pip install --upgrade pip
-if %ERRORLEVEL% NEQ 0 (
+if errorlevel 1 (
     echo [ERROR] Failed to upgrade pip.
-    exit /b %ERRORLEVEL%
+    exit /b 1
 )
 
 echo [INFO] Installing project dependencies ...
 python -m pip install -r requirements-dev.txt
-if %ERRORLEVEL% NEQ 0 (
+if errorlevel 1 (
     echo [ERROR] Dependency installation encountered an issue.
-    exit /b %ERRORLEVEL%
+    exit /b 1
 )
 
 echo [INFO] Generating ArUco marker printable assets ...
 python tools\generate_aruco_markers.py
-if %ERRORLEVEL% NEQ 0 (
+if errorlevel 1 (
     echo [ERROR] Marker generation failed.
-    exit /b %ERRORLEVEL%
+    exit /b 1
 )
 
 echo [INFO] Running test suite ...
 pytest -v
-if %ERRORLEVEL% NEQ 0 (
+if errorlevel 1 (
     echo [ERROR] Automated test suite failed.
-    exit /b %ERRORLEVEL%
+    exit /b 1
 )
 
 echo ======================================================================

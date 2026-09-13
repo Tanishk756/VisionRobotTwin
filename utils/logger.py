@@ -1,7 +1,9 @@
-"""Structured Logger for VisionRobotTwin.
+"""Structured Logger Hierarchy for VisionRobotTwin.
 
-Provides clean console formatting and file logging with automatic directory creation.
-Avoids spamming every frame by providing rate-limited / event-driven log messages.
+Configures the root 'VisionRobotTwin' logger with console formatting and file handlers.
+All module loggers (e.g., 'VisionRobotTwin.Perception.Camera', 'VisionRobotTwin.Robotics.IK')
+are created as descendants of 'VisionRobotTwin', guaranteeing proper propagation and eliminating
+lost log messages or duplicate handlers.
 """
 
 import logging
@@ -9,20 +11,19 @@ import sys
 from pathlib import Path
 from typing import Optional
 
-
-_GLOBAL_LOGGER: Optional[logging.Logger] = None
+ROOT_LOGGER_NAME = "VisionRobotTwin"
 
 
 def setup_logger(
-    name: str = "VisionRobotTwin",
+    name: str = ROOT_LOGGER_NAME,
     log_file: Optional[Path] = Path("logs/vision_robot_twin.log"),
     level: int = logging.INFO,
     debug: bool = False,
 ) -> logging.Logger:
-    """Configures and returns the application logger.
+    """Configures and returns the root application logger.
 
     Args:
-        name: Logger name.
+        name: Root logger name (defaults to 'VisionRobotTwin').
         log_file: Optional file path for persistent logs.
         level: Default log level.
         debug: If True, sets level to DEBUG.
@@ -30,16 +31,11 @@ def setup_logger(
     Returns:
         Configured logging.Logger instance.
     """
-    global _GLOBAL_LOGGER
     if debug:
         level = logging.DEBUG
 
     logger = logging.getLogger(name)
     logger.setLevel(level)
-
-    # Avoid duplicate handlers if re-initialized
-    if logger.handlers:
-        return logger
 
     # Formatting
     console_format = logging.Formatter(
@@ -51,31 +47,51 @@ def setup_logger(
         datefmt="%Y-%m-%d %H:%M:%S",
     )
 
-    # Console Handler
-    console_handler = logging.StreamHandler(sys.stdout)
-    console_handler.setLevel(level)
-    console_handler.setFormatter(console_format)
-    logger.addHandler(console_handler)
+    # Ensure handlers
+    has_console = any(isinstance(h, logging.StreamHandler) and not isinstance(h, logging.FileHandler) for h in logger.handlers)
+    if not has_console:
+        console_handler = logging.StreamHandler(sys.stdout)
+        console_handler.setLevel(level)
+        console_handler.setFormatter(console_format)
+        logger.addHandler(console_handler)
 
     # File Handler
     if log_file:
-        try:
-            log_path = Path(log_file)
-            log_path.parent.mkdir(parents=True, exist_ok=True)
-            file_handler = logging.FileHandler(log_path, mode="a", encoding="utf-8")
-            file_handler.setLevel(logging.DEBUG)  # Always log debug to file
-            file_handler.setFormatter(file_format)
-            logger.addHandler(file_handler)
-        except Exception as e:
-            logger.warning(f"Could not initialize file logger at {log_file}: {e}")
+        log_path = Path(log_file)
+        already_has_file = any(
+            isinstance(h, logging.FileHandler) and Path(getattr(h, "baseFilename", "")).resolve() == log_path.resolve()
+            for h in logger.handlers
+        )
+        if not already_has_file:
+            try:
+                log_path.parent.mkdir(parents=True, exist_ok=True)
+                file_handler = logging.FileHandler(log_path, mode="a", encoding="utf-8")
+                file_handler.setLevel(logging.DEBUG)  # Always capture debug in logfile
+                file_handler.setFormatter(file_format)
+                logger.addHandler(file_handler)
+            except Exception as e:
+                logger.warning(f"Could not initialize file logger at {log_file}: {e}")
 
-    _GLOBAL_LOGGER = logger
     return logger
 
 
-def get_logger(name: str = "VisionRobotTwin") -> logging.Logger:
-    """Retrieves the global logger instance or initializes a default one."""
-    global _GLOBAL_LOGGER
-    if _GLOBAL_LOGGER is None:
-        return setup_logger(name)
-    return logging.getLogger(name)
+def get_logger(module_name: str = "") -> logging.Logger:
+    """Retrieves a descendant logger under the 'VisionRobotTwin' namespace.
+
+    Example:
+        get_logger("Robotics.IK") -> logging.getLogger("VisionRobotTwin.Robotics.IK")
+    """
+    # Ensure root is initialized with default config if not already setup
+    root_logger = logging.getLogger(ROOT_LOGGER_NAME)
+    if not root_logger.handlers:
+        setup_logger(ROOT_LOGGER_NAME)
+
+    if not module_name or module_name == ROOT_LOGGER_NAME:
+        return root_logger
+
+    if module_name.startswith(f"{ROOT_LOGGER_NAME}."):
+        full_name = module_name
+    else:
+        full_name = f"{ROOT_LOGGER_NAME}.{module_name}"
+
+    return logging.getLogger(full_name)

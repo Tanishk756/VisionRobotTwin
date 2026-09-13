@@ -1,8 +1,9 @@
-"""Unit tests for workspace mapping, SE(3) transformation modes, boundaries, and slew-rate safety."""
+"""Unit tests for workspace mapping, SE(3) transformation modes, relative 6-DoF orientation, and slew-rate safety."""
 
 import math
 import numpy as np
 import pytest
+from scipy.spatial.transform import Rotation
 
 from config.settings import WorkspaceConfig, TransformConfig
 from robotics.workspace_mapper import WorkspaceMapper
@@ -49,6 +50,73 @@ def test_se3_vs_relative_modes():
     tgt_se3 = mapper_se3.map_camera_to_robot(p_cam, enforce_slew_rate=False)
     # In SE3 with identity rotation: p_base = [0.7+0.1, 0+0.2, 0.4+0.3] = [0.8, 0.2, 0.7]
     assert np.allclose(tgt_se3.position, [0.8, 0.2, 0.7], atol=1e-5)
+
+
+def test_relative_mode_initial_reference_and_rotation_mapping():
+    """Verify relative orientation math: initial reference -> default tool orientation, and delta mapping."""
+    ws_cfg = WorkspaceConfig(
+        scale_x=1.0, scale_y=1.0, scale_z=1.0,
+        robot_center_x=0.5, robot_center_y=0.0, robot_center_z=0.4,
+        cam_center_x=0.0, cam_center_y=0.0, cam_center_z=0.5,
+    )
+    tf_cfg = TransformConfig(
+        transform_mode="relative",
+        tool_orientation_offset=(1.0, 0.0, 0.0, 0.0),  # Downward orientation [1, 0, 0, 0]
+    )
+    mapper = WorkspaceMapper(ws_cfg, tf_cfg)
+
+    # 1. First frame: marker presented at arbitrary orientation (e.g. 45 deg tilt)
+    initial_marker_rot = Rotation.from_euler("xyz", [45, 0, 0], degrees=True)
+    q_init = initial_marker_rot.as_quat()
+
+    t1 = mapper.map_camera_to_robot(
+        camera_pos=np.array([0.0, 0.0, 0.5]),
+        camera_quat_xyzw=q_init,
+        enforce_slew_rate=False,
+    )
+    # Initial presentation must produce reference default tool orientation, NOT arbitrary tilt or 180 flip
+    assert np.allclose(t1.orientation, [1.0, 0.0, 0.0, 0.0], atol=1e-3) or np.allclose(t1.orientation, [-1.0, 0.0, 0.0, 0.0], atol=1e-3)
+    assert np.isclose(np.linalg.norm(t1.orientation), 1.0)
+
+    # 2. Rotate marker +90 degrees around Camera Z (yaw in camera frame)
+    # Camera +Z maps to Robot +X (forward). So +90 around Cam Z should produce +90 around Robot X!
+    rot_cam_z_90 = Rotation.from_euler("z", 90, degrees=True)
+    rot_frame2 = rot_cam_z_90 * initial_marker_rot
+    q_frame2 = rot_frame2.as_quat()
+
+    t2 = mapper.map_camera_to_robot(
+        camera_pos=np.array([0.0, 0.0, 0.5]),
+        camera_quat_xyzw=q_frame2,
+        enforce_slew_rate=False,
+    )
+    assert np.isclose(np.linalg.norm(t2.orientation), 1.0)
+
+    # Expected tool orientation: initial [1,0,0,0] rotated +90 deg around Robot X
+    expected_rot = Rotation.from_euler("x", 90, degrees=True) * Rotation.from_quat([1.0, 0.0, 0.0, 0.0])
+    exp_q = expected_rot.as_quat()
+
+    # Compare orientation equivalence (accounting for q and -q)
+    dot = np.abs(np.dot(t2.orientation, exp_q))
+    assert np.isclose(dot, 1.0, atol=1e-3), f"Expected relative rotation dot {dot} to be close to 1.0"
+
+
+def test_relative_mode_camera_axis_mapping_matrix():
+    """Verify R_R_C matrix maps camera axes to intuitive robot translation/rotation axes."""
+    mapper = WorkspaceMapper(WorkspaceConfig())
+    # Camera +Z -> Robot +X
+    # Camera +X -> Robot -Y
+    # Camera +Y -> Robot -Z
+    v_cam_z = np.array([0.0, 0.0, 1.0])
+    v_rob_x = mapper.R_R_C @ v_cam_z
+    assert np.allclose(v_rob_x, [1.0, 0.0, 0.0])
+
+    v_cam_x = np.array([1.0, 0.0, 0.0])
+    v_rob_y = mapper.R_R_C @ v_cam_x
+    assert np.allclose(v_rob_y, [0.0, -1.0, 0.0])
+
+    v_cam_y = np.array([0.0, 1.0, 0.0])
+    v_rob_z = mapper.R_R_C @ v_cam_y
+    assert np.allclose(v_rob_z, [0.0, 0.0, -1.0])
 
 
 def test_time_based_slew_rate_limiting():

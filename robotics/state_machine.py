@@ -46,9 +46,11 @@ class RoboticStateMachine:
         self._action_timer: Optional[float] = None
         self._waypoint_start_time: float = time.time()
 
-        # Perception Gating Stability Counters
+        # Perception Gating Stability & Acquisition Buffers
         self._consecutive_pick_detections: int = 0
         self._consecutive_place_detections: int = 0
+        self._pick_poses_buffer: list[np.ndarray] = []
+        self._place_poses_buffer: list[np.ndarray] = []
         self._targets_frozen: bool = False
 
         # Autonomous Waypoints (Robot base frame coordinates)
@@ -146,27 +148,47 @@ class RoboticStateMachine:
                 self.place_target_pos = np.array([0.45, 0.20, self.config.pick_descent_height_m], dtype=np.float64)
                 self._targets_frozen = True
             else:
-                # Accumulate consecutive detections
+                # Accumulate consecutive detections with strict reset on missed frame
                 if marker_1_pos is not None:
                     self._consecutive_pick_detections += 1
-                    self.pick_target_pos = marker_1_pos.copy()
-                    self.pick_target_pos[2] = self.config.pick_descent_height_m
+                    self._pick_poses_buffer.append(np.asarray(marker_1_pos, dtype=np.float64))
                 else:
-                    self._consecutive_pick_detections = max(0, self._consecutive_pick_detections - 1)
+                    self._consecutive_pick_detections = 0
+                    self._pick_poses_buffer.clear()
 
                 if marker_2_pos is not None:
                     self._consecutive_place_detections += 1
-                    self.place_target_pos = marker_2_pos.copy()
-                    self.place_target_pos[2] = self.config.pick_descent_height_m
+                    self._place_poses_buffer.append(np.asarray(marker_2_pos, dtype=np.float64))
                 else:
-                    self._consecutive_place_detections = max(0, self._consecutive_place_detections - 1)
+                    self._consecutive_place_detections = 0
+                    self._place_poses_buffer.clear()
 
                 if (
                     self._consecutive_pick_detections >= self.config.consecutive_detection_threshold
                     and self._consecutive_place_detections >= self.config.consecutive_detection_threshold
                 ):
+                    # Compute robust median position across the consecutive sample window
+                    pick_window = np.array(self._pick_poses_buffer[-self.config.consecutive_detection_threshold:])
+                    place_window = np.array(self._place_poses_buffer[-self.config.consecutive_detection_threshold:])
+                    pick_median = np.median(pick_window, axis=0)
+                    place_median = np.median(place_window, axis=0)
+
+                    pick_spread_m = float(np.max(np.std(pick_window, axis=0)))
+                    place_spread_m = float(np.max(np.std(place_window, axis=0)))
+                    logger.info(
+                        f"Perception Gating Passed: Pick spread {pick_spread_m*1000.0:.2f} mm, "
+                        f"Place spread {place_spread_m*1000.0:.2f} mm across "
+                        f"{self.config.consecutive_detection_threshold} consecutive samples."
+                    )
+
+                    self.pick_target_pos = pick_median.copy()
+                    self.pick_target_pos[2] = self.config.pick_descent_height_m
+                    self.place_target_pos = place_median.copy()
+                    self.place_target_pos[2] = self.config.pick_descent_height_m
                     self._targets_frozen = True
-                    logger.info("Perception Gating Passed: Pick and Place targets frozen from vision.")
+                    self._pick_poses_buffer.clear()
+                    self._place_poses_buffer.clear()
+
                     if on_targets_stabilized_fn and self.pick_target_pos is not None and self.place_target_pos is not None:
                         on_targets_stabilized_fn(self.pick_target_pos, self.place_target_pos)
 
@@ -278,6 +300,8 @@ class RoboticStateMachine:
         self._targets_frozen = False
         self._consecutive_pick_detections = 0
         self._consecutive_place_detections = 0
+        self._pick_poses_buffer.clear()
+        self._place_poses_buffer.clear()
         self._lost_marker_time = None
         self._action_timer = None
         self.transition_to(RobotState.SEARCH, "FSM Reset")

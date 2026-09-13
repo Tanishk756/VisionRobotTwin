@@ -66,6 +66,19 @@ class WorkspaceMapper:
         self._last_commanded_orientation: Optional[np.ndarray] = None
         self._last_update_time: Optional[float] = None
 
+        # Camera-to-Robot interaction frame transformation matrix
+        # Maps camera task-space delta (dx_cam, dy_cam, dz_cam) -> robot delta (dz_cam, -dx_cam, -dy_cam)
+        # R_R_C @ [x_c, y_c, z_c]^T = [z_c, -x_c, -y_c]^T
+        self.R_R_C = np.array([
+            [0.0,  0.0,  1.0],
+            [-1.0, 0.0,  0.0],
+            [0.0, -1.0,  0.0],
+        ], dtype=np.float64)
+
+        # Initial reference orientations for relative teleoperation
+        self._ref_marker_rot: Optional[Rotation] = None
+        self._ref_tool_rot: Optional[Rotation] = None
+
     def map_camera_to_robot(
         self,
         camera_pos: np.ndarray,
@@ -119,17 +132,49 @@ class WorkspaceMapper:
         if camera_quat_xyzw is not None and np.all(np.isfinite(camera_quat_xyzw)):
             q_norm = np.linalg.norm(camera_quat_xyzw)
             if q_norm > 1e-6:
-                q_cam_marker = np.asarray(camera_quat_xyzw) / q_norm
+                q_cam_marker = np.asarray(camera_quat_xyzw, dtype=np.float64) / q_norm
+                rot_curr = Rotation.from_quat(q_cam_marker)
+
                 if self.tf_config.transform_mode == "se3":
                     R_base_cam = self._T_base_camera[:3, :3]
                     q_base_cam = Rotation.from_matrix(R_base_cam).as_quat()
                     q_base_marker = multiply_quaternions(q_base_cam, q_cam_marker)
                     target_orn = multiply_quaternions(q_base_marker, self.tf_config.tool_orientation_offset)
                 else:
-                    # In relative mode, apply orientation delta around default downward orientation
-                    target_orn = multiply_quaternions(q_cam_marker, self.tf_config.tool_orientation_offset)
+                    # Relative teleoperation mode:
+                    # On initial marker acquisition, capture reference orientations
+                    if self._ref_marker_rot is None:
+                        self._ref_marker_rot = rot_curr
+                        tool_ref_q = np.asarray(self.tf_config.tool_orientation_offset, dtype=np.float64)
+                        tool_ref_q /= np.linalg.norm(tool_ref_q)
+                        self._ref_tool_rot = Rotation.from_quat(tool_ref_q)
+                        target_orn = tool_ref_q.copy()
+                    else:
+                        # Calculate marker orientation change in camera frame: Delta_R_C = R_curr @ R_ref^T
+                        R_curr_mat = rot_curr.as_matrix()
+                        R_ref_mat = self._ref_marker_rot.as_matrix()
+                        Delta_R_C = R_curr_mat @ R_ref_mat.T
+
+                        # Remap delta into intuitive robot coordinate frame: Delta_R_R = R_R_C @ Delta_R_C @ R_R_C^T
+                        Delta_R_R = self.R_R_C @ Delta_R_C @ self.R_R_C.T
+
+                        # Apply delta relative to initial reference tool orientation
+                        R_target_mat = Delta_R_R @ self._ref_tool_rot.as_matrix()
+                        target_orn = Rotation.from_matrix(R_target_mat).as_quat()
+
+                # Shortest-path quaternion alignment
+                if self._last_commanded_orientation is not None:
+                    if np.dot(target_orn, self._last_commanded_orientation) < 0.0:
+                        target_orn = -target_orn
             else:
                 target_orn = np.asarray(self.tf_config.tool_orientation_offset, dtype=np.float64)
+        else:
+            target_orn = np.asarray(self.tf_config.tool_orientation_offset, dtype=np.float64)
+
+        # Normalize target quaternion
+        target_orn_norm = np.linalg.norm(target_orn)
+        if target_orn_norm > 1e-6:
+            target_orn = target_orn / target_orn_norm
         else:
             target_orn = np.asarray(self.tf_config.tool_orientation_offset, dtype=np.float64)
 
@@ -196,3 +241,5 @@ class WorkspaceMapper:
         self._last_commanded_position = None
         self._last_commanded_orientation = None
         self._last_update_time = None
+        self._ref_marker_rot = None
+        self._ref_tool_rot = None

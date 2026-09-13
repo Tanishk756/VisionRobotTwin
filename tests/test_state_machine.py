@@ -4,7 +4,8 @@ import time
 import numpy as np
 import pytest
 
-from config.settings import StateMachineConfig, WorkspaceConfig
+from config.settings import AppConfig, StateMachineConfig, WorkspaceConfig
+from main import VisionRobotTwinApp
 from robotics.state_machine import RoboticStateMachine, RobotState
 from robotics.gripper import GraspResult
 
@@ -29,7 +30,6 @@ def test_manual_mode_acquisition_and_tracking():
 def test_tracking_loss_hold_and_search_timeout():
     """Verify transition from TRACK -> HOLD -> SEARCH when marker is occluded."""
     sm_cfg = StateMachineConfig(
-        lost_tracking_hold_timeout_s=0.05,
         lost_tracking_search_timeout_s=0.15,
     )
     ws_cfg = WorkspaceConfig()
@@ -50,33 +50,93 @@ def test_tracking_loss_hold_and_search_timeout():
     assert fsm.state == RobotState.SEARCH
 
 
-def test_auto_mode_perception_gating():
-    """Verify auto mode remains in SEARCH unless both markers are detected consecutively."""
+def test_interrupted_detections_reset_consecutive_counter():
+    """Verify that a missed frame strictly resets consecutive counter to 0."""
     sm_cfg = StateMachineConfig(consecutive_detection_threshold=3, auto_demo=False)
     ws_cfg = WorkspaceConfig()
     fsm = RoboticStateMachine(sm_cfg, ws_cfg)
     fsm.set_mode("AUTO")
 
-    assert fsm.state == RobotState.SEARCH
-
     p_pick = np.array([0.45, -0.20, 0.035])
     p_place = np.array([0.45, 0.20, 0.035])
 
-    # 1. No markers seen -> remains in SEARCH
-    wp, status = fsm.update_auto_mode(current_ee_pos=np.array([0.4, 0.0, 0.4]))
+    # 2 consecutive hits
+    fsm.update_auto_mode(current_ee_pos=np.array([0.4, 0.0, 0.4]), marker_1_pos=p_pick, marker_2_pos=p_place)
+    fsm.update_auto_mode(current_ee_pos=np.array([0.4, 0.0, 0.4]), marker_1_pos=p_pick, marker_2_pos=p_place)
+    assert fsm._consecutive_pick_detections == 2
+
+    # Missed frame on marker 1
+    fsm.update_auto_mode(current_ee_pos=np.array([0.4, 0.0, 0.4]), marker_1_pos=None, marker_2_pos=p_place)
+    assert fsm._consecutive_pick_detections == 0
+    assert len(fsm._pick_poses_buffer) == 0
+
+    # Needs 3 fresh consecutive hits to transition
+    fsm.update_auto_mode(current_ee_pos=np.array([0.4, 0.0, 0.4]), marker_1_pos=p_pick, marker_2_pos=p_place)
     assert fsm.state == RobotState.SEARCH
-    assert status == "SEARCHING_FOR_MARKERS"
-
-    # 2. Only 1 marker seen -> remains in SEARCH
-    fsm.update_auto_mode(current_ee_pos=np.array([0.4, 0.0, 0.4]), marker_1_pos=p_pick)
+    fsm.update_auto_mode(current_ee_pos=np.array([0.4, 0.0, 0.4]), marker_1_pos=p_pick, marker_2_pos=p_place)
     assert fsm.state == RobotState.SEARCH
-
-    # 3. Both markers seen for 3 consecutive updates -> transitions to APPROACH
     fsm.update_auto_mode(current_ee_pos=np.array([0.4, 0.0, 0.4]), marker_1_pos=p_pick, marker_2_pos=p_place)
-    fsm.update_auto_mode(current_ee_pos=np.array([0.4, 0.0, 0.4]), marker_1_pos=p_pick, marker_2_pos=p_place)
-    fsm.update_auto_mode(current_ee_pos=np.array([0.4, 0.0, 0.4]), marker_1_pos=p_pick, marker_2_pos=p_place)
-
     assert fsm.state == RobotState.APPROACH
+
+
+def test_noisy_acquisition_produces_stable_median_aggregate_target():
+    """Verify that noisy samples and outliers are filtered out by median aggregation."""
+    sm_cfg = StateMachineConfig(consecutive_detection_threshold=5, auto_demo=False)
+    ws_cfg = WorkspaceConfig()
+    fsm = RoboticStateMachine(sm_cfg, ws_cfg)
+    fsm.set_mode("AUTO")
+
+    # True central position = [0.45, -0.20, 0.035]
+    # Feed 4 samples around central, and 1 large outlier at the end: [0.95, -0.90, 0.035]
+    noisy_pick_samples = [
+        np.array([0.451, -0.199, 0.035]),
+        np.array([0.449, -0.201, 0.035]),
+        np.array([0.450, -0.200, 0.035]),
+        np.array([0.452, -0.198, 0.035]),
+        np.array([0.950, -0.900, 0.035]),  # Outlier sample on final frame
+    ]
+    place_sample = np.array([0.45, 0.20, 0.035])
+
+    for p_samp in noisy_pick_samples:
+        fsm.update_auto_mode(current_ee_pos=np.array([0.4, 0.0, 0.4]), marker_1_pos=p_samp, marker_2_pos=place_sample)
+
+    assert fsm._targets_frozen is True
+    # Frozen target must approximate central median [0.45, -0.20] rather than the last noisy sample [0.95, -0.90]
+    assert np.isclose(fsm.pick_target_pos[0], 0.451, atol=0.005)
+    assert np.isclose(fsm.pick_target_pos[1], -0.199, atol=0.005)
+
+
+def test_6dof_hold_preserves_commanded_orientation():
+    """Verify that entering HOLD preserves the last valid 6-DoF commanded orientation."""
+    config = AppConfig()
+    config.camera.synthetic_mode = True
+    config.simulation.gui = False
+    config.control_mode = "6dof"
+    config.mode = "manual"
+
+    app = VisionRobotTwinApp(config, headless_sim=True)
+    try:
+        # 1. Step while tracking with a non-default custom orientation
+        custom_orn = np.array([0.7071, 0.0, 0.7071, 0.0])
+        app._last_commanded_target_orn = custom_orn.copy()
+        app.state_machine.transition_to(RobotState.TRACK, "Test tracking")
+
+        # 2. Simulate losing marker -> Transition to HOLD
+        cmd_target, is_tracking = app.state_machine.update_manual_mode(
+            marker_detected=False,
+            target_pos_robot=None,
+        )
+        assert app.state_machine.state == RobotState.HOLD
+
+        # Process frame without marker
+        blank_frame = np.zeros((720, 1280, 3), dtype=np.uint8)
+        res = app.process_frame(frame=blank_frame, wall_dt=0.033)
+
+        assert res.state_name == "HOLD"
+        # Commanded orientation must NOT snap back to default_ee_orientation; it must retain custom_orn
+        assert np.allclose(res.commanded_orientation, custom_orn, atol=1e-3)
+    finally:
+        app.cleanup()
 
 
 def test_waypoint_timeout_transitions_to_error():

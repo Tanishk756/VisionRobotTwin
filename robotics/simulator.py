@@ -16,6 +16,7 @@ from config.settings import AppConfig, SimulationConfig, WorkspaceConfig
 from robotics.robot_controller import PandaRobotController
 from robotics.inverse_kinematics import PandaIKSolver
 from robotics.gripper import VirtualGripper
+from utils.simulation_clock import SimulationClock
 from utils.logger import get_logger
 
 logger = get_logger("Robotics.Simulator")
@@ -29,6 +30,12 @@ class PyBulletSimulator:
         self.sim_config = config.simulation
         self.ws_config = config.workspace
         self.headless = headless
+
+        self.sim_clock = SimulationClock(
+            target_physics_hz=self.sim_config.target_physics_hz,
+            simulation_time_step=self.sim_config.time_step,
+            max_substeps_per_iteration=self.sim_config.max_substeps_per_frame,
+        )
 
         self.client_id: int = -1
         self.plane_id: int = -1
@@ -285,9 +292,23 @@ class PyBulletSimulator:
             self.clear_trajectory()
         return self.show_trajectory
 
-    def step(self) -> None:
-        """Advances the physics simulation by one time step."""
-        p.stepSimulation(physicsClientId=self.client_id)
+    def step(self, wall_dt: Optional[float] = None) -> int:
+        """Advances the physics simulation by appropriate 1/240s substeps.
+
+        Args:
+            wall_dt: Elapsed wall-clock time in seconds. If None, advances exactly 1 physics step.
+
+        Returns:
+            Number of physics substeps executed.
+        """
+        if wall_dt is None:
+            p.stepSimulation(physicsClientId=self.client_id)
+            return 1
+
+        return self.sim_clock.step(
+            wall_dt=wall_dt,
+            step_fn=lambda: p.stepSimulation(physicsClientId=self.client_id),
+        )
 
     def capture_screenshot(self, output_path: Path) -> bool:
         """Renders OpenGL view and saves screenshot image."""
