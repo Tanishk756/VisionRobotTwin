@@ -34,7 +34,7 @@ class KukaIiwaAdapter(RobotAdapter):
                 ),
                 max_joint_force=200.0,
                 max_joint_velocity_radps=1.71,
-                position_gain=0.05,
+                position_gain=0.75,
                 velocity_gain=1.0,
                 default_ee_orientation=(0.0, 1.0, 0.0, 0.0),
                 spherical_reach_m=0.820,

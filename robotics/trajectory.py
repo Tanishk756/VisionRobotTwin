@@ -7,7 +7,7 @@ Supports:
 """
 
 from dataclasses import dataclass
-from typing import List, Optional, Tuple, Union
+from typing import List, Optional, Sequence, Tuple, Union
 import numpy as np
 
 from utils.logger import get_logger
@@ -141,6 +141,49 @@ class JointQuinticTrajectory:
             acc = np.zeros(self.dof)
 
         return TrajectorySample(time=float(t), position=pos, velocity=vel, acceleration=acc)
+
+
+class PiecewiseJointTrajectory:
+    """Multi-segment quintic trajectory through a sequence of waypoints."""
+
+    def __init__(self, waypoints: Sequence[np.ndarray], duration: float = 2.0):
+        if len(waypoints) < 2:
+            raise ValueError("Piecewise trajectory requires at least 2 waypoints")
+        self.waypoints = [np.asarray(w, dtype=np.float64).flatten() for w in waypoints]
+        self.duration = float(duration)
+        self.num_segments = len(self.waypoints) - 1
+
+        seg_lengths = [
+            float(np.linalg.norm(self.waypoints[i + 1] - self.waypoints[i]))
+            for i in range(self.num_segments)
+        ]
+        total_len = sum(seg_lengths)
+        if total_len < 1e-6:
+            seg_durations = [self.duration / self.num_segments] * self.num_segments
+        else:
+            seg_durations = [max(0.01, self.duration * (l / total_len)) for l in seg_lengths]
+            scale = self.duration / sum(seg_durations)
+            seg_durations = [d * scale for d in seg_durations]
+
+        self.segments: List[JointQuinticTrajectory] = []
+        self.segment_times = [0.0]
+        curr_t = 0.0
+        for i in range(self.num_segments):
+            seg_traj = JointQuinticTrajectory(
+                self.waypoints[i], self.waypoints[i + 1], duration=seg_durations[i]
+            )
+            self.segments.append(seg_traj)
+            curr_t += seg_durations[i]
+            self.segment_times.append(curr_t)
+
+    def evaluate(self, t: float) -> TrajectorySample:
+        """Evaluates piecewise trajectory sample at time t."""
+        t_clamped = np.clip(t, 0.0, self.duration)
+        for i in range(self.num_segments):
+            if t_clamped <= self.segment_times[i + 1] or i == self.num_segments - 1:
+                t_local = t_clamped - self.segment_times[i]
+                return self.segments[i].evaluate(t_local)
+        return self.segments[-1].evaluate(self.segments[-1].duration)
 
 
 class CartesianSE3Trajectory:

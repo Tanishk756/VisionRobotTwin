@@ -34,7 +34,7 @@ class PandaAdapter(RobotAdapter):
                 ),
                 max_joint_force=200.0,
                 max_joint_velocity_radps=2.0,
-                position_gain=0.15,
+                position_gain=0.75,
                 velocity_gain=1.0,
                 default_ee_orientation=(1.0, 0.0, 0.0, 0.0),
                 spherical_reach_m=0.855,
