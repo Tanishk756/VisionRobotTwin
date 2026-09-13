@@ -3,10 +3,10 @@
 Measures real-time perception and control metrics:
 - Real Camera Frame Rate (FPS)
 - ArUco Marker Detection & Tracking Rate (%)
-- 3D Position & Orientation Jitter (Standard Deviation at standstill)
-- PnP Metric Depth Estimates
+- 3D Position Jitter (Standard Deviation at standstill in mm)
 - Robot Digital Twin Command-to-EE Tracking Error (mm)
-- Tracking Loss Occurrences & Latencies
+- Physics Substeps & Measured Stepping Rate (Hz)
+- Tracking Loss Occurrences Count
 
 Outputs structured session benchmark results to benchmarks/session_TIMESTAMP.json.
 """
@@ -23,9 +23,10 @@ import numpy as np
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from config.settings import get_default_config
 from main import VisionRobotTwinApp
-from utils.logger import setup_logger
+from utils.logger import setup_logger, get_logger
 
-logger = setup_logger("Tools.Benchmark")
+setup_logger()
+logger = get_logger("Tools.Benchmark")
 
 
 def run_benchmark(
@@ -112,6 +113,8 @@ def run_benchmark(
     detection_rate_pct = (sum(detection_flags) / len(detection_flags) * 100.0) if detection_flags else 0.0
     mean_fps = float(np.mean(fps_records[10:])) if len(fps_records) > 10 else 0.0
     mean_substeps = float(np.mean(physics_substeps_records)) if physics_substeps_records else 1.0
+    total_substeps = sum(physics_substeps_records)
+    measured_step_rate_hz = float(total_substeps / max(total_elapsed, 1e-4))
 
     pos_std_xyz_mm = (np.std(pos_arr, axis=0) * 1000.0).tolist() if len(pos_arr) > 5 else [0.0, 0.0, 0.0]
     mean_error_mm = float(np.mean(err_arr) * 1000.0) if len(err_arr) > 0 else 0.0
@@ -126,6 +129,7 @@ def run_benchmark(
         "total_frames_processed": frames_processed,
         "mean_camera_fps": round(mean_fps, 2),
         "mean_physics_substeps_per_frame": round(mean_substeps, 2),
+        "measured_physics_step_rate_hz": round(measured_step_rate_hz, 2),
         "detection_rate_pct": round(detection_rate_pct, 2),
         "position_jitter_std_mm": {
             "x": round(pos_std_xyz_mm[0], 3),
@@ -150,6 +154,7 @@ def run_benchmark(
     print(f"Control Mode:            {control_mode.upper()} ({transform_mode.upper()})")
     print(f"Mean Camera FPS:         {results['mean_camera_fps']:.1f} FPS")
     print(f"Physics Substeps/Frame:  {results['mean_physics_substeps_per_frame']:.1f}")
+    print(f"Physics Step Rate:       {results['measured_physics_step_rate_hz']:.1f} Hz")
     print(f"Marker Detection Rate:   {results['detection_rate_pct']:.1f} %")
     print(f"Position Jitter (StdDev): X={pos_std_xyz_mm[0]:.2f}mm, Y={pos_std_xyz_mm[1]:.2f}mm, Z={pos_std_xyz_mm[2]:.2f}mm")
     print(f"Mean Robot EE Error:     {results['robot_tracking_error_mm']['mean']:.2f} mm")

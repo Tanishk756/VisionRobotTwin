@@ -4,6 +4,7 @@ Coordinates deterministic behavior across perception gating, manual teleoperatio
 tracking-loss recovery, and autonomous pick-and-place sequence execution.
 """
 
+from collections import deque
 from enum import Enum, auto
 import time
 from typing import Callable, Optional, Tuple
@@ -46,11 +47,11 @@ class RoboticStateMachine:
         self._action_timer: Optional[float] = None
         self._waypoint_start_time: float = time.time()
 
-        # Perception Gating Stability & Acquisition Buffers
+        # Perception Gating
         self._consecutive_pick_detections: int = 0
         self._consecutive_place_detections: int = 0
-        self._pick_poses_buffer: list[np.ndarray] = []
-        self._place_poses_buffer: list[np.ndarray] = []
+        self._pick_poses_buffer: deque[np.ndarray] = deque(maxlen=self.config.consecutive_detection_threshold)
+        self._place_poses_buffer: deque[np.ndarray] = deque(maxlen=self.config.consecutive_detection_threshold)
         self._targets_frozen: bool = False
 
         # Autonomous Waypoints (Robot base frame coordinates)
@@ -148,6 +149,12 @@ class RoboticStateMachine:
                 self.place_target_pos = np.array([0.45, 0.20, self.config.pick_descent_height_m], dtype=np.float64)
                 self._targets_frozen = True
             else:
+                thresh = self.config.consecutive_detection_threshold
+                if self._pick_poses_buffer.maxlen != thresh:
+                    self._pick_poses_buffer = deque(self._pick_poses_buffer, maxlen=thresh)
+                if self._place_poses_buffer.maxlen != thresh:
+                    self._place_poses_buffer = deque(self._place_poses_buffer, maxlen=thresh)
+
                 # Accumulate consecutive detections with strict reset on missed frame
                 if marker_1_pos is not None:
                     self._consecutive_pick_detections += 1
@@ -168,8 +175,8 @@ class RoboticStateMachine:
                     and self._consecutive_place_detections >= self.config.consecutive_detection_threshold
                 ):
                     # Compute robust median position across the consecutive sample window
-                    pick_window = np.array(self._pick_poses_buffer[-self.config.consecutive_detection_threshold:])
-                    place_window = np.array(self._place_poses_buffer[-self.config.consecutive_detection_threshold:])
+                    pick_window = np.array(list(self._pick_poses_buffer))
+                    place_window = np.array(list(self._place_poses_buffer))
                     pick_median = np.median(pick_window, axis=0)
                     place_median = np.median(place_window, axis=0)
 

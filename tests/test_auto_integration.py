@@ -38,9 +38,10 @@ def test_full_synthetic_auto_pick_and_place_e2e():
         assert initial_cube_pos[2] < 0.05, f"Initial cube height {initial_cube_pos[2]} should be resting on table surface"
 
         # Step app in a bounded real-time control loop
-        max_test_iterations = 600
+        max_test_iterations = 1000
         reached_lift_with_cube = False
         reached_place_release = False
+        reached_search_after_home = False
         fsm_states_visited = set()
 
         for iteration in range(max_test_iterations):
@@ -59,27 +60,46 @@ def test_full_synthetic_auto_pick_and_place_e2e():
 
             if current_state == RobotState.RETURN_HOME and not app.simulator.gripper.is_grasping:
                 reached_place_release = True
+
+            if reached_place_release and current_state == RobotState.SEARCH:
+                reached_search_after_home = True
                 break
 
             # If error reached, fail test immediately
             assert current_state != RobotState.ERROR, f"FSM entered ERROR state at iteration {iteration}"
 
-        # Assert full sequence completion
+        # Assert full sequence completion through SEARCH
         assert RobotState.APPROACH in fsm_states_visited, "Did not visit APPROACH state"
         assert RobotState.PICK in fsm_states_visited, "Did not visit PICK state"
         assert RobotState.LIFT in fsm_states_visited, "Did not visit LIFT state"
         assert RobotState.MOVE_TO_PLACE in fsm_states_visited, "Did not visit MOVE_TO_PLACE state"
         assert RobotState.PLACE in fsm_states_visited, "Did not visit PLACE state"
+        assert RobotState.RETURN_HOME in fsm_states_visited, "Did not visit RETURN_HOME state"
 
         assert reached_lift_with_cube, "Cube was not successfully attached and lifted into the air"
         assert reached_place_release, "Cube was not successfully placed and released"
+        assert reached_search_after_home, "FSM did not transition back to SEARCH after completing RETURN_HOME"
+        assert not app.simulator.gripper.is_grasping, "Gripper must not be grasping after cycle completion"
 
-        # Check final cube position is near place target pad
+        # Check final cube position is resting near place target pad
         final_cube_pos, _ = p.getBasePositionAndOrientation(app.simulator.pick_cube_id, physicsClientId=app.simulator.client_id)
         place_pad_pos, _ = p.getBasePositionAndOrientation(app.simulator.place_cube_id, physicsClientId=app.simulator.client_id)
 
         xy_dist = np.linalg.norm(np.array(final_cube_pos[:2]) - np.array(place_pad_pos[:2]))
         assert xy_dist < 0.08, f"Final cube placement position ({final_cube_pos[:2]}) is too far from place pad ({place_pad_pos[:2]}) (distance: {xy_dist*100:.1f} cm)"
+        assert -0.05 < final_cube_pos[2] < 0.06, f"Final cube height {final_cube_pos[2]} is not near support surface"
+
+        # Check robot EE reached home position within tolerance
+        ee_pos, _ = app.simulator.controller.get_end_effector_pose()
+        home_pos = np.array([
+            app.config.workspace.robot_center_x,
+            app.config.workspace.robot_center_y,
+            app.config.workspace.robot_center_z,
+        ])
+        ee_home_dist = float(np.linalg.norm(ee_pos - home_pos))
+        assert ee_home_dist < app.config.state_machine.waypoint_tolerance_m, (
+            f"Robot EE position ({ee_pos}) did not return within tolerance ({app.config.state_machine.waypoint_tolerance_m} m) of home ({home_pos}), distance: {ee_home_dist:.4f} m"
+        )
 
     finally:
         app.cleanup()

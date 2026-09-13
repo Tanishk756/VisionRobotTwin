@@ -199,13 +199,18 @@ pytest -v
 
 ### Test Suite Overview:
 - `test_transforms.py`: Orthogonality of $SO(3)$, Euler/Quaternion roundtrips, $SE(3)$ analytical matrix inversion, composition.
-- `test_filters.py`: Exponential moving average convergence, noise reduction, 1-Euro adaptive cutoff, quaternion SLERP.
+- `test_filters.py`: Exponential moving average, noise reduction, 1-Euro adaptive cutoff, quaternion SLERP.
 - `test_workspace.py`: Workspace boundary clamping, SE(3) vs relative modes, time-based slew limiting, NaN/Inf protection.
 - `test_state_machine.py`: Perception gating (consecutive detections), lost-tracking recovery, waypoint timeouts, grasp rejection.
 - `test_gripper_physics.py`: Distance-gated constraint attachment ($< 5.5\text{ cm}$ threshold) and clean release.
 - `test_camera.py`: Explicit synthetic mode and physical camera failure handling.
 - `test_headless_integration.py`: Bounded headless runtime pipeline validation.
-- `test_ik_and_robot.py`: Damped Least-Squares IK convergence, unreachable target rejection, and joint controller stepping.
+- `test_ik_and_robot.py`: PyBullet IK solution generation, joint limit rejection, and dynamic end-effector tracking against test tolerance.
+- `test_simulation_clock.py`: Multi-substep accumulator, fixed 1/240 s physics scheduling, and remainder preservation.
+- `test_logger.py`: Hierarchical logging namespace under `VisionRobotTwin.*`, file handler formatting, dynamic loglevel reconfiguration.
+- `test_pause_and_context.py`: True joint-freeze pause/HOLD, relative orientation reference reset on operator context change, bounded perception buffers.
+- `test_benchmark_pipeline.py`: Benchmark runner execution on shared frame processing pipeline.
+- `test_auto_integration.py`: Full closed-loop perception-gated pick-and-place through SEARCH state completion.
 
 ---
 
@@ -213,11 +218,11 @@ pytest -v
 
 | Metric / Parameter | Status | Value / Measurement |
 | :--- | :---: | :--- |
-| **Automated Tests** | **PASS** | **27 / 27 passing** |
-| **Physics Simulation Rate** | **PASS** | **240 Hz (PyBullet standard timestep)** |
-| **Synthetic Pipeline Tracking** | **PASS** | **Verified in simulation** |
-| **Physical Webcam Benchmarks** | *NOT YET MEASURED* | Hardware dependent (Run `tools/benchmark_live.py`) |
-| **Physical Camera Calibration** | *OPTIONAL / PENDING* | Pinhole fallback active until `calibrate_camera.py` run |
+| **Automated Tests** | **PASS** | **47 / 47 passing (47 automated unit/integration tests at v1.1)** |
+| **Physics Scheduling** | **PASS** | **Fixed timestep: 1/240 s (240 Hz target scheduled via accumulator)** |
+| **Synthetic Pipeline Tracking** | **PASS** | **Verified in PyBullet closed-loop simulation** |
+| **Physical Webcam Benchmarks** | *NOT TESTED* | Hardware dependent (Run `tools/benchmark_live.py`) |
+| **Physical Camera Calibration** | *NOT TESTED* | Default pinhole fallback active until `calibrate_camera.py` run |
 
 *See [VALIDATION.md](VALIDATION.md) for full subsystem audit details.*
 
@@ -242,7 +247,7 @@ VisionRobotTwin/
 ├── .gitignore                  # Git ignore rules
 │
 ├── .github/workflows/          # GitHub Actions CI Workflows
-│   └── tests.yml               # Automated multi-Python test runner
+│   └── tests.yml               # Automated multi-Python test runner (Windows Python 3.11/3.12)
 │
 ├── config/                     # Centralized Strongly-Typed Settings
 │   ├── __init__.py
@@ -258,23 +263,24 @@ VisionRobotTwin/
 ├── robotics/                   # Robotics Kinematics, Control, & Simulation
 │   ├── __init__.py
 │   ├── coordinate_transform.py # SE(3) Lie group homogeneous matrices & conversions
-│   ├── workspace_mapper.py     # Cartesian mapping, boundary clamping, time-based slew limiter
-│   ├── inverse_kinematics.py   # PyBullet Damped Least-Squares IK solver
+│   ├── workspace_mapper.py     # Cartesian mapping, boundary clamping, relative orientation reference
+│   ├── inverse_kinematics.py   # PyBullet Damped Least-Squares IK solver & limit rejection
 │   ├── robot_controller.py     # Franka Panda URDF inspector & joint controller
 │   ├── simulator.py            # PyBullet physics manager, targets & trajectory lines
 │   ├── gripper.py              # Distance-gated virtual gripper & constraint manager
-│   └── state_machine.py        # Perception-gated Finite State Machine
+│   └── state_machine.py        # Perception-gated Finite State Machine & bounded buffers
 │
 ├── utils/                      # Utilities & Monitoring
 │   ├── __init__.py
+│   ├── simulation_clock.py     # Fixed-step accumulator physics scheduler
 │   ├── filters.py              # EMA filter, 1 Euro adaptive filter, Quaternion SLERP
 │   ├── telemetry.py            # Live OpenCV HUD overlay renderer
-│   ├── logger.py               # Structured application logger
+│   ├── logger.py               # Hierarchical structured application logger
 │   └── fps_counter.py          # Real-time sliding window FPS counter
 │
 ├── tools/                      # Standalone CLI Utilities
 │   ├── generate_aruco_markers.py # Printable marker and card generator
-│   ├── calibrate_camera.py     # Interactive chessboard calibration tool
+│   ├── calibrate_camera.py     # Interactive chessboard calibration tool (RMS error px)
 │   ├── benchmark_live.py       # Physical & synthetic benchmark tool
 │   └── generate_demo_gif.py    # Automated demo GIF recorder
 │
@@ -282,7 +288,21 @@ VisionRobotTwin/
 ├── calibration/                # Camera Calibration Storage (.npz)
 ├── screenshots/                # Captured HUD and simulation snapshots
 ├── demo/                       # 15-second animated demonstration GIF
-└── tests/                      # Comprehensive Unit & Integration Test Suite
+└── tests/                      # Comprehensive Unit & Integration Test Suite (47 tests)
+    ├── test_auto_integration.py
+    ├── test_benchmark_pipeline.py
+    ├── test_camera.py
+    ├── test_filters.py
+    ├── test_gripper_physics.py
+    ├── test_headless_integration.py
+    ├── test_ik_and_robot.py
+    ├── test_logger.py
+    ├── test_pause_and_context.py
+    ├── test_pose_utils.py
+    ├── test_simulation_clock.py
+    ├── test_state_machine.py
+    ├── test_transforms.py
+    └── test_workspace.py
 ```
 
 ---

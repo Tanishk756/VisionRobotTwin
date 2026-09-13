@@ -331,6 +331,14 @@ class VisionRobotTwinApp:
                 ik_status = ik_res.status_message
                 if ik_res.success:
                     self.simulator.controller.set_arm_joint_positions(ik_res.joint_positions)
+        else:
+            # Active PAUSE/HOLD: maintain frozen joint target
+            if self._paused_joint_positions is not None:
+                self.simulator.controller.set_arm_joint_positions(self._paused_joint_positions)
+            ik_status = "HOLD (PAUSED)"
+            ee_frozen_pos, _ = self.simulator.controller.get_end_effector_pose()
+            commanded_cartesian_target = ee_frozen_pos
+            commanded_orientation_target = self._last_commanded_target_orn.copy()
 
         # --- PHASE 6: SIMULATION PHYSICS STEPPING ---
         substeps = self.simulator.step(wall_dt=effective_dt)
@@ -458,17 +466,27 @@ class VisionRobotTwinApp:
 
         elif char == "h":  # Home
             self.logger.info("Homing robot manipulator.")
+            self.pose_filter.reset()
+            self.workspace_mapper.reset()
             self.simulator.controller.reset_to_home()
             self.state_machine.transition_to(RobotState.HOME, "User pressed Home")
 
         elif key == ord(" "):  # Space: Hold / Resume
             self._is_paused = not self._is_paused
+            if self._is_paused:
+                self._paused_joint_positions = self.simulator.controller.get_current_joint_positions()
+            else:
+                self._paused_joint_positions = None
             self.logger.info(f"{'Paused (HOLD)' if self._is_paused else 'Resumed tracking'}.")
 
         elif char == "m":  # Manual Mode
+            self.pose_filter.reset()
+            self.workspace_mapper.reset()
             self.state_machine.set_mode("MANUAL")
 
         elif char == "a":  # Auto Mode
+            self.pose_filter.reset()
+            self.workspace_mapper.reset()
             self.state_machine.set_mode("AUTO")
 
         elif char == "r":  # Reset

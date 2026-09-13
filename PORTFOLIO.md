@@ -54,7 +54,7 @@
   > *Developed a real-time vision-guided robotic manipulation digital twin integrating OpenCV-based ArUco 6-DoF pose estimation with a PyBullet Franka Panda manipulator; implemented SE(3) coordinate-frame transformations, inverse kinematics, adaptive 1 Euro pose filtering, workspace constraints, trajectory visualization, tracking-loss recovery, and perception-gated autonomous pick-and-place state control.*
 
 - **Computer Vision / Controls Engineer Bullet**:
-  > *Engineered an end-to-end perception-to-control pipeline in Python/PyBullet; implemented PnP 6-DoF pose estimation, camera intrinsic calibration, Damped Least-Squares IK, and quaternion SLERP smoothing, verified via 27 automated unit/integration tests and CI workflows.*
+  > *Engineered an end-to-end perception-to-control pipeline in Python/PyBullet; implemented PnP 6-DoF pose estimation, camera intrinsic calibration, Damped Least-Squares IK, and quaternion SLERP smoothing, verified via 47 automated unit/integration tests at v1.1 and CI workflows.*
 
 ---
 
@@ -69,7 +69,7 @@ I built a real-time, closed-loop vision-guided robotic manipulator digital twin 
 - **Kinematics & Control**: Homogeneous $SE(3)$ transformations, Damped Least-Squares Inverse Kinematics, and joint position control.
 - **Signal Filtering & Safety**: Adaptive 1 Euro filtering, quaternion SLERP smoothing, time-based slew-rate velocity limiting, and workspace boundary clamping.
 - **Autonomy**: Perception-gated Finite State Machine (FSM) executing multi-waypoint pick-and-place manipulation with physical distance-validated grasping.
-- **Testing & CI**: 27 unit & integration tests running automatically via GitHub Actions on Windows.
+- **Testing & CI**: 47 unit & integration tests running automatically via GitHub Actions on Windows.
 
 💻 **Check out the code & documentation on GitHub**: https://github.com/Tanishk756/VisionRobotTwin
 
@@ -79,7 +79,7 @@ I built a real-time, closed-loop vision-guided robotic manipulator digital twin 
 
 ## 7. GitHub Publishing Checklist
 
-- [x] All 27 automated pytest tests passing (`pytest -v`)
+- [x] All 47 automated pytest tests passing (`pytest -v`)
 - [x] Marker generator and printable assets generated (`tools/generate_aruco_markers.py`)
 - [x] Unmistakable synthetic stream indicators and explicit camera failure modes
 - [x] Physical distance-gated virtual grasping and perception-gated autonomous sequencing

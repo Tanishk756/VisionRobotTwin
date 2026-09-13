@@ -16,9 +16,10 @@ import numpy as np
 # Ensure project root is in sys.path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from config.settings import ArUcoConfig
-from utils.logger import setup_logger
+from utils.logger import setup_logger, get_logger
 
-logger = setup_logger("Tools.GenerateMarkers")
+setup_logger()
+logger = get_logger("Tools.GenerateMarkers")
 
 
 def generate_single_marker(

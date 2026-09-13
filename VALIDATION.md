@@ -33,9 +33,9 @@ This document provides a strict, evidence-grounded validation report for all per
 +-------------------------------------------------------------------------------+
 | PARAMETER                            | STATUS / VALUE                         |
 +-------------------------------------------------------------------------------+
-| Automated Unit & Integration Tests   | PASSING (Local pytest suite)           |
+| Automated Unit & Integration Tests   | PASSING (47 / 47 tests passing at v1.1)|
 | Continuous Integration (CI)          | PR Workflow Configured (Windows 3.11/12)|
-| Physics Simulation Clock Rate        | 240 Hz Target (Multi-substep scheduled)|
+| Physics Simulation Clock Rate        | 240 Hz Target (Fixed 1/240s timestep)  |
 | Dynamic Tracking Acceptance Criterion| Error < 45 mm (Dynamic Test Threshold) |
 | Physical Webcam Frame Rate           | NOT YET MEASURED (Hardware dependent)  |
 | Static Marker Tracking Jitter        | NOT YET MEASURED (Physical camera req) |

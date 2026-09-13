@@ -42,3 +42,20 @@ def test_logger_child_message_logged_to_file(tmp_path: Path):
     content = log_file.read_text(encoding="utf-8")
     assert test_msg in content
     assert "VisionRobotTwin.Robotics.IK" in content
+
+
+def test_logger_reconfig_updates_debug_level():
+    """Verify calling setup_logger(debug=True) updates root and handler levels to DEBUG."""
+    # 1. Initialize INFO
+    logger = setup_logger(name="VisionRobotTwin", debug=False)
+    assert logger.level == logging.INFO
+
+    # 2. Re-configure with debug=True
+    logger = setup_logger(name="VisionRobotTwin", debug=True)
+    assert logger.level == logging.DEBUG
+    for h in logger.handlers:
+        if isinstance(h, logging.StreamHandler) and not isinstance(h, logging.FileHandler):
+            assert h.level == logging.DEBUG
+
+    child = get_logger("Robotics.Test")
+    assert child.isEnabledFor(logging.DEBUG)

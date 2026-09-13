@@ -48,7 +48,12 @@ def setup_logger(
     )
 
     # Ensure handlers
-    has_console = any(isinstance(h, logging.StreamHandler) and not isinstance(h, logging.FileHandler) for h in logger.handlers)
+    has_console = False
+    for h in logger.handlers:
+        if isinstance(h, logging.StreamHandler) and not isinstance(h, logging.FileHandler):
+            has_console = True
+            h.setLevel(level)
+
     if not has_console:
         console_handler = logging.StreamHandler(sys.stdout)
         console_handler.setLevel(level)
