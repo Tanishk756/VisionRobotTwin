@@ -1,0 +1,3 @@
+"""VisionRobotTwin package version information."""
+
+__version__ = "1.1.0"

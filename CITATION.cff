@@ -1,0 +1,12 @@
+cff-version: 1.2.0
+message: "If you use VisionRobotTwin in academic work, research, demonstrations, or derivative projects, please cite this repository."
+title: "VisionRobotTwin"
+version: 1.1.0
+date-released: 2026-09-13
+url: "https://github.com/Tanishk756/VisionRobotTwin"
+repository-code: "https://github.com/Tanishk756/VisionRobotTwin"
+license: "MIT"
+authors:
+  - family-names: "Singhal"
+    given-names: "Tanishk"
+    email: "tanisksinghal6285@gmail.com"

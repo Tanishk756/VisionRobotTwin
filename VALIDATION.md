@@ -20,7 +20,7 @@ This document provides a strict, evidence-grounded validation report for all per
 | **Simulation Physics Scheduling** | Automated pytest (`test_simulation_clock.py`)| **`PASS`** | Multi-substep accumulator advances 1/240s physics steps between perception frames without real-time slowdown. |
 | **Autonomous Pick-and-Place E2E**| Automated pytest (`test_auto_integration.py`)| **`PASS (Synthetic)`**| True perception $\to$ gating $\to$ waypoint $\to$ PyBullet physical constraint $\to$ transport $\to$ place $\to$ home. |
 | **PyBullet Headless Digital Twin** | Automated test (`test_headless_integration.py`)| **`PASS`** | 120-step bounded headless pipeline runs without desktop GUI or display dependencies. |
-| **Physical Webcam Live Capture** | Live Hardware Detection | **`NOT TESTED`** | Automated environment lacks physical USB camera. Requires physical operator webcam test via `python main.py`. |
+| **Physical Webcam Live Capture** | Live Hardware Detection | **`USER-CONFIRMED / PASS`** | Physical operator webcam smoke test completed on Marker 0 teleoperation. |
 | **Physical Camera Intrinsics** | Chessboard Calibration Tool | **`NOT TESTED`** | Uncalibrated fallback uses horizontal FOV pinhole model. Run `python tools/calibrate_camera.py` for physical metrics. |
 | **Physical Marker Pose Stability** | Stationary Marker Benchmark | **`NOT TESTED`** | Synthetic benchmark tool verified (`tools/benchmark_live.py`). Physical jitter pending live webcam session. |
 | **Manual 6-DoF Teleoperation** | End-to-End Simulation Stream | **`PASS (Synthetic)`** | Verified in PyBullet digital twin with simulated video stream and trajectory line tracking. |
@@ -33,11 +33,11 @@ This document provides a strict, evidence-grounded validation report for all per
 +-------------------------------------------------------------------------------+
 | PARAMETER                            | STATUS / VALUE                         |
 +-------------------------------------------------------------------------------+
-| Automated Unit & Integration Tests   | PASSING (47 / 47 tests passing at v1.1)|
+| Automated Unit & Integration Tests   | PASSING (49 / 49 tests passing at v1.1)|
 | Continuous Integration (CI)          | PR Workflow Configured (Windows 3.11/12)|
 | Physics Simulation Clock Rate        | 240 Hz Target (Fixed 1/240s timestep)  |
 | Dynamic Tracking Acceptance Criterion| Error < 45 mm (Dynamic Test Threshold) |
-| Physical Webcam Frame Rate           | NOT YET MEASURED (Hardware dependent)  |
+| Basic Physical Webcam Smoke Test     | USER-CONFIRMED / PASS (Marker 0 tracking)|
 | Static Marker Tracking Jitter        | NOT YET MEASURED (Physical camera req) |
 | Physical Tracking Recovery Latency   | NOT YET MEASURED                       |
 | Camera Intrinsic Calibration Status  | DEFAULT PINHOLE (Metric calib pending) |
