@@ -2,7 +2,9 @@ name: CI Testing & Validation
 
 on:
   push:
-    branches: [ main ]
+    branches:
+      - main
+      - "develop/**"
   pull_request:
     branches: [ main ]
 
@@ -42,6 +44,14 @@ jobs:
         run: |
           pytest -v
 
-      - name: Run Bounded Headless Synthetic Integration Test
+      - name: Run Bounded Headless Synthetic Smoke (Panda IK)
         run: |
-          python main.py --synthetic --headless --max-frames 120
+          python main.py --robot panda --synthetic --headless --max-frames 60
+
+      - name: Run Bounded Headless Synthetic Smoke (KUKA iiwa IK)
+        run: |
+          python main.py --robot kuka_iiwa --synthetic --headless --max-frames 60
+
+      - name: Run Bounded Headless Synthetic Smoke (Panda Resolved-Rate)
+        run: |
+          python main.py --robot panda --controller resolved-rate --synthetic --headless --max-frames 60
