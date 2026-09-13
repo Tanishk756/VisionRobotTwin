@@ -1,0 +1,47 @@
+name: CI Testing & Validation
+
+on:
+  push:
+    branches: [ main, v1.1-engineering-hardening ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  test:
+    name: Test on Windows (Python ${{ matrix.python-version }})
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12"]
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: "pip"
+
+      - name: Upgrade pip and Install Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements-dev.txt
+
+      - name: Bytecode Compilation Check
+        run: |
+          python -m compileall .
+
+      - name: Generate ArUco Marker Assets
+        run: |
+          python tools/generate_aruco_markers.py
+
+      - name: Run Test Suite (pytest)
+        run: |
+          pytest -v
+
+      - name: Run Bounded Headless Synthetic Integration Test
+        run: |
+          python main.py --synthetic --headless --max-frames 120

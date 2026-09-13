@@ -13,6 +13,8 @@ from robotics.coordinate_transform import (
     rotation_matrix_to_euler,
     quaternion_to_rotation_matrix,
     rotation_matrix_to_quaternion,
+    multiply_quaternions,
+    compute_angular_distance,
     is_valid_se3,
 )
 
@@ -49,6 +51,18 @@ def test_euler_and_quaternion_roundtrip():
     assert np.allclose(R, R_from_q, atol=1e-6)
 
 
+def test_quaternion_multiplication_and_angular_distance():
+    """Verify Hamilton product and geodesic distance calculation."""
+    q_ident = np.array([0.0, 0.0, 0.0, 1.0])
+    q_rot_z90 = np.array([0.0, 0.0, math.sin(math.pi / 4), math.cos(math.pi / 4)])
+
+    q_mult = multiply_quaternions(q_ident, q_rot_z90)
+    assert np.allclose(q_mult, q_rot_z90, atol=1e-6)
+
+    dist = compute_angular_distance(q_ident, q_rot_z90)
+    assert np.isclose(dist, math.pi / 2, atol=1e-5)
+
+
 def test_se3_inverse():
     """Verify analytical homogeneous transform inversion: T @ T^-1 == I."""
     t = [0.5, -0.3, 0.7]
@@ -79,14 +93,10 @@ def test_se3_composition_and_associativity():
 
 def test_point_transformation():
     """Verify transforming a 3D point from marker frame to robot base frame."""
-    # Robot to camera: placed at [0.7, 0, 0.4] looking down
     T_base_cam = SE3Transform.from_rpy(0.7, 0.0, 0.4, math.pi, 0.0, 0.0)
-    # Camera to marker: marker is 0.4m in front of camera
     T_cam_marker = SE3Transform.from_rpy(0.0, 0.0, 0.4, 0.0, 0.0, 0.0)
 
-    # Combined transform
     T_base_marker = T_base_cam @ T_cam_marker
     marker_origin_in_base = T_base_marker.transform_point([0, 0, 0])
 
-    # Point [0, 0, 0] transformed should match translation
     assert np.allclose(marker_origin_in_base, T_base_marker.translation, atol=1e-6)

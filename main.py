@@ -39,8 +39,13 @@ def parse_arguments() -> argparse.Namespace:
     parser.add_argument("--width", type=int, default=1280, help="Camera width resolution")
     parser.add_argument("--height", type=int, default=720, help="Camera height resolution")
     parser.add_argument("--mode", type=str, choices=["manual", "auto"], default="manual", help="Initial operational mode")
-    parser.add_argument("--synthetic", action="store_true", help="Force synthetic simulated video stream")
-    parser.add_argument("--headless", action="store_true", help="Run PyBullet without GUI window")
+    parser.add_argument("--control-mode", type=str, choices=["6dof", "3dof"], default="6dof", help="Control mode: 6-DoF (pos+orn) or 3-DoF (pos only)")
+    parser.add_argument("--transform-mode", type=str, choices=["relative", "se3"], default="relative", help="Transform pipeline mode")
+    parser.add_argument("--synthetic", action="store_true", help="Explicitly force synthetic simulated video stream")
+    parser.add_argument("--allow-synthetic-fallback", action="store_true", help="Allow fallback to synthetic stream if physical webcam is missing")
+    parser.add_argument("--auto-demo", action="store_true", help="Enable offline demo coordinates in auto mode without waiting for markers")
+    parser.add_argument("--headless", action="store_true", help="Run PyBullet and perception without GUI window")
+    parser.add_argument("--max-frames", type=int, default=0, help="Maximum frames to run before clean exit (0 = continuous)")
     parser.add_argument("--debug", action="store_true", help="Enable verbose debug logging")
     parser.add_argument("--record-data", action="store_true", help="Record trajectory session data to CSV")
     return parser.parse_args()
@@ -51,12 +56,14 @@ class VisionRobotTwinApp:
 
     def __init__(self, config: AppConfig, headless_sim: bool = False, record_data: bool = False):
         self.config = config
+        self.headless = headless_sim or not config.simulation.gui
         self.logger = get_logger("VisionRobotTwin")
 
         self.logger.info("=" * 70)
-        self.logger.info(" INITIALIZING VISION-ROBOT DIGITAL TWIN")
+        self.logger.info(" INITIALIZING VISION-ROBOT DIGITAL TWIN (v1.1)")
         self.logger.info(f" Python Version: {sys.version.split()[0]} | OpenCV Version: {cv2.__version__}")
-        self.logger.info(f" Mode: {config.mode.upper()} | Camera Index: {config.camera.camera_index}")
+        self.logger.info(f" Mode: {config.mode.upper()} | Control Mode: {config.control_mode.upper()} | Transform: {config.transform.transform_mode.upper()}")
+        self.logger.info(f" Camera: {'SYNTHETIC' if config.camera.synthetic_mode else f'Index {config.camera.camera_index}'}")
         self.logger.info("=" * 70)
 
         # 1. Perception & Calibration
@@ -78,10 +85,10 @@ class VisionRobotTwinApp:
             one_euro_min_cutoff=self.config.filter.one_euro_min_cutoff,
             one_euro_beta=self.config.filter.one_euro_beta,
         )
-        self.workspace_mapper = WorkspaceMapper(self.config.workspace)
+        self.workspace_mapper = WorkspaceMapper(self.config.workspace, self.config.transform)
 
         # 3. Robotics & PyBullet Digital Twin
-        self.simulator = PyBulletSimulator(self.config, headless=headless_sim)
+        self.simulator = PyBulletSimulator(self.config, headless=self.headless)
         self.state_machine = RoboticStateMachine(self.config.state_machine, self.config.workspace)
         self.state_machine.set_mode(self.config.mode)
 
@@ -99,6 +106,7 @@ class VisionRobotTwinApp:
 
         self._is_running = True
         self._is_paused = False
+        self._frames_processed = 0
 
     def _init_csv_recorder(self) -> None:
         """Initializes trajectory data logger."""
@@ -125,6 +133,12 @@ class VisionRobotTwinApp:
         try:
             while self._is_running:
                 loop_start = time.perf_counter()
+                self._frames_processed += 1
+
+                # Check max frames bound
+                if self.config.max_frames > 0 and self._frames_processed > self.config.max_frames:
+                    self.logger.info(f"Reached max frames limit ({self.config.max_frames}). Exiting cleanly.")
+                    break
 
                 # --- PHASE 1: CAMERA PERCEPTION ---
                 active_id = self.config.aruco.target_marker_id if self.state_machine.mode == "MANUAL" else (
@@ -169,30 +183,37 @@ class VisionRobotTwinApp:
                 filt_pos_cam = None
                 marker_dist = None
                 target_robot_pos = None
+                target_robot_orn = None
                 was_clamped = False
 
                 if target_pose is not None:
                     raw_pos_cam = (target_pose.x, target_pose.y, target_pose.z)
                     marker_dist = target_pose.distance_m
 
-                    # Filter 6-DoF Pose
-                    filt_pos, _ = self.pose_filter.update(
+                    # Filter 6-DoF Pose (Position + SLERP Orientation)
+                    filt_pos, filt_quat = self.pose_filter.update(
                         np.array(raw_pos_cam),
                         target_pose.quaternion_xyzw,
                         timestamp=loop_start,
                     )
                     filt_pos_cam = (float(filt_pos[0]), float(filt_pos[1]), float(filt_pos[2]))
 
-                    # Map to Robot Base Cartesian Space
-                    mapped_target = self.workspace_mapper.map_camera_to_robot(filt_pos)
+                    # Map to Robot Base Coordinate Frame
+                    mapped_target = self.workspace_mapper.map_camera_to_robot(
+                        filt_pos,
+                        filt_quat if self.config.control_mode == "6dof" else None,
+                        timestamp=loop_start,
+                    )
                     if mapped_target.is_valid:
                         target_robot_pos = mapped_target.position
+                        target_robot_orn = mapped_target.orientation
                         was_clamped = mapped_target.is_clamped
                 else:
                     self.pose_filter.reset()
 
                 # --- PHASE 3: STATE MACHINE & ROBOT CONTROL ---
                 commanded_cartesian_target = None
+                commanded_orientation_target = None
                 ik_status = "IDLE"
 
                 if not self._is_paused:
@@ -202,10 +223,11 @@ class VisionRobotTwinApp:
                             target_pos_robot=target_robot_pos,
                         )
                         commanded_cartesian_target = cmd_target
+                        commanded_orientation_target = target_robot_orn if is_tracking else self.config.robot.default_ee_orientation
                     else:  # AUTO MODE
                         current_ee_pos, _ = self.simulator.controller.get_end_effector_pose()
-                        
-                        # Map pick and place markers if visually detected
+
+                        # Map pick and place markers if observed by vision
                         p_pick_robot = None
                         if pick_pose is not None:
                             mapped_pick = self.workspace_mapper.map_camera_to_robot(
@@ -230,21 +252,26 @@ class VisionRobotTwinApp:
                             marker_2_pos=p_place_robot,
                             gripper_attach_fn=lambda: self.simulator.gripper.attach_object(self.simulator.pick_cube_id),
                             gripper_detach_fn=lambda: self.simulator.gripper.detach_object(),
+                            on_targets_stabilized_fn=lambda p_pick, p_place: (
+                                self.simulator.set_pick_object_position(p_pick),
+                                self.simulator.set_place_target_position(p_place),
+                            ),
                         )
                         commanded_cartesian_target = cmd_target
+                        commanded_orientation_target = self.config.robot.default_ee_orientation
 
                     # --- PHASE 4: INVERSE KINEMATICS & MOTOR COMMAND ---
                     if commanded_cartesian_target is not None:
-                        # Update visual target sphere in PyBullet
                         self.simulator.set_target_visual_position(commanded_cartesian_target)
 
-                        # Solve IK
-                        ik_res = self.simulator.ik_solver.solve(commanded_cartesian_target)
+                        # Solve IK with target position and target orientation
+                        ik_res = self.simulator.ik_solver.solve(
+                            target_position=commanded_cartesian_target,
+                            target_orientation=commanded_orientation_target,
+                        )
+                        ik_status = ik_res.status_message
                         if ik_res.success:
-                            ik_status = "OK"
                             self.simulator.controller.set_arm_joint_positions(ik_res.joint_positions)
-                        else:
-                            ik_status = "REJECTED"
 
                 # Step simulation physics
                 self.simulator.step()
@@ -271,7 +298,7 @@ class VisionRobotTwinApp:
                         f"{fps:.1f}",
                     ])
 
-                # --- PHASE 6: RENDER TELEMETRY HUD & DISPLAY ---
+                # --- PHASE 6: RENDER TELEMETRY HUD & GUI DISPLAY ---
                 telem_data = TelemetryData(
                     mode=self.state_machine.mode,
                     state=self.state_machine.state_name if not self._is_paused else "PAUSED",
@@ -293,12 +320,13 @@ class VisionRobotTwinApp:
                 )
 
                 self.telemetry_overlay.render(display_frame, telem_data)
-                cv2.imshow("VisionRobotTwin - Perception HUD", display_frame)
 
-                # --- PHASE 7: KEYBOARD CONTROLS ---
-                key = cv2.waitKey(1) & 0xFF
-                if key != 255:
-                    self._handle_keypress(key, display_frame)
+                # Only show GUI window if not headless
+                if not self.headless:
+                    cv2.imshow("VisionRobotTwin - Perception HUD", display_frame)
+                    key = cv2.waitKey(1) & 0xFF
+                    if key != 255:
+                        self._handle_keypress(key, display_frame)
 
         except KeyboardInterrupt:
             self.logger.info("Keyboard interrupt received.")
@@ -334,7 +362,7 @@ class VisionRobotTwinApp:
             self.simulator.gripper.detach_object()
             self.pose_filter.reset()
             self.workspace_mapper.reset()
-            self.state_machine.transition_to(RobotState.SEARCH, "User reset")
+            self.state_machine.reset()
 
         elif char == "t":  # Toggle Trajectory
             enabled = self.simulator.toggle_trajectory()
@@ -359,13 +387,11 @@ class VisionRobotTwinApp:
         self.config.screenshots_dir.mkdir(parents=True, exist_ok=True)
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
 
-        # Save Camera HUD Frame
         if last_display_frame is not None:
             hud_path = self.config.screenshots_dir / f"hud_{timestamp}.png"
             cv2.imwrite(str(hud_path), last_display_frame)
             self.logger.info(f"Saved Camera HUD screenshot: {hud_path}")
 
-        # Capture PyBullet screenshot
         bullet_path = self.config.screenshots_dir / f"sim_{timestamp}.png"
         self.simulator.capture_screenshot(bullet_path)
         self.logger.info(f"Saved Simulation screenshot: {bullet_path}")
@@ -391,17 +417,22 @@ def main() -> int:
     """Application main entry point."""
     args = parse_arguments()
 
-    # Configure Logger
     logger = setup_logger(debug=args.debug)
 
-    # Build Configuration
     config = get_default_config()
     config.camera.camera_index = args.camera
     config.camera.width = args.width
     config.camera.height = args.height
     config.camera.synthetic_mode = args.synthetic
+    config.camera.allow_synthetic_fallback = args.allow_synthetic_fallback
+    config.state_machine.auto_demo = args.auto_demo
     config.mode = args.mode
+    config.control_mode = args.control_mode
+    config.transform.transform_mode = args.transform_mode
     config.debug = args.debug
+    config.max_frames = args.max_frames
+    if args.headless:
+        config.simulation.gui = False
 
     try:
         app = VisionRobotTwinApp(

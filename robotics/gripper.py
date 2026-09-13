@@ -1,10 +1,11 @@
-"""Virtual Gripper and Grasp Constraint Abstraction.
+"""Virtual Gripper and Physical Distance-Gated Grasp Constraint Manager.
 
-Manages both the visual prismatic finger joints of the Franka Panda hand
-and reliable dynamic physics constraints (p.createConstraint / p.removeConstraint)
-for robust virtual object pick-and-place manipulation.
+Manages finger joint kinematics and ensures dynamic rigid grasp constraints
+can ONLY attach when the end-effector tool center point is physically adjacent
+to the target manipulable object, eliminating remote/magical attachments.
 """
 
+from dataclasses import dataclass
 from typing import List, Optional
 import pybullet as p
 import numpy as np
@@ -14,8 +15,17 @@ from utils.logger import get_logger
 logger = get_logger("Robotics.Gripper")
 
 
+@dataclass
+class GraspResult:
+    """Structured output for grasp attempt validation."""
+    success: bool
+    distance_m: float
+    reason: str
+    constraint_id: Optional[int] = None
+
+
 class VirtualGripper:
-    """Controls gripper finger motion and attaches/releases physics grasp constraints."""
+    """Controls gripper finger motion and attaches distance-validated grasp constraints."""
 
     def __init__(
         self,
@@ -23,11 +33,13 @@ class VirtualGripper:
         robot_id: int,
         finger_joint_indices: List[int],
         ee_link_index: int,
+        max_grasp_distance_m: float = 0.055,
     ):
         self.client_id = physics_client_id
         self.robot_id = robot_id
         self.finger_indices = finger_joint_indices
         self.ee_link_index = ee_link_index
+        self.max_grasp_distance_m = max_grasp_distance_m
 
         self._active_constraint_id: Optional[int] = None
         self._grasped_body_id: Optional[int] = None
@@ -64,23 +76,49 @@ class VirtualGripper:
                 physicsClientId=self.client_id,
             )
 
-    def attach_object(self, object_body_id: int) -> bool:
-        """Creates a rigid kinematic constraint between the end-effector and target object."""
+    def attach_object(self, object_body_id: int) -> GraspResult:
+        """Attaches a rigid kinematic constraint only if physically within grasp threshold.
+
+        Args:
+            object_body_id: PyBullet body ID of the object to grasp.
+
+        Returns:
+            GraspResult with distance, success flag, and reason.
+        """
+        if object_body_id < 0:
+            return GraspResult(success=False, distance_m=float("inf"), reason="INVALID_OBJECT_ID")
+
         if self._active_constraint_id is not None:
             self.detach_object()
 
         try:
-            # Query relative transform between EE and object
+            # Query EE state and Object state
             ee_state = p.getLinkState(self.robot_id, self.ee_link_index, physicsClientId=self.client_id)
-            ee_pos = ee_state[0]
+            ee_pos = np.array(ee_state[0], dtype=np.float64)
             ee_orn = ee_state[1]
 
-            obj_pos, obj_orn = p.getBasePositionAndOrientation(object_body_id, physicsClientId=self.client_id)
+            obj_pos_raw, obj_orn = p.getBasePositionAndOrientation(object_body_id, physicsClientId=self.client_id)
+            obj_pos = np.array(obj_pos_raw, dtype=np.float64)
 
-            # Invert EE transform to get local offset
-            inv_ee_pos, inv_ee_orn = p.invertTransform(ee_pos, ee_orn)
+            # Compute actual Euclidean distance
+            distance = float(np.linalg.norm(ee_pos - obj_pos))
+
+            # Strictly enforce grasp distance threshold
+            if distance > self.max_grasp_distance_m:
+                logger.warning(
+                    f"Grasp rejected: End-effector distance to object ({distance:.4f}m) "
+                    f"exceeds maximum threshold ({self.max_grasp_distance_m:.4f}m)."
+                )
+                return GraspResult(
+                    success=False,
+                    distance_m=distance,
+                    reason=f"DISTANCE_EXCEEDED ({distance*100:.1f}cm > {self.max_grasp_distance_m*100:.1f}cm)",
+                )
+
+            # Compute local offset transform
+            inv_ee_pos, inv_ee_orn = p.invertTransform(list(ee_pos), ee_orn)
             parent_to_child_pos, parent_to_child_orn = p.multiplyTransforms(
-                inv_ee_pos, inv_ee_orn, obj_pos, obj_orn
+                inv_ee_pos, inv_ee_orn, list(obj_pos), obj_orn
             )
 
             constraint_id = p.createConstraint(
@@ -99,12 +137,17 @@ class VirtualGripper:
             self._active_constraint_id = constraint_id
             self._grasped_body_id = object_body_id
             self.close()
-            logger.info(f"Attached grasp constraint (ID: {constraint_id}) to body {object_body_id}.")
-            return True
+            logger.info(f"Grasp attached: constraint {constraint_id} on object {object_body_id} (dist: {distance*100:.2f}cm).")
+            return GraspResult(
+                success=True,
+                distance_m=distance,
+                reason="ATTACHED_SUCCESS",
+                constraint_id=constraint_id,
+            )
 
         except Exception as e:
-            logger.error(f"Failed to attach grasp constraint: {e}")
-            return False
+            logger.error(f"Grasp attachment failed with exception: {e}")
+            return GraspResult(success=False, distance_m=float("inf"), reason=f"EXCEPTION: {e}")
 
     def detach_object(self) -> None:
         """Removes active grasp constraint and releases the object."""

@@ -1,8 +1,8 @@
 """Camera capture abstraction and synthetic frame generator.
 
 Handles physical webcam capture with configurable parameters, backend selection,
-frame validation, and seamless fallback to synthetic ArUco marker animation
-when physical cameras are unavailable or when running automated CI/tests.
+frame validation, and explicit synthetic ArUco marker animation mode.
+Prevents silent masking of physical camera failures unless explicitly configured.
 """
 
 import time
@@ -53,24 +53,24 @@ class SyntheticFrameGenerator:
         for x in range(0, self.width, grid_size):
             cv2.line(frame, (x, 0), (x, self.height), (42, 42, 48), 1)
 
-        # Synthetic motion trajectory (smooth Lissajous or circular path)
+        # Synthetic motion trajectory (smooth 3D path)
         if state == "MANUAL":
-            center_x = self.width / 2.0 + 220.0 * math.sin(t * 0.8)
-            center_y = self.height / 2.0 + 120.0 * math.cos(t * 1.2)
-            scale = 1.0 + 0.25 * math.sin(t * 0.5)  # Simulates depth (Z) movement
-            angle = math.degrees(math.sin(t * 0.4) * 0.35)
+            center_x = self.width / 2.0 + 180.0 * math.sin(t * 0.8)
+            center_y = self.height / 2.0 + 100.0 * math.cos(t * 1.2)
+            scale = 1.0 + 0.20 * math.sin(t * 0.5)  # Simulates depth (Z) movement
+            angle = math.degrees(math.sin(t * 0.4) * 0.30)
             active_id = marker_id
         elif state in ("APPROACH", "PICK"):
-            # Move towards pick target (ID 1)
-            center_x = self.width / 2.0 - 180.0
-            center_y = self.height / 2.0 + 60.0
+            # Position at pick target (ID 1)
+            center_x = self.width / 2.0 - 160.0
+            center_y = self.height / 2.0 + 50.0
             scale = 1.1
             angle = 0.0
             active_id = 1
         elif state in ("MOVE_TO_PLACE", "PLACE"):
-            # Move towards place target (ID 2)
-            center_x = self.width / 2.0 + 180.0
-            center_y = self.height / 2.0 + 60.0
+            # Position at place target (ID 2)
+            center_x = self.width / 2.0 + 160.0
+            center_y = self.height / 2.0 + 50.0
             scale = 1.1
             angle = 0.0
             active_id = 2
@@ -116,14 +116,17 @@ class SyntheticFrameGenerator:
             )
             frame[y1:y2, x1:x2] = cv2.cvtColor(rotated_m, cv2.COLOR_GRAY2BGR)
 
-        # Synthetic mode banner
+        # Synthetic mode banner (Unmistakable watermark)
+        banner_text = "[SYNTHETIC INPUT STREAM - SIMULATION ONLY]"
+        cv2.rectangle(frame, (10, self.height - 35), (self.width - 10, self.height - 5), (0, 60, 180), -1)
+        cv2.rectangle(frame, (10, self.height - 35), (self.width - 10, self.height - 5), (0, 160, 255), 1)
         cv2.putText(
             frame,
-            "[SYNTHETIC CAMERA STREAM - LIVE SIMULATION]",
-            (self.width // 2 - 210, self.height - 55),
+            banner_text,
+            (self.width // 2 - 220, self.height - 15),
             cv2.FONT_HERSHEY_SIMPLEX,
-            0.50,
-            (100, 200, 255),
+            0.52,
+            (255, 255, 255),
             1,
             cv2.LINE_AA,
         )
@@ -131,7 +134,7 @@ class SyntheticFrameGenerator:
 
 
 class Camera:
-    """Robust camera interface with automatic physical capture and synthetic fallback."""
+    """Robust camera interface with strict separation between physical and synthetic operation."""
 
     def __init__(self, config: CameraConfig, aruco_config: Optional[ArUcoConfig] = None):
         self.config = config
@@ -144,16 +147,31 @@ class Camera:
             self._open_physical_camera()
 
         if self.cap is None or not self.cap.isOpened():
-            logger.warning(
-                f"Webcam at index {self.config.camera_index} is unavailable. "
-                "Switching automatically to Synthetic Frame Generator for real-time simulation."
-            )
-            self.is_synthetic = True
-            self._synthetic_gen = SyntheticFrameGenerator(
-                width=self.config.width,
-                height=self.config.height,
-                aruco_config=self.aruco_config,
-            )
+            if self.is_synthetic:
+                logger.info("Initialized explicit Synthetic Camera Stream.")
+                self._synthetic_gen = SyntheticFrameGenerator(
+                    width=self.config.width,
+                    height=self.config.height,
+                    aruco_config=self.aruco_config,
+                )
+            elif self.config.allow_synthetic_fallback:
+                logger.warning(
+                    f"Physical camera at index {self.config.camera_index} is unavailable. "
+                    "Fallback enabled: switching to Synthetic Frame Generator."
+                )
+                self.is_synthetic = True
+                self._synthetic_gen = SyntheticFrameGenerator(
+                    width=self.config.width,
+                    height=self.config.height,
+                    aruco_config=self.aruco_config,
+                )
+            else:
+                err_msg = (
+                    f"Physical camera could not be opened at index {self.config.camera_index}. "
+                    "To run in simulation without hardware, use the '--synthetic' flag or '--allow-synthetic-fallback'."
+                )
+                logger.error(err_msg)
+                raise RuntimeError(err_msg)
 
     def _open_physical_camera(self) -> None:
         """Attempts to open physical webcam device using DirectShow or MSMF backends."""
@@ -195,15 +213,16 @@ class Camera:
             if ret and frame is not None and frame.size > 0:
                 return True, frame
 
-            logger.warning("Frame capture failed from physical camera. Falling back to synthetic generator.")
-            self.is_synthetic = True
-            if self._synthetic_gen is None:
-                self._synthetic_gen = SyntheticFrameGenerator(
-                    width=self.config.width,
-                    height=self.config.height,
-                    aruco_config=self.aruco_config,
-                )
-            return True, self._synthetic_gen.get_frame(marker_id=active_marker_id, state=state)
+            if self.config.allow_synthetic_fallback:
+                logger.warning("Frame capture failed from physical camera. Falling back to synthetic generator.")
+                self.is_synthetic = True
+                if self._synthetic_gen is None:
+                    self._synthetic_gen = SyntheticFrameGenerator(
+                        width=self.config.width,
+                        height=self.config.height,
+                        aruco_config=self.aruco_config,
+                    )
+                return True, self._synthetic_gen.get_frame(marker_id=active_marker_id, state=state)
 
         return False, None
 

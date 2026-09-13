@@ -1,7 +1,8 @@
 """PyBullet Physics Simulator Environment for Franka Emika Panda.
 
-Encapsulates PyBullet connection lifecycle, scene asset loading, target visualization,
-workspace bounding box visualization, trailing trajectory rendering, and screenshot capture.
+Encapsulates PyBullet physics client lifecycle, URDF asset loading, visual targets,
+object position synchronization with perception, bounded trajectory debug line management,
+and screenshot capture.
 """
 
 from collections import deque
@@ -41,10 +42,10 @@ class PyBulletSimulator:
         self.ik_solver: Optional[PandaIKSolver] = None
         self.gripper: Optional[VirtualGripper] = None
 
-        # Trajectory visualization debug lines
+        # Trajectory visualization debug lines (Strictly bounded lifecycle)
         self.show_trajectory: bool = True
         self._trajectory_points: Deque[np.ndarray] = deque(maxlen=self.sim_config.trajectory_history_len)
-        self._trajectory_line_ids: Deque[int] = deque(maxlen=self.sim_config.trajectory_history_len)
+        self._trajectory_line_ids: Deque[int] = deque()
 
         self._initialize_pybullet()
         self._load_environment()
@@ -172,6 +173,7 @@ class PyBulletSimulator:
             robot_id=self.robot_id,
             finger_joint_indices=self.controller.finger_joint_indices,
             ee_link_index=self.controller.ee_link_index,
+            max_grasp_distance_m=self.config.state_machine.grasp_distance_threshold_m,
         )
 
     def _draw_workspace_bounds(self) -> None:
@@ -214,8 +216,30 @@ class PyBulletSimulator:
             physicsClientId=self.client_id,
         )
 
+    def set_pick_object_position(self, position: np.ndarray) -> None:
+        """Synchronizes pick cube position with vision target."""
+        pos = [float(position[0]), float(position[1]), max(0.02, float(position[2]))]
+        p.resetBasePositionAndOrientation(
+            self.pick_cube_id,
+            posObj=pos,
+            ornObj=[0, 0, 0, 1],
+            physicsClientId=self.client_id,
+        )
+        logger.info(f"Synchronized Pick Cube to {pos}")
+
+    def set_place_target_position(self, position: np.ndarray) -> None:
+        """Synchronizes place pad position with vision target."""
+        pos = [float(position[0]), float(position[1]), 0.003]
+        p.resetBasePositionAndOrientation(
+            self.place_cube_id,
+            posObj=pos,
+            ornObj=[0, 0, 0, 1],
+            physicsClientId=self.client_id,
+        )
+        logger.info(f"Synchronized Place Pad to {pos}")
+
     def update_trajectory_visualization(self, current_ee_pos: np.ndarray) -> None:
-        """Appends current end-effector position and draws smooth 3D trajectory line."""
+        """Appends current end-effector position and draws smooth 3D trajectory line with bounded memory."""
         if not self.show_trajectory or self.headless:
             return
 
@@ -234,21 +258,24 @@ class PyBulletSimulator:
                 self._trajectory_line_ids.append(line_id)
                 self._trajectory_points.append(current_ee_pos.copy())
 
-                # If queue full, remove oldest line
-                if len(self._trajectory_line_ids) == self._trajectory_line_ids.maxlen:
+                # If queue exceeds capacity, remove and free oldest debug line in PyBullet
+                while len(self._trajectory_line_ids) > self.sim_config.trajectory_history_len:
                     old_id = self._trajectory_line_ids.popleft()
-                    p.removeUserDebugItem(old_id, physicsClientId=self.client_id)
+                    try:
+                        p.removeUserDebugItem(old_id, physicsClientId=self.client_id)
+                    except Exception:
+                        pass
         else:
             self._trajectory_points.append(current_ee_pos.copy())
 
     def clear_trajectory(self) -> None:
-        """Clears all drawn trajectory lines."""
-        for line_id in self._trajectory_line_ids:
+        """Clears all drawn trajectory lines and frees debug items."""
+        while self._trajectory_line_ids:
+            line_id = self._trajectory_line_ids.popleft()
             try:
                 p.removeUserDebugItem(line_id, physicsClientId=self.client_id)
             except Exception:
                 pass
-        self._trajectory_line_ids.clear()
         self._trajectory_points.clear()
 
     def toggle_trajectory(self) -> bool:
@@ -272,9 +299,7 @@ class PyBulletSimulator:
                 height=720,
                 physicsClientId=self.client_id,
             )
-            # PyBullet returns tuple of pixel values; convert explicitly to uint8
             rgb_arr = np.asarray(rgb_img, dtype=np.uint8).reshape((h, w, 4))[:, :, :3]
-            # Convert RGB to BGR for saving with cv2
             import cv2
             bgr_arr = cv2.cvtColor(rgb_arr, cv2.COLOR_RGB2BGR)
             cv2.imwrite(str(path), bgr_arr)
@@ -285,7 +310,8 @@ class PyBulletSimulator:
             return False
 
     def close(self) -> None:
-        """Disconnects PyBullet physics client safely."""
+        """Disconnects PyBullet physics client safely and frees all resources."""
+        self.clear_trajectory()
         if self.client_id >= 0:
             try:
                 p.disconnect(physicsClientId=self.client_id)

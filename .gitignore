@@ -11,17 +11,20 @@ __pycache__/
 .coverage
 htmlcov/
 
-# Logs & Temporary Session Data
+# Logs, Session Telemetry & Local Benchmark Recordings
 logs/*.log
 demo/data/*.csv
+benchmarks/*.json
+benchmarks/*.csv
 
-# Calibration & Local IDE
+# Device-Specific Camera Calibration
+calibration/*.npz
+
+# Local IDE & OS metadata
 .vscode/
 .idea/
 *.swp
 *.swo
-
-# OS Specific
 Thumbs.db
 Desktop.ini
 .DS_Store

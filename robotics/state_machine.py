@@ -1,12 +1,12 @@
 """Robotic Control Finite State Machine (FSM).
 
-Coordinates high-level behavior across perception, manual teleoperation,
+Coordinates deterministic behavior across perception gating, manual teleoperation,
 tracking-loss recovery, and autonomous pick-and-place sequence execution.
 """
 
 from enum import Enum, auto
 import time
-from typing import Optional, Tuple
+from typing import Callable, Optional, Tuple
 import numpy as np
 
 from config.settings import StateMachineConfig, WorkspaceConfig
@@ -31,7 +31,7 @@ class RobotState(Enum):
 
 
 class RoboticStateMachine:
-    """Manages state transitions, timeouts, and waypoint sequencing."""
+    """Manages state transitions, perception gating, and waypoint sequencing."""
 
     def __init__(self, config: StateMachineConfig, ws_config: WorkspaceConfig):
         self.config = config
@@ -44,11 +44,21 @@ class RoboticStateMachine:
         self._state_enter_time: float = time.time()
         self._lost_marker_time: Optional[float] = None
         self._action_timer: Optional[float] = None
+        self._waypoint_start_time: float = time.time()
+
+        # Perception Gating Stability Counters
+        self._consecutive_pick_detections: int = 0
+        self._consecutive_place_detections: int = 0
+        self._targets_frozen: bool = False
 
         # Autonomous Waypoints (Robot base frame coordinates)
-        self.pick_target_pos: np.ndarray = np.array([0.45, -0.20, 0.035], dtype=np.float64)
-        self.place_target_pos: np.ndarray = np.array([0.45, 0.20, 0.035], dtype=np.float64)
-        self.current_waypoint: np.ndarray = np.array([0.40, 0.0, 0.40], dtype=np.float64)
+        self.pick_target_pos: Optional[np.ndarray] = None
+        self.place_target_pos: Optional[np.ndarray] = None
+        self.current_waypoint: np.ndarray = np.array([
+            self.ws_config.robot_center_x,
+            self.ws_config.robot_center_y,
+            self.ws_config.robot_center_z,
+        ], dtype=np.float64)
 
         self._step_counter: int = 0
 
@@ -68,29 +78,27 @@ class RoboticStateMachine:
             logger.info(f"FSM State Transition: {self.state.name} -> {new_state.name} ({reason})")
             self.state = new_state
             self._state_enter_time = time.time()
+            self._waypoint_start_time = time.time()
             self._step_counter = 0
+            self._action_timer = None
 
     def set_mode(self, mode: str) -> None:
-        """Switches mode between MANUAL and AUTO."""
+        """Switches operational mode between MANUAL and AUTO."""
         mode_upper = mode.upper()
         if mode_upper in ("MANUAL", "AUTO"):
             self.mode = mode_upper
-            logger.info(f"Mode set to {self.mode}")
-            if self.mode == "MANUAL":
-                self.transition_to(RobotState.SEARCH, "Switched to Manual mode")
-            else:
-                self.transition_to(RobotState.SEARCH, "Switched to Autonomous mode")
+            logger.info(f"Operational mode switched to {self.mode}")
+            self._targets_frozen = False
+            self._consecutive_pick_detections = 0
+            self._consecutive_place_detections = 0
+            self.transition_to(RobotState.SEARCH, f"Switched mode to {self.mode}")
 
     def update_manual_mode(
         self,
         marker_detected: bool,
         target_pos_robot: Optional[np.ndarray],
     ) -> Tuple[np.ndarray, bool]:
-        """Updates FSM logic for Manual Tracking Mode.
-
-        Returns:
-            (commanded_cartesian_target, is_tracking_active)
-        """
+        """Updates FSM logic for Manual Tracking Mode with lost-tracking hold and recovery."""
         now = time.time()
 
         if marker_detected and target_pos_robot is not None:
@@ -101,7 +109,7 @@ class RoboticStateMachine:
             self.current_waypoint = target_pos_robot.copy()
             return self.current_waypoint, True
 
-        # Marker NOT detected
+        # Marker is NOT detected
         if self._lost_marker_time is None:
             self._lost_marker_time = now
 
@@ -111,10 +119,9 @@ class RoboticStateMachine:
             self.transition_to(RobotState.HOLD, "Marker temporarily occluded")
 
         if self.state == RobotState.HOLD:
-            if duration_lost > self.config.lost_tracking_search_timeout_s:
+            if duration_lost >= self.config.lost_tracking_search_timeout_s:
                 self.transition_to(RobotState.SEARCH, "Lost tracking timeout exceeded")
 
-        # In HOLD or SEARCH, hold last known valid target or safe center
         return self.current_waypoint, False
 
     def update_auto_mode(
@@ -122,44 +129,78 @@ class RoboticStateMachine:
         current_ee_pos: np.ndarray,
         marker_1_pos: Optional[np.ndarray] = None,
         marker_2_pos: Optional[np.ndarray] = None,
-        gripper_attach_fn=None,
-        gripper_detach_fn=None,
+        gripper_attach_fn: Optional[Callable] = None,
+        gripper_detach_fn: Optional[Callable] = None,
+        on_targets_stabilized_fn: Optional[Callable[[np.ndarray, np.ndarray], None]] = None,
     ) -> Tuple[np.ndarray, str]:
-        """Executes autonomous pick-and-place waypoint state sequence.
-
-        Sequence:
-          SEARCH -> APPROACH -> PICK (attach) -> LIFT -> MOVE_TO_PLACE -> PLACE (detach) -> RETURN_HOME -> SEARCH
-        """
+        """Executes perception-gated autonomous pick-and-place sequence."""
         self._step_counter += 1
         now = time.time()
+        elapsed_waypoint_time = now - self._waypoint_start_time
 
-        # Update detected pick/place positions if available from vision
-        if marker_1_pos is not None:
-            self.pick_target_pos = marker_1_pos.copy()
-            self.pick_target_pos[2] = self.config.pick_descent_height_m
+        # 1. Perception Gating Phase in SEARCH state
+        if self.state in (RobotState.HOME, RobotState.SEARCH):
+            if self.config.auto_demo:
+                # Fallback coordinates for explicit offline demo mode
+                self.pick_target_pos = np.array([0.45, -0.20, self.config.pick_descent_height_m], dtype=np.float64)
+                self.place_target_pos = np.array([0.45, 0.20, self.config.pick_descent_height_m], dtype=np.float64)
+                self._targets_frozen = True
+            else:
+                # Accumulate consecutive detections
+                if marker_1_pos is not None:
+                    self._consecutive_pick_detections += 1
+                    self.pick_target_pos = marker_1_pos.copy()
+                    self.pick_target_pos[2] = self.config.pick_descent_height_m
+                else:
+                    self._consecutive_pick_detections = max(0, self._consecutive_pick_detections - 1)
 
-        if marker_2_pos is not None:
-            self.place_target_pos = marker_2_pos.copy()
-            self.place_target_pos[2] = self.config.pick_descent_height_m
+                if marker_2_pos is not None:
+                    self._consecutive_place_detections += 1
+                    self.place_target_pos = marker_2_pos.copy()
+                    self.place_target_pos[2] = self.config.pick_descent_height_m
+                else:
+                    self._consecutive_place_detections = max(0, self._consecutive_place_detections - 1)
 
-        # Compute distance to current waypoint
+                if (
+                    self._consecutive_pick_detections >= self.config.consecutive_detection_threshold
+                    and self._consecutive_place_detections >= self.config.consecutive_detection_threshold
+                ):
+                    self._targets_frozen = True
+                    logger.info("Perception Gating Passed: Pick and Place targets frozen from vision.")
+                    if on_targets_stabilized_fn and self.pick_target_pos is not None and self.place_target_pos is not None:
+                        on_targets_stabilized_fn(self.pick_target_pos, self.place_target_pos)
+
+            if self._targets_frozen and self.pick_target_pos is not None:
+                self.current_waypoint = np.array([
+                    self.pick_target_pos[0],
+                    self.pick_target_pos[1],
+                    self.pick_target_pos[2] + self.config.approach_height_offset_m,
+                ])
+                self.transition_to(RobotState.APPROACH, "Beginning Pick Approach")
+                return self.current_waypoint, "TARGETS_STABILIZED"
+
+            return self.current_waypoint, "SEARCHING_FOR_MARKERS"
+
+        # 2. Waypoint Arrival & Timeout Check
         dist_to_waypoint = float(np.linalg.norm(current_ee_pos - self.current_waypoint))
-        arrived = dist_to_waypoint < self.config.waypoint_tolerance_m or self._step_counter > self.config.max_step_count_per_phase
+        arrived = dist_to_waypoint < self.config.waypoint_tolerance_m
+
+        # If timeout exceeded before arrival, transition to ERROR
+        if not arrived and (
+            elapsed_waypoint_time > self.config.waypoint_timeout_s
+            or self._step_counter > self.config.max_step_count_per_phase
+        ):
+            self.transition_to(
+                RobotState.ERROR,
+                f"Waypoint timeout ({elapsed_waypoint_time:.1f}s > {self.config.waypoint_timeout_s:.1f}s, dist: {dist_to_waypoint*100:.1f}cm)",
+            )
+            return self.current_waypoint, "TIMEOUT_ERROR"
 
         action_status = ""
 
-        if self.state in (RobotState.HOME, RobotState.SEARCH):
-            # Pre-pick approach waypoint (above pick target)
-            self.current_waypoint = np.array([
-                self.pick_target_pos[0],
-                self.pick_target_pos[1],
-                self.pick_target_pos[2] + self.config.approach_height_offset_m,
-            ])
-            self.transition_to(RobotState.APPROACH, "Beginning Pick Approach")
-
-        elif self.state == RobotState.APPROACH:
+        # 3. State Sequence Transitions
+        if self.state == RobotState.APPROACH:
             if arrived:
-                # Descend directly onto pick object
                 self.current_waypoint = self.pick_target_pos.copy()
                 self.transition_to(RobotState.PICK, "Descended to Pick Target")
 
@@ -168,21 +209,30 @@ class RoboticStateMachine:
                 if self._action_timer is None:
                     self._action_timer = now
                 elif now - self._action_timer >= self.config.grasp_action_delay_s:
+                    grasp_ok = True
                     if gripper_attach_fn:
-                        gripper_attach_fn()
-                    action_status = "GRASP_ATTACHED"
-                    self._action_timer = None
-                    # Ascend with object
-                    self.current_waypoint = np.array([
-                        self.pick_target_pos[0],
-                        self.pick_target_pos[1],
-                        self.pick_target_pos[2] + self.config.approach_height_offset_m,
-                    ])
-                    self.transition_to(RobotState.LIFT, "Lifting Object")
+                        grasp_res = gripper_attach_fn()
+                        # If gripper returns structured GraspResult, validate success
+                        if hasattr(grasp_res, "success"):
+                            grasp_ok = grasp_res.success
+                        elif grasp_res is False:
+                            grasp_ok = False
+
+                    if grasp_ok:
+                        action_status = "GRASP_ATTACHED"
+                        self._action_timer = None
+                        self.current_waypoint = np.array([
+                            self.pick_target_pos[0],
+                            self.pick_target_pos[1],
+                            self.pick_target_pos[2] + self.config.approach_height_offset_m,
+                        ])
+                        self.transition_to(RobotState.LIFT, "Lifting Object")
+                    else:
+                        self.transition_to(RobotState.ERROR, "Physical grasp attachment rejected")
+                        action_status = "GRASP_FAILED"
 
         elif self.state == RobotState.LIFT:
             if arrived:
-                # Move to position above place target
                 self.current_waypoint = np.array([
                     self.place_target_pos[0],
                     self.place_target_pos[1],
@@ -192,7 +242,6 @@ class RoboticStateMachine:
 
         elif self.state == RobotState.MOVE_TO_PLACE:
             if arrived:
-                # Descend onto place pad
                 self.current_waypoint = self.place_target_pos.copy()
                 self.transition_to(RobotState.PLACE, "Descended to Place Pad")
 
@@ -205,7 +254,6 @@ class RoboticStateMachine:
                         gripper_detach_fn()
                     action_status = "GRASP_RELEASED"
                     self._action_timer = None
-                    # Return to safe Home / Standby
                     self.current_waypoint = np.array([
                         self.ws_config.robot_center_x,
                         self.ws_config.robot_center_y,
@@ -215,6 +263,21 @@ class RoboticStateMachine:
 
         elif self.state == RobotState.RETURN_HOME:
             if arrived:
+                self._targets_frozen = False
+                self._consecutive_pick_detections = 0
+                self._consecutive_place_detections = 0
                 self.transition_to(RobotState.SEARCH, "Pick-and-Place Cycle Completed")
 
+        elif self.state == RobotState.ERROR:
+            action_status = "ERROR_STATE"
+
         return self.current_waypoint, action_status
+
+    def reset(self) -> None:
+        """Resets state machine to initial SEARCH state."""
+        self._targets_frozen = False
+        self._consecutive_pick_detections = 0
+        self._consecutive_place_detections = 0
+        self._lost_marker_time = None
+        self._action_timer = None
+        self.transition_to(RobotState.SEARCH, "FSM Reset")
