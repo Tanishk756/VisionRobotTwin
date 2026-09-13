@@ -14,11 +14,15 @@ htmlcov/
 # Logs, Session Telemetry & Local Benchmark Recordings
 logs/*.log
 demo/data/*.csv
-benchmarks/*.json
-benchmarks/*.csv
+demo/recordings/
+benchmarks/
+screenshots/*.png
+screenshots/*.json
 
-# Device-Specific Camera Calibration
+# Device-Specific Camera Calibration & Diagnostics
 calibration/*.npz
+calibration/*.json
+calibration/*.png
 
 # Local IDE & OS metadata
 .vscode/

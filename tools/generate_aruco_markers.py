@@ -4,6 +4,7 @@ Generates printable ArUco fiducial markers for the VisionRobotTwin system:
 - Marker ID 0: Manual Robot Control Target
 - Marker ID 1: Autonomous Pick Waypoint
 - Marker ID 2: Autonomous Place Waypoint
+- Marker ID 10: World / Robot Base Calibration Anchor
 
 Also produces a combined printable multi-marker sheet with human-readable labels.
 """
@@ -108,6 +109,7 @@ def generate_all_markers(output_dir: Path = Path("assets/markers")) -> None:
         (config.target_marker_id, "Manual Robot Target"),
         (config.pick_marker_id, "Autonomous Pick Location"),
         (config.place_marker_id, "Autonomous Place Location"),
+        (getattr(config, "anchor_marker_id", 10), "World Anchor"),
     ]
 
     cards = []
@@ -126,7 +128,7 @@ def generate_all_markers(output_dir: Path = Path("assets/markers")) -> None:
 
         logger.info(f"Generated Marker ID {mid} ('{label}') -> {card_path}")
 
-    # Create combined 3-marker printable overview sheet
+    # Create combined printable overview sheet
     max_w = max(c.shape[1] for c in cards)
     gap = 20
     total_h = sum(c.shape[0] for c in cards) + gap * (len(cards) + 1)

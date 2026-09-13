@@ -5,6 +5,21 @@ All notable changes to the VisionRobotTwin project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+- **Camera Calibration Quality Reports**: JSON report export (`calibration/camera_calibration_report.json`) and visual diagnostic residual plots (`calibration/calibration_diagnostics.png`).
+- **Calibration Sample-Quality Heuristics**: Pre-solve gating based on Laplacian variance sharpness, bounding area ratio, duplicate view rejection, and spatial/scale diversity scoring.
+- **World-Anchor Extrinsic Calibration**: Camera-to-Virtual-Robot Extrinsic Calibration via ArUco Marker ID 10 ($\mathbf{T}_{\text{robot}\to\text{camera}} = \mathbf{T}_{\text{robot}\to\text{anchor}} \cdot \mathbf{T}_{\text{camera}\to\text{anchor}}^{-1}$).
+- **Dedicated World Anchor Marker**: Printable Marker ID 10 asset (`assets/markers/marker_10_world_anchor.png`) and updated marker sheet tooling.
+- **Extrinsics Calibration Tool**: CLI utility (`tools/calibrate_extrinsics.py`) with robust median pose aggregation, outlier rejection, and standard deviation reporting.
+- **Extrinsics Validation Tool**: CLI utility (`tools/validate_extrinsics.py`) measuring anchor point residual error in mm and degrees.
+- **Runtime Extrinsics Integration**: Automatic loading of `calibration/extrinsics.json` in SE(3) mode and telemetry HUD indicator (`EXTRINSICS: CALIBRATED / NOMINAL`).
+- **Calibration Status CLI Command**: Diagnostic status report via `python main.py --calibration-status` without opening hardware.
+- **Physical Benchmark Suite V2**: Upgraded `tools/benchmark_live.py` supporting `--benchmark-mode {stationary, tracking, standard}`, session folders (`benchmarks/YYYYMMDD_HHMMSS/`), time-series `frames.csv`, diagnostic plots, and system manifest.
+- **Physical Demo Video Recorder**: Video recording utility (`tools/record_demo.py` and `python main.py --record`) supporting MP4 and AVI fallbacks.
+- **Snapshot Metadata Capture**: Adjacent JSON metadata export (`screenshots/session_YYYYMMDD_HHMMSS.json`) on keyboard snapshot capture (`S`).
+
 ## [1.1.0] - 2026-09-13
 
 ### Added

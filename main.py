@@ -16,6 +16,7 @@ from typing import Optional, Tuple
 import cv2
 import numpy as np
 
+import json
 from visionrobottwin_version import __version__
 from config.settings import AppConfig, get_default_config
 from vision.calibration import load_or_create_calibration
@@ -38,6 +39,7 @@ def parse_arguments() -> argparse.Namespace:
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
     parser.add_argument("--version", action="version", version=f"VisionRobotTwin {__version__}")
+    parser.add_argument("--calibration-status", action="store_true", help="Print camera intrinsics and extrinsics calibration status and exit")
     parser.add_argument("--camera", type=int, default=0, help="Camera device index")
     parser.add_argument("--width", type=int, default=1280, help="Camera width resolution")
     parser.add_argument("--height", type=int, default=720, help="Camera height resolution")
@@ -50,8 +52,44 @@ def parse_arguments() -> argparse.Namespace:
     parser.add_argument("--headless", action="store_true", help="Run PyBullet and perception without GUI window")
     parser.add_argument("--max-frames", type=int, default=0, help="Maximum frames to run before clean exit (0 = continuous)")
     parser.add_argument("--debug", action="store_true", help="Enable verbose debug logging")
+    parser.add_argument("--record", action="store_true", help="Record OpenCV HUD output video to demo/recordings/")
     parser.add_argument("--record-data", action="store_true", help="Record trajectory session data to CSV")
     return parser.parse_args()
+
+
+def print_calibration_status() -> None:
+    """Prints diagnostic report of intrinsics and extrinsics without opening hardware."""
+    calib_file = Path("calibration/camera_calibration.npz")
+    report_file = Path("calibration/camera_calibration_report.json")
+    ext_file = Path("calibration/extrinsics.json")
+
+    print("Camera Intrinsics:")
+    if calib_file.exists():
+        print("CALIBRATED")
+        print(f"Intrinsics file:\n{calib_file}")
+        if report_file.exists():
+            try:
+                with open(report_file, "r", encoding="utf-8") as f:
+                    rep = json.load(f)
+                rms = rep.get("reprojection_error_rms")
+                mean_err = rep.get("reprojection_error_mean")
+                if rms is not None:
+                    print(f"RMS:\n{rms:.4f} px (mean: {mean_err:.4f} px)")
+            except Exception:
+                pass
+    else:
+        print("FALLBACK PINHOLE")
+        print("Intrinsics file:\nNone (nominal fallback model)")
+
+    print("\nExtrinsics:")
+    if ext_file.exists():
+        print("CALIBRATED")
+        print(f"Extrinsics file:\n{ext_file}")
+        print("Anchor validation:\navailable (run tools/validate_extrinsics.py)")
+    else:
+        print("NOMINAL")
+        print("Extrinsics file:\nNone (nominal config model)")
+        print("Anchor validation:\nunavailable (no extrinsics calibration file found)")
 
 
 @dataclass
@@ -84,17 +122,16 @@ class FrameResult:
 class VisionRobotTwinApp:
     """Master application controller orchestrating vision, kinematics, and simulation."""
 
-    def __init__(self, config: AppConfig, headless_sim: bool = False, record_data: bool = False):
+    def __init__(
+        self,
+        config: AppConfig,
+        headless_sim: bool = False,
+        record_data: bool = False,
+        record_video: bool = False,
+    ):
         self.config = config
         self.headless = headless_sim or not config.simulation.gui
         self.logger = get_logger("VisionRobotTwin")
-
-        self.logger.info("=" * 70)
-        self.logger.info(" INITIALIZING VISION-ROBOT DIGITAL TWIN (v1.1)")
-        self.logger.info(f" Python Version: {sys.version.split()[0]} | OpenCV Version: {cv2.__version__}")
-        self.logger.info(f" Mode: {config.mode.upper()} | Control Mode: {config.control_mode.upper()} | Transform: {config.transform.transform_mode.upper()}")
-        self.logger.info(f" Camera: {'SYNTHETIC' if config.camera.synthetic_mode else f'Index {config.camera.camera_index}'}")
-        self.logger.info("=" * 70)
 
         # 1. Perception & Calibration
         self.calibration = load_or_create_calibration(
@@ -115,7 +152,32 @@ class VisionRobotTwinApp:
             one_euro_min_cutoff=self.config.filter.one_euro_min_cutoff,
             one_euro_beta=self.config.filter.one_euro_beta,
         )
+        # Check if calibrated extrinsics exist in SE(3) mode
+        if self.config.transform.transform_mode == "se3" and getattr(self.config.transform, "extrinsics_file", None) is not None:
+            if Path(self.config.transform.extrinsics_file).exists():
+                self.config.transform.is_calibrated_extrinsics = True
+
         self.workspace_mapper = WorkspaceMapper(self.config.workspace, self.config.transform)
+
+        intrinsics_status = (
+            f"CALIBRATED ({self.config.calibration.calibration_file})"
+            if self.calibration.is_calibrated
+            else "FALLBACK PINHOLE"
+        )
+        extrinsics_status = (
+            f"CALIBRATED ({self.config.transform.extrinsics_file})"
+            if self.workspace_mapper.tf_config.is_calibrated_extrinsics
+            else "NOMINAL"
+        )
+
+        self.logger.info("=" * 70)
+        self.logger.info(" INITIALIZING VISION-ROBOT DIGITAL TWIN (v1.2-dev)")
+        self.logger.info(f" Python Version : {sys.version.split()[0]} | OpenCV Version: {cv2.__version__}")
+        self.logger.info(f" Mode           : {config.mode.upper()} | Control Mode: {config.control_mode.upper()} | Transform: {config.transform.transform_mode.upper()}")
+        self.logger.info(f" Camera         : {'SYNTHETIC' if config.camera.synthetic_mode else f'Index {config.camera.camera_index}'}")
+        self.logger.info(f" INTRINSICS     : {intrinsics_status}")
+        self.logger.info(f" EXTRINSICS     : {extrinsics_status}")
+        self.logger.info("=" * 70)
 
         # 3. Robotics & PyBullet Digital Twin
         self.simulator = PyBulletSimulator(self.config, headless=self.headless)
@@ -127,16 +189,22 @@ class VisionRobotTwinApp:
         self.sim_fps_counter = FPSCounter()
         self.telemetry_overlay = TelemetryOverlay()
 
-        # 5. Session CSV Logging
+        # 5. Session Logging & Video Recording
         self.record_data = record_data
+        self.record_video = record_video
         self._csv_file = None
         self._csv_writer = None
+        self._video_writer: Optional[cv2.VideoWriter] = None
+        self._video_path: Optional[Path] = None
+
         if self.record_data:
             self._init_csv_recorder()
 
         self._is_running = True
         self._is_paused = False
+        self._paused_joint_positions: Optional[list] = None
         self._frames_processed = 0
+        self._last_frame_result: Optional[FrameResult] = None
 
         # Memory for 6-DoF HOLD tracking
         self._last_commanded_target_pos: np.ndarray = np.array([
@@ -173,11 +241,7 @@ class VisionRobotTwinApp:
         frame: Optional[np.ndarray] = None,
         wall_dt: Optional[float] = None,
     ) -> FrameResult:
-        """Executes a complete frame iteration: perception, filtering, mapping, IK, and physics stepping.
-
-        This unified method is shared between the interactive main application, the headless integration tests,
-        and the physical benchmark suite.
-        """
+        """Executes a complete frame iteration: perception, filtering, mapping, IK, and physics stepping."""
         now = time.perf_counter()
         if wall_dt is None:
             effective_dt = (now - self._last_loop_time) if self._last_loop_time is not None else (1.0 / max(self.config.camera.fps, 1))
@@ -280,10 +344,8 @@ class VisionRobotTwinApp:
                     commanded_orientation_target = target_robot_orn
                     self._last_commanded_target_orn = target_robot_orn.copy()
                 elif self.state_machine.state == RobotState.HOLD:
-                    # Maintain full 6-DoF pose during HOLD (do not snap orientation)
                     commanded_orientation_target = self._last_commanded_target_orn.copy()
                 else:
-                    # In SEARCH or HOME after prolonged loss, keep last orientation or default
                     commanded_orientation_target = self._last_commanded_target_orn.copy()
             else:  # AUTO MODE
                 current_ee_pos, _ = self.simulator.controller.get_end_effector_pose()
@@ -334,7 +396,6 @@ class VisionRobotTwinApp:
                 if ik_res.success:
                     self.simulator.controller.set_arm_joint_positions(ik_res.joint_positions)
         else:
-            # Active PAUSE/HOLD: maintain frozen joint target
             if self._paused_joint_positions is not None:
                 self.simulator.controller.set_arm_joint_positions(self._paused_joint_positions)
             ik_status = "HOLD (PAUSED)"
@@ -350,7 +411,7 @@ class VisionRobotTwinApp:
         self.simulator.update_trajectory_visualization(ee_pos)
         pos_error = float(np.linalg.norm(ee_pos - commanded_cartesian_target)) if commanded_cartesian_target is not None else None
 
-        return FrameResult(
+        result = FrameResult(
             success=True,
             frame=raw_frame,
             display_frame=display_frame,
@@ -374,6 +435,8 @@ class VisionRobotTwinApp:
             physics_substeps=substeps,
             fps=fps,
         )
+        self._last_frame_result = result
+        return result
 
     def run(self) -> None:
         """Main real-time perception-control loop."""
@@ -424,11 +487,30 @@ class VisionRobotTwinApp:
                     physics_actual_step_rate=res.physics_substeps / max(loop_dt, 1e-4),
                     lost_tracking_time_s=self.state_machine.lost_tracking_duration_s,
                     is_calibrated=self.calibration.is_calibrated,
+                    is_calibrated_extrinsics=self.workspace_mapper.tf_config.is_calibrated_extrinsics,
+                    transform_mode=self.workspace_mapper.tf_config.transform_mode,
                     workspace_clamped=res.was_clamped,
                     debug_mode=self.config.debug,
                 )
 
                 self.telemetry_overlay.render(display_frame, telem_data)
+
+                # Video Recording
+                if self.record_video:
+                    if self._video_writer is None:
+                        from tools.record_demo import create_video_writer
+                        demo_dir = Path("demo/recordings")
+                        demo_dir.mkdir(parents=True, exist_ok=True)
+                        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                        out_mp4 = demo_dir / f"session_{timestamp}.mp4"
+                        fh, fw = display_frame.shape[:2]
+                        self._video_writer, self._video_path = create_video_writer(
+                            out_mp4, fw, fh, fps=float(self.config.camera.fps or 30.0)
+                        )
+                    # Draw recording badge
+                    cv2.circle(display_frame, (display_frame.shape[1] - 30, 25), 8, (0, 0, 255), -1)
+                    cv2.putText(display_frame, "REC", (display_frame.shape[1] - 65, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (0, 0, 255), 1, cv2.LINE_AA)
+                    self._video_writer.write(display_frame)
 
                 # CSV Telemetry Recording
                 if self._csv_writer and res.commanded_position is not None and res.ee_position is not None:
@@ -504,7 +586,7 @@ class VisionRobotTwinApp:
             self.logger.info(f"Trajectory visualization {'enabled' if enabled else 'disabled'}.")
 
         elif char == "s":  # Screenshot
-            self._capture_screenshots(last_display_frame)
+            self._capture_screenshots(last_display_frame, self._last_frame_result)
 
         elif char == "d":  # Debug Toggle
             self.config.debug = not self.config.debug
@@ -512,13 +594,16 @@ class VisionRobotTwinApp:
 
         elif char == "c":  # Calibration Info
             self.logger.info(
-                f"Camera Calibration Status: {'Calibrated' if self.calibration.is_calibrated else 'Uncalibrated default'}\n"
-                f"fx={self.calibration.fx:.1f}, fy={self.calibration.fy:.1f}, "
-                f"cx={self.calibration.cx:.1f}, cy={self.calibration.cy:.1f}"
+                f"Camera Intrinsics: {'Calibrated' if self.calibration.is_calibrated else 'Fallback pinhole'} | "
+                f"Extrinsics: {'Calibrated' if self.workspace_mapper.tf_config.is_calibrated_extrinsics else 'Nominal'}"
             )
 
-    def _capture_screenshots(self, last_display_frame: Optional[np.ndarray] = None) -> None:
-        """Captures screenshots of both camera HUD and PyBullet simulator."""
+    def _capture_screenshots(
+        self,
+        last_display_frame: Optional[np.ndarray] = None,
+        last_result: Optional[FrameResult] = None,
+    ) -> None:
+        """Captures screenshots of camera HUD and PyBullet, and creates adjacent JSON metadata."""
         self.config.screenshots_dir.mkdir(parents=True, exist_ok=True)
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
 
@@ -531,12 +616,47 @@ class VisionRobotTwinApp:
         self.simulator.capture_screenshot(bullet_path)
         self.logger.info(f"Saved Simulation screenshot: {bullet_path}")
 
+        # Adjacent JSON metadata
+        meta = {
+            "timestamp": datetime.now().isoformat(),
+            "version": __version__,
+            "mode": self.state_machine.mode,
+            "control_mode": self.config.control_mode,
+            "transform_mode": self.config.transform.transform_mode,
+            "state": self.state_machine.state_name,
+            "marker_id": last_result.target_pose.marker_id if (last_result and last_result.target_pose) else None,
+            "camera_pose": {
+                "raw_pos_m": [float(v) for v in last_result.raw_pos_cam] if (last_result and last_result.raw_pos_cam) else None,
+                "filtered_pos_m": [float(v) for v in last_result.filtered_pos_cam] if (last_result and last_result.filtered_pos_cam) else None,
+            },
+            "robot_target_pos": [float(v) for v in last_result.commanded_position] if (last_result and last_result.commanded_position is not None) else None,
+            "robot_target_orn": [float(v) for v in last_result.commanded_orientation] if (last_result and last_result.commanded_orientation is not None) else None,
+            "ee_pos": [float(v) for v in last_result.ee_position] if (last_result and last_result.ee_position is not None) else None,
+            "ee_orn": [float(v) for v in last_result.ee_orientation] if (last_result and last_result.ee_orientation is not None) else None,
+            "ik_status": last_result.ik_status if last_result else "UNKNOWN",
+            "calibration_status": "CALIBRATED" if self.calibration.is_calibrated else "FALLBACK PINHOLE",
+            "extrinsics_status": "CALIBRATED" if self.workspace_mapper.tf_config.is_calibrated_extrinsics else "NOMINAL",
+        }
+        json_path = self.config.screenshots_dir / f"session_{timestamp}.json"
+        try:
+            with open(json_path, "w", encoding="utf-8") as f:
+                json.dump(meta, f, indent=2)
+            self.logger.info(f"Saved Screenshot metadata: {json_path}")
+        except Exception as e:
+            self.logger.warning(f"Failed to save screenshot metadata: {e}")
+
     def cleanup(self) -> None:
         """Releases all hardware, windows, files, and physics server resources cleanly."""
         self.logger.info("Cleaning up application resources...")
         if self.camera:
             self.camera.release()
         cv2.destroyAllWindows()
+        if self._video_writer:
+            try:
+                self._video_writer.release()
+                self.logger.info(f"Closed video recording: {self._video_path}")
+            except Exception:
+                pass
         if self.simulator:
             self.simulator.close()
         if self._csv_file:
@@ -551,6 +671,10 @@ class VisionRobotTwinApp:
 def main() -> int:
     """Application main entry point."""
     args = parse_arguments()
+
+    if args.calibration_status:
+        print_calibration_status()
+        return 0
 
     logger = setup_logger(debug=args.debug)
 
@@ -574,6 +698,7 @@ def main() -> int:
             config=config,
             headless_sim=args.headless,
             record_data=args.record_data,
+            record_video=args.record,
         )
         app.run()
         return 0

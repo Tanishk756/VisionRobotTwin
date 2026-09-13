@@ -9,7 +9,7 @@
 [![OpenCV](https://img.shields.io/badge/Perception-OpenCV%204.8+-red.svg)](https://opencv.org/)
 [![CI Validation](https://github.com/Tanishk756/VisionRobotTwin/actions/workflows/tests.yml/badge.svg)](https://github.com/Tanishk756/VisionRobotTwin/actions/workflows/tests.yml)
 
-**Current Release**: `v1.1.0` | **Maintainer**: [Tanishk Singhal](https://github.com/Tanishk756) ([tanisksinghal6285@gmail.com](mailto:tanisksinghal6285@gmail.com))
+**Current Release**: `v1.1.0` (Latest Stable) | **Active Development**: `v1.2.0-dev` | **Maintainer**: [Tanishk Singhal](https://github.com/Tanishk756) ([tanisksinghal6285@gmail.com](mailto:tanisksinghal6285@gmail.com))
 
 [Changelog](CHANGELOG.md) • [Validation Matrix](VALIDATION.md) • [Architecture](ARCHITECTURE.md) • [Portfolio Guide](PORTFOLIO.md) • [Authors](AUTHORS.md) • [Citation](CITATION.cff) • [Contributing](CONTRIBUTING.md) • [Security](SECURITY.md)
 
@@ -21,9 +21,12 @@
 
 A physical or synthetic **ArUco marker** is detected in 3D space, its 6-DoF metric pose is estimated using camera intrinsics and Perspective-n-Point (PnP), filtered to eliminate high-frequency sensor noise, transformed across rigid coordinate frames ($SE(3)$), mapped and clamped into the reachable robot workspace, and resolved into 7-DoF joint position commands via numerical **Damped Least-Squares Inverse Kinematics (IK)**.
 
-The system features:
+### Features & Capabilities:
 1. **Manual Teleoperation Tracking Mode**: The Franka Panda end-effector tracks physical ArUco marker translation and orientation in real time.
 2. **Autonomous Pick-and-Place Mode**: A perception-gated finite state machine coordinates multi-frame target stabilization, approach, descent, physical distance-gated virtual grasping, elevation, transfer, and release between detected target markers.
+3. **World-Anchor Extrinsic Calibration (v1.2)**: Solves direct Camera-to-Robot base transformation $\mathbf{T}_{\text{robot}\to\text{camera}} = \mathbf{T}_{\text{robot}\to\text{anchor}} \cdot \mathbf{T}_{\text{camera}\to\text{anchor}}^{-1}$ via dedicated ArUco World Anchor Marker ID 10.
+4. **Reproducible Benchmark Suite V2 (v1.2)**: Stationary standstill optical jitter analysis and dynamic tracking benchmark with timestamped artifacts (`benchmarks/YYYYMMDD_HHMMSS/`) and system manifest.
+5. **Physical Demo Video & Snapshot Recording (v1.2)**: Record demo sessions to MP4/AVI and save timestamped snapshots with adjacent JSON metadata.
 
 ---
 
@@ -93,7 +96,7 @@ $$\mathbf{T} = \begin{bmatrix} \mathbf{R} & \mathbf{t} \\ \mathbf{0}_{1\times3} 
 
 ### Transformation Modes:
 - **`relative` mode (default)**: Intuitive teleoperation mapping Cartesian displacements relative to interaction center.
-- **`se3` mode**: Computes direct rigid transformation using configured or hand-eye calibrated camera-to-robot extrinsics ($\mathbf{T}_{B \to M} = \mathbf{T}_{B \to C} \cdot \mathbf{T}_{C \to M}$).
+- **`se3` mode**: Computes direct rigid transformation using nominal or world-anchor calibrated camera-to-robot extrinsics ($\mathbf{T}_{B \to M} = \mathbf{T}_{B \to C} \cdot \mathbf{T}_{C \to M}$).
 
 ---
 
@@ -143,19 +146,36 @@ python tools\generate_aruco_markers.py
 | **ID 0** | `MANUAL TARGET` | Controls Franka Panda end-effector in Manual Tracking Mode |
 | **ID 1** | `PICK LOCATION` | Sets Cartesian target for Autonomous Pick phase |
 | **ID 2** | `PLACE LOCATION` | Sets Cartesian target for Autonomous Place phase |
+| **ID 10** | `WORLD ANCHOR` | Physical calibration anchor for Camera-to-Robot Extrinsics |
 
 ---
 
-## 🎯 Camera Calibration Procedure
+## 🎯 Vision Calibration Tools
 
-For metric 6-DoF pose accuracy, calibrate your camera using a standard $9 \times 6$ chessboard:
+### 1. Camera Intrinsic Calibration & Quality Reports
+Calibrate camera intrinsics using a standard $9 \times 6$ chessboard ($25\text{ mm}$ square size):
 ```powershell
 python tools\calibrate_camera.py --camera 0 --cols 9 --rows 6 --square-size 0.025
 ```
-- Hold the chessboard pattern in front of the camera at multiple angles and depths.
-- Press `[SPACE]` when the pattern is highlighted in green (capture 15–20 frames).
-- Press `[C]` to compute intrinsics and save to `calibration/camera_calibration.npz`.
-- *If no calibration file exists, the system automatically uses a default pinhole model and informs the operator via the HUD.*
+Outputs `calibration/camera_calibration.npz`, `calibration/camera_calibration_report.json` (OpenCV RMS, mean error, diversity score), and `calibration/calibration_diagnostics.png`.
+
+### 2. World-Anchor Camera-to-Robot Extrinsic Calibration
+Calibrate camera mounting extrinsics relative to the virtual Franka base using Marker ID 10:
+```powershell
+python tools\calibrate_extrinsics.py --camera 0 --marker-id 10 --samples 30
+```
+Outputs `calibration/extrinsics.json` containing $\mathbf{T}_{\text{robot}\to\text{camera}}$, translation standard deviation (mm), and rotation dispersion (deg).
+
+### 3. Extrinsic Validation Tool
+```powershell
+python tools\validate_extrinsics.py --camera 0 --marker-id 10
+```
+Measures live anchor point residual translation error (mm) and orientation error (deg).
+
+### 4. Calibration Status Inspection
+```powershell
+python main.py --calibration-status
+```
 
 ---
 
@@ -169,14 +189,17 @@ python main.py --camera 0
 # Launch in Autonomous Pick-and-Place Mode (Perception-gated)
 python main.py --mode auto
 
+# Launch with SE(3) Calibrated Extrinsics
+python main.py --camera 0 --transform-mode se3
+
+# Launch with Session Video Recording
+python main.py --camera 0 --record
+
 # Launch in Synthetic Simulation Mode (offline testing)
 python main.py --synthetic
 
 # Launch in Bounded Headless Mode (CI automated validation)
 python main.py --synthetic --headless --max-frames 120
-
-# Run live benchmark utility
-python tools/benchmark_live.py --synthetic --duration 5.0
 ```
 
 ### Keyboard Controls
@@ -190,9 +213,23 @@ python tools/benchmark_live.py --synthetic --duration 5.0
 | **`A`** | **Auto Mode** | Initiates perception-gated Pick-and-Place sequence |
 | **`R`** | **Reset** | Resets simulation objects, grasp constraints, and state machine |
 | **`T`** | **Toggle Trajectory** | Toggles 3D end-effector trailing line visualizer |
-| **`S`** | **Screenshot** | Saves timestamped snapshots of both Camera HUD and PyBullet window |
+| **`S`** | **Screenshot** | Saves timestamped snapshots and adjacent JSON metadata |
 | **`D`** | **Debug** | Toggles verbose debugging telemetry |
-| **`C`** | **Calibration Info** | Prints camera intrinsics matrix and principal point to console |
+| **`C`** | **Calibration Info** | Prints camera intrinsics and extrinsics status |
+
+---
+
+## 📊 Benchmarking Suite V2
+
+Run physical or synthetic reproducible benchmark sessions:
+```powershell
+# Stationary Standstill Jitter Benchmark (Place Marker 0 still)
+python tools/benchmark_live.py --camera 0 --duration 10.0 --benchmark-mode stationary
+
+# Dynamic Motion Tracking Benchmark
+python tools/benchmark_live.py --camera 0 --duration 15.0 --benchmark-mode tracking
+```
+Artifacts are saved to `benchmarks/YYYYMMDD_HHMMSS/` containing `summary.json`, `frames.csv`, and diagnostic plots.
 
 ---
 
@@ -202,35 +239,20 @@ python tools/benchmark_live.py --synthetic --duration 5.0
 pytest -v
 ```
 
-### Test Suite Overview:
-- `test_transforms.py`: Orthogonality of $SO(3)$, Euler/Quaternion roundtrips, $SE(3)$ analytical matrix inversion, composition.
-- `test_filters.py`: Exponential moving average, noise reduction, 1-Euro adaptive cutoff, quaternion SLERP.
-- `test_workspace.py`: Workspace boundary clamping, SE(3) vs relative modes, time-based slew limiting, NaN/Inf protection.
-- `test_state_machine.py`: Perception gating (consecutive detections), lost-tracking recovery, waypoint timeouts, grasp rejection.
-- `test_gripper_physics.py`: Distance-gated constraint attachment ($< 5.5\text{ cm}$ threshold) and clean release.
-- `test_camera.py`: Explicit synthetic mode and physical camera failure handling.
-- `test_headless_integration.py`: Bounded headless runtime pipeline validation.
-- `test_ik_and_robot.py`: PyBullet IK solution generation, joint limit rejection, and dynamic end-effector tracking against test tolerance.
-- `test_simulation_clock.py`: Multi-substep accumulator, fixed 1/240 s physics scheduling, and remainder preservation.
-- `test_logger.py`: Hierarchical logging namespace under `VisionRobotTwin.*`, file handler formatting, dynamic loglevel reconfiguration.
-- `test_pause_and_context.py`: True joint-freeze pause/HOLD, relative orientation reference reset on operator context change, bounded perception buffers.
-- `test_benchmark_pipeline.py`: Benchmark runner execution on shared frame processing pipeline.
-- `test_auto_integration.py`: Full closed-loop perception-gated pick-and-place through SEARCH state completion.
-- `test_version.py`: Canonical version metadata and CLI `--version` verification.
-
----
-
-## 📊 Verification & Benchmarks
-
-| Metric / Parameter | Status | Value / Measurement |
+| Subsystem / Test Suite | Status | Test Coverage |
 | :--- | :---: | :--- |
-| **Automated Tests** | **PASS** | **49 / 49 passing (49 automated unit/integration tests at v1.1.0)** |
-| **Physics Scheduling** | **PASS** | **Fixed timestep: 1/240 s (240 Hz target scheduled via accumulator)** |
-| **Synthetic Pipeline Tracking** | **PASS** | **Verified in PyBullet closed-loop simulation** |
-| **Basic Physical Webcam Smoke Test** | **USER-CONFIRMED / PASS** | Manual Marker-0 teleoperation interaction verified on live webcam |
-| **Physical Calibrated Benchmarks** | *NOT YET MEASURED* | Hardware dependent (Run `tools/benchmark_live.py`) |
-| **Physical Camera Calibration** | *NOT TESTED* | Default pinhole fallback active until `calibrate_camera.py` run |
-| **Physical Franka Manipulator** | *NOT TESTED* | Simulation / digital twin implementation |
+| **Transform Math & Lie Groups** | **PASS** | `test_transforms.py`, `test_extrinsics_math.py` |
+| **Calibration Quality & IO** | **PASS** | `test_calibration_quality.py`, `test_extrinsics_io.py`, `test_pose_aggregation.py` |
+| **Pose Filtering & SLERP** | **PASS** | `test_filters.py` |
+| **Workspace & Cartesian Safety**| **PASS** | `test_workspace.py` |
+| **IK Solver & Limit Rejection** | **PASS** | `test_ik_and_robot.py` |
+| **State Machine Autonomy** | **PASS** | `test_state_machine.py`, `test_auto_integration.py` |
+| **Benchmark Suite V2 Pipeline** | **PASS** | `test_benchmark_v2.py`, `test_benchmark_pipeline.py` |
+| **Demo Recording & Metadata** | **PASS** | `test_demo_and_snapshots.py` |
+| **Physics Scheduling Clock** | **PASS** | `test_simulation_clock.py` |
+| **Logging & Operator Context** | **PASS** | `test_logger.py`, `test_pause_and_context.py` |
+| **Version & Packaging** | **PASS** | `test_version.py` |
+| **Total Automated Tests** | **PASS** | **68 / 68 passing** |
 
 *See [VALIDATION.md](VALIDATION.md) for full subsystem audit details.*
 
@@ -242,7 +264,7 @@ pytest -v
 VisionRobotTwin/
 │
 ├── main.py                     # Main application entry point & perception-control loop
-├── visionrobottwin_version.py  # Canonical package version definition (1.1.0)
+├── visionrobottwin_version.py  # Canonical package version definition (1.2.0-dev)
 ├── requirements.txt            # Production dependencies
 ├── requirements-dev.txt        # Development and testing dependencies
 ├── pytest.ini                  # Pytest configuration

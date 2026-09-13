@@ -15,14 +15,14 @@ def test_benchmark_synthetic_6dof_execution(tmp_path: Path):
         transform_mode="relative",
         output_dir=tmp_path,
     )
-    assert res["input_source"] == "SYNTHETIC"
-    assert res["control_mode"] == "6dof"
-    assert res["transform_mode"] == "relative"
-    assert res["total_frames_processed"] > 0
-    assert "mean_camera_fps" in res
-    assert "mean_physics_substeps_per_frame" in res
-    assert "position_jitter_std_mm" in res
-    assert "robot_tracking_error_mm" in res
+    assert res["manifest"]["camera_index"] == 0
+    assert res["manifest"]["control_mode"] == "6dof"
+    assert res["manifest"]["transform_mode"] == "relative"
+    assert res["session_metrics"]["frames_captured"] > 0
+    assert "actual_camera_fps" in res["session_metrics"]
+    assert "physics_substeps_per_frame" in res["session_metrics"]
+    assert "position_std_xyz_mm" in res["optical_jitter"]
+    assert "mean_error_mm" in res["digital_twin_ee_tracking"]
 
 
 def test_benchmark_synthetic_3dof_execution(tmp_path: Path):
@@ -35,5 +35,5 @@ def test_benchmark_synthetic_3dof_execution(tmp_path: Path):
         transform_mode="relative",
         output_dir=tmp_path,
     )
-    assert res["control_mode"] == "3dof"
-    assert res["total_frames_processed"] > 0
+    assert res["manifest"]["control_mode"] == "3dof"
+    assert res["session_metrics"]["frames_captured"] > 0

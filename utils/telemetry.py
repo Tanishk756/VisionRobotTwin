@@ -31,6 +31,8 @@ class TelemetryData:
     physics_actual_step_rate: float = 240.0
     lost_tracking_time_s: float = 0.0
     is_calibrated: bool = False
+    is_calibrated_extrinsics: bool = False
+    transform_mode: str = "relative"
     workspace_clamped: bool = False
     debug_mode: bool = False
 
@@ -181,7 +183,7 @@ class TelemetryOverlay:
             raw_str = f"Raw:    [{rx:+6.3f}, {ry:+6.3f}, {rz:+6.3f}] m"
         else:
             raw_str = "Raw:    [  --- ,   --- ,   --- ] m"
-        cv2.putText(frame, raw_str, (x + 12, y + 78), cv2.FONT_HERSHEY_SIMPLEX, 0.42, self.COLOR_MUTED, 1, cv2.LINE_AA)
+        cv2.putText(frame, raw_str, (x + 12, y + 74), cv2.FONT_HERSHEY_SIMPLEX, 0.42, self.COLOR_MUTED, 1, cv2.LINE_AA)
 
         # Filtered Pose
         if data.filtered_pos_cam:
@@ -189,21 +191,31 @@ class TelemetryOverlay:
             filt_str = f"Filt:   [{fx:+6.3f}, {fy:+6.3f}, {fz:+6.3f}] m"
         else:
             filt_str = "Filt:   [  --- ,   --- ,   --- ] m"
-        cv2.putText(frame, filt_str, (x + 12, y + 104), cv2.FONT_HERSHEY_SIMPLEX, 0.42, self.COLOR_CYAN, 1, cv2.LINE_AA)
+        cv2.putText(frame, filt_str, (x + 12, y + 98), cv2.FONT_HERSHEY_SIMPLEX, 0.42, self.COLOR_CYAN, 1, cv2.LINE_AA)
 
         # Distance
         dist_str = f"Distance: {data.marker_distance_m * 100:.1f} cm" if data.marker_distance_m is not None else "Distance: ---"
-        cv2.putText(frame, dist_str, (x + 12, y + 130), cv2.FONT_HERSHEY_SIMPLEX, 0.42, self.COLOR_TEXT, 1, cv2.LINE_AA)
+        cv2.putText(frame, dist_str, (x + 12, y + 122), cv2.FONT_HERSHEY_SIMPLEX, 0.42, self.COLOR_TEXT, 1, cv2.LINE_AA)
 
-        # Calibration status
-        cal_str = "Calibrated: YES (intrinsics)" if data.is_calibrated else "Calibrated: NO (synthetic default)"
+        # Intrinsics status
+        cal_str = "INTRINSICS: CALIBRATED" if data.is_calibrated else "INTRINSICS: FALLBACK PINHOLE"
         cal_col = self.COLOR_GREEN if data.is_calibrated else self.COLOR_YELLOW
-        cv2.putText(frame, cal_str, (x + 12, y + 158), cv2.FONT_HERSHEY_SIMPLEX, 0.40, cal_col, 1, cv2.LINE_AA)
+        cv2.putText(frame, cal_str, (x + 12, y + 148), cv2.FONT_HERSHEY_SIMPLEX, 0.40, cal_col, 1, cv2.LINE_AA)
 
-        # Pose Quality Note
+        # Extrinsics status
+        if data.transform_mode == "se3":
+            ext_str = "EXTRINSICS: CALIBRATED" if data.is_calibrated_extrinsics else "EXTRINSICS: NOMINAL"
+            ext_col = self.COLOR_GREEN if data.is_calibrated_extrinsics else self.COLOR_YELLOW
+        else:
+            ext_str = "TRANSFORM: RELATIVE TELEOP"
+            ext_col = self.COLOR_CYAN
+        cv2.putText(frame, ext_str, (x + 12, y + 172), cv2.FONT_HERSHEY_SIMPLEX, 0.40, ext_col, 1, cv2.LINE_AA)
+
+        # Guidance note
         if not data.is_calibrated:
-            cv2.putText(frame, "(!) Run tools/calibrate_camera.py", (x + 12, y + 180), cv2.FONT_HERSHEY_SIMPLEX, 0.38, self.COLOR_YELLOW, 1, cv2.LINE_AA)
-            cv2.putText(frame, "    for metric calibration", (x + 12, y + 196), cv2.FONT_HERSHEY_SIMPLEX, 0.38, self.COLOR_YELLOW, 1, cv2.LINE_AA)
+            cv2.putText(frame, "Run tools/calibrate_camera.py", (x + 12, y + 200), cv2.FONT_HERSHEY_SIMPLEX, 0.36, self.COLOR_MUTED, 1, cv2.LINE_AA)
+        elif data.transform_mode == "se3" and not data.is_calibrated_extrinsics:
+            cv2.putText(frame, "Run tools/calibrate_extrinsics.py", (x + 12, y + 200), cv2.FONT_HERSHEY_SIMPLEX, 0.36, self.COLOR_MUTED, 1, cv2.LINE_AA)
 
     def _draw_robot_panel(self, frame: np.ndarray, data: TelemetryData, x: int, y: int) -> None:
         pw, ph = 310, 235

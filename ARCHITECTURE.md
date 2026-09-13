@@ -71,7 +71,19 @@ Matrix inversion is performed analytically:
 
 $$\mathbf{T}^{-1} = \begin{bmatrix} \mathbf{R}^T & -\mathbf{R}^T \mathbf{t} \\ \mathbf{0}_{1\times3} & 1 \end{bmatrix}$$
 
-### 2.3 1 Euro Adaptive Filtering
+### 2.3 World-Anchor Camera-to-Virtual-Robot Extrinsic Calibration
+To ground the camera optical coordinate frame $\mathcal{F}_C$ in the Franka Panda base coordinate frame $\mathcal{F}_R$, a dedicated ArUco World Anchor Marker (**Marker ID 10**) is placed at a known, configured rigid pose $\mathbf{T}_{\text{robot}\to\text{anchor}} \in SE(3)$.
+
+Upon detecting the anchor marker in the optical frame $\mathbf{T}_{\text{camera}\to\text{anchor}}$, the rigid transform $\mathbf{T}_{\text{robot}\to\text{camera}}$ is solved analytically:
+
+$$\mathbf{T}_{\text{robot}\to\text{camera}} = \mathbf{T}_{\text{robot}\to\text{anchor}} \cdot \mathbf{T}_{\text{camera}\to\text{anchor}}^{-1}$$
+
+Where:
+- $\mathbf{T}_{\text{camera}\to\text{anchor}}^{-1} = \begin{bmatrix} \mathbf{R}^T & -\mathbf{R}^T \mathbf{t} \\ \mathbf{0} & 1 \end{bmatrix}$ is the exact Lie group analytical inverse.
+- Multi-sample robust median pose aggregation with $> 3\sigma$ Euclidean and geodesic outlier filtering removes optical noise.
+- Repeatability is quantified via translation standard deviation $\sigma_{\text{pos}}$ (mm) and geodesic rotation dispersion $\sigma_{\text{rot}}$ (deg).
+
+### 2.4 1 Euro Adaptive Filtering
 To eliminate optical tracking jitter at low velocities without introducing phase lag during rapid motion, the 1 Euro filter adjusts its low-pass cutoff frequency $\hat{f}_c$ dynamically:
 
 $$\hat{f}_c = f_{c,\min} + \beta \|\dot{\mathbf{x}}\|, \quad \alpha = \frac{1}{1 + \frac{1}{2\pi \hat{f}_c \Delta t}}$$
