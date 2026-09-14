@@ -72,62 +72,28 @@ VisionRobotTwin maintains a strict engineering distinction across validation tie
 ## 4. PyBullet Simulation Benchmark Evidence
 
 > [!NOTE]
-> All metrics below represent rigorous, reproducible **PyBullet Physics Simulation Benchmarks** evaluated across identical 6-DoF candidate target distributions and settled initializations. They do not represent physical hardware trials.
+> All metrics below represent rigorous, reproducible **PyBullet Physics Simulation Benchmarks** evaluated across identical 6-DoF candidate target distributions and settled initializations under the v1.2 reference configuration. They do not represent physical hardware trials.
 
-### A. Cross-Robot Kinematics & Planning Benchmark (`tools/compare_robots.py`)
-*Evaluated on 15 shared reachable SE(3) targets accepted by both manipulators ($IK_{\text{pos residual}} \le 25\text{ mm}$, $IK_{\text{orn residual}} \le 10^\circ$).*
+### Task-Space Research Benchmark Suite (`tools/run_taskspace_experiments.py`)
 
-| Metric | Franka Emika Panda | KUKA LBR iiwa |
-| :--- | :---: | :---: |
-| **Shared Targets Evaluated** | 15 / 15 (100%) | 15 / 15 (100%) |
-| **IK Solve Time (Mean / P95)** | 1.21 ms / 1.48 ms | 0.93 ms / 1.11 ms |
-| **FK Measured IK Position Residual (Mean / P95)** | 1.22 mm / 1.69 mm | 20.82 mm / 21.73 mm |
-| **FK Measured IK Orientation Residual (Mean)** | 0.016 deg | 0.088 deg |
-| **Dynamic Execution Tracking Samples** | 7,200 | 7,200 |
-| **Dynamic Position Tracking Error (Mean / P95)** | 19.72 mm / 128.72 mm | 23.81 mm / 154.03 mm |
-| **Dynamic Orientation Tracking Error (Mean)** | 0.16 deg | 5.77 deg |
-| **Final Position / Orientation Error (Mean)** | 19.48 mm / 0.23 deg | 40.21 mm / 6.46 deg |
-| **Yoshikawa Manipulability Index $w(\mathbf{q})$ (Mean / Min)** | 0.0565 / 0.0377 | 0.0624 / 0.0510 |
-| **Max Jacobian Condition Number $\kappa(\mathbf{J})$** | 10.00 | 12.78 |
-| **Direct Free Path Rate** | 100.0% (15/15) | 93.3% (14/15) |
-| **RRT-Connect Planning Success Rate** | 100.0% (15/15) | 100.0% (15/15) |
-| **RRT-Connect Planning Time (Mean)** | 26.84 ms | 59.00 ms |
-| **Planned Joint Path Length (Mean)** | 0.443 rad | 0.734 rad |
+Under the provenance-locked v1.2 reference suite ([docs/experiments/v1.2_reference/REPORT.md](docs/experiments/v1.2_reference/REPORT.md)):
+- **Feasibility Preflight**: 5 of 5 task trajectories passed dense stride-1 feasibility verification (`preflight_sample_stride = 1`).
+- **Tracking Trials**: 60 deterministic trials executed across Panda and KUKA under IK and Resolved-Rate control.
+- **Completion Criteria**: 45 of 60 trials met configured completion criteria ($e_{\text{pos}} \le 10\text{ mm}$, $e_{\text{orn}} \le 10^\circ$).
+- **KUKA IK Settling**: 15 KUKA IK trials exceeded the 10 mm completion position threshold due to numerical IK offsets, while KUKA Resolved-Rate velocity control achieved 100% completion success across all five trajectories.
+- **Collisions & Safety**: Recorded **0 self-collisions**, **0 environment collisions**, and **0 singularity warnings** ($\kappa > 100$ or $\sigma_{\min} < 0.01$).
 
-### B. Cross-Controller Tracking & Convergence Benchmark (`tools/compare_controllers.py`)
-*Evaluated on Franka Panda across 10 identical 3D trajectories ($T=2.0\text{s}$, 0.5s settle stage @ 5.0 mm tolerance, 240 Hz fixed-step physics, settled start).*
-
-| Performance Metric | IK Position Control | Resolved-Rate Velocity Control |
-| :--- | :---: | :---: |
-| **Requested / Executed Trajectories** | 10 / 10 (100%) | 10 / 10 (100%) |
-| **Mean Dynamic Position Tracking Error** | 11.730 mm | **4.699 mm** |
-| **P95 Dynamic Position Tracking Error** | 30.443 mm | **11.440 mm** |
-| **Final Position Error** | 7.976 mm | **0.056 mm** |
-| **Mean Dynamic Orientation Error** | 7.244 deg | **5.443 deg** |
-| **Final Orientation Error** | 6.968 deg | **1.072 deg** |
-| **Settled within 5.0 mm Final-Goal Tolerance** | 30.0% | **100.0%** |
-| **Time to Final Goal Tolerance ($t_{\text{tol}}$)** | 2.272 s | **1.719 s** |
-| **Measured Peak Joint Velocity** | 0.261 rad/s | 0.469 rad/s |
-| **Total Joint Travel Distance** | **11.362 rad** | 13.138 rad |
-| **Min Yoshikawa Manipulability** | 0.0376 | 0.0352 |
-
-**Engineering Trade-Off Analysis**:
-- **IK Position Control** achieves low peak joint velocities (0.261 rad/s) and minimal total joint displacement (11.36 rad).
-- **Resolved-Rate Velocity Control** provides dramatically superior dynamic tracking (4.70 mm vs 11.73 mm), near-zero final position error (0.056 mm vs 7.976 mm), 100% tolerance settling within 1.72s, and precise orientation alignment (1.07 deg final error).
-
-### C. Task-Space Research Benchmark Suite (`tools/run_taskspace_experiments.py`)
-*Evaluated across 5 deterministic Cartesian paths and 1 obstacle reach planning test (3 statistical repeats, 240 Hz fixed-step physics, preflight IK feasibility verified).*
-
-| Experiment | Panda IK (RMSE / Travel / Success) | Panda Resolved-Rate (RMSE / Travel / Success) | KUKA iiwa IK (RMSE / Travel / Success) | KUKA iiwa Resolved-Rate (RMSE / Travel / Success) |
-| :--- | :---: | :---: | :---: | :---: |
-| **Line (10 cm)** | 2.02 mm / 0.36 rad / **100%** | 10.23 mm / 0.38 rad / **100%** | 20.45 mm / 0.28 rad / 0%* | 11.02 mm / 0.28 rad / **100%** |
-| **Circle (R=5 cm)** | 30.80 mm / 0.81 rad / **100%** | 24.73 mm / 0.74 rad / **100%** | 21.18 mm / 0.60 rad / 0%* | 25.04 mm / 0.60 rad / **100%** |
-| **Figure Eight** | 20.15 mm / 0.84 rad / **100%** | 18.68 mm / 0.85 rad / **100%** | 21.30 mm / 0.76 rad / 0%* | 19.08 mm / 0.77 rad / **100%** |
-| **Waypoint Box** | 15.53 mm / 0.58 rad / **100%** | 19.07 mm / 0.59 rad / **100%** | 21.06 mm / 0.44 rad / 0%* | 19.45 mm / 0.44 rad / **100%** |
-| **SE(3) Sweep ($\pm 20^\circ$)** | 11.10 mm / 0.61 rad / **100%** | 6.52 mm / 0.80 rad / **100%** | 20.68 mm / 0.43 rad / 0%* | 7.68 mm / 0.79 rad / **100%** |
-
-*\*Note on KUKA IK settling rate: PyBullet's default numerical IK solver exhibits a persistent ~20.5 mm offset for KUKA's 7-DoF kinematic chain under this orientation frame, which strictly exceeds the 10.0 mm completion settling tolerance while Resolved-Rate velocity control eliminates this offset and achieves 100% success.*
+| Experiment | Panda IK RMSE | Panda RR RMSE | KUKA IK RMSE | KUKA RR RMSE | Success Pattern |
+| :--- | :---: | :---: | :---: | :---: | :---: |
+| **Line (10 cm)** | 2.39 mm | 12.27 mm | 20.44 mm | 13.06 mm | Panda 100% / KUKA RR 100% |
+| **Circle ($R=5\text{ cm}$)** | 27.46 mm | 22.38 mm | 20.99 mm | 22.67 mm | Panda 100% / KUKA RR 100% |
+| **Figure Eight** | 10.81 mm | 15.38 mm | 20.92 mm | 15.71 mm | Panda 100% / KUKA RR 100% |
+| **Waypoint Box** | 6.56 mm | 13.95 mm | 20.81 mm | 14.32 mm | Panda 100% / KUKA RR 100% |
+| **SE3 Sweep ($\pm 20^\circ$)** | 10.31 mm | 5.95 mm | 20.63 mm | 7.19 mm | Panda 100% / KUKA RR 100% |
 
 #### Obstacle Reach Planning Evaluation
-- **Franka Panda**: Direct joint path `BLOCKED` by obstacle. RRT-Connect planned collision-free path in **1084 ms** (50 $\to$ 14 waypoints, minimum clearance 2.7 mm, final error 1.20 mm, **`SUCCESS`**).
-- **KUKA LBR iiwa**: Direct joint path `BLOCKED` by obstacle. RRT-Connect planned collision-free path in **615 ms** (36 $\to$ 4 waypoints, minimum clearance 5.6 mm, final error 18.82 mm, **`SUCCESS`**).
+Under the reference PyBullet obstacle avoidance scenario ($[0.42, -0.18, 0.35] \to [0.42, 0.18, 0.35]$ with box obstacle at $[0.42, 0.0, 0.35]$), planning success requires collision-free execution and final endpoint error $\le 25.0\text{ mm}$:
+- **Franka Panda**: Direct joint path `BLOCKED` by obstacle. RRT-Connect planned collision-free path in **1473.5 ms** (50 $\to$ 14 waypoints, raw travel 2.39 rad $\to$ smoothed 1.70 rad, minimum clearance 0.0027 m, final error 1.20 mm, **`PASS`**).
+- **KUKA LBR iiwa**: Direct joint path `BLOCKED` by obstacle. RRT-Connect planned collision-free path in **669.6 ms** (36 $\to$ 4 waypoints, raw travel 1.70 rad $\to$ smoothed 1.30 rad, minimum clearance 0.0056 m, final error 18.82 mm, **`PASS`**).
+
+Complete quantitative trial time series, full metrics tables, and 3D trajectory plots are available in [docs/experiments/v1.2_reference/REPORT.md](docs/experiments/v1.2_reference/REPORT.md).

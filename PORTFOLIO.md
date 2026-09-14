@@ -37,7 +37,7 @@
 
 ### Challenge 4: Collision-Aware Motion Planning Around Obstacles
 - **Problem**: Direct joint interpolation collides when physical obstacles are present in the workspace.
-- **Solution**: Implemented a bidirectional **RRT-Connect** joint-space planner with state-preserving collision queries and randomized path shortcutting. In benchmark trials, RRT-Connect achieved a 100% success rate routing around mid-workspace obstacles with zero collisions.
+- **Solution**: Implemented a bidirectional **RRT-Connect** joint-space planner with state-preserving collision queries and randomized path shortcutting. Both deterministic reference obstacle-reach trials produced collision-free RRT-Connect plans satisfying the configured 25 mm endpoint criterion.
 
 ### Challenge 5: Multi-Robot Task-Space Experimentation & Reproducibility
 - **Problem**: Comparing disparate robots (Franka Panda vs KUKA iiwa) and controllers (IK vs Resolved-Rate) often suffers from subtle biases (different path geometries, varying timesteps, asynchronous clocks).
@@ -64,7 +64,7 @@
   > *Architected a modular multi-manipulator robotics digital twin in Python/PyBullet supporting Franka Emika Panda and KUKA LBR iiwa; developed geometric Jacobian solvers, adaptive DLS resolved-rate control, Yoshikawa manipulability telemetry, null-space redundancy optimization, and collision-aware RRT-Connect motion planning, verified via 131 automated unit/integration tests.*
 
 - **Controls & Research Engineer Bullet**:
-  > *Built a reproducible multi-manipulator task-space benchmarking framework with provenance-tracked simulation results comparing IK and Jacobian resolved-rate control across shared Cartesian trajectories (lines, circles, lemniscates, waypoints, SE(3) sweeps), achieving sub-millimeter settled precision in simulation and zero singularity warnings under 240 Hz fixed-step physics.*
+  > *Built a provenance-tracked multi-manipulator task-space benchmarking framework that quantifies tracking error, orientation error, manipulability, joint travel and controller trade-offs across deterministic PyBullet trajectories.*
 
 - **Computer Vision / Controls Engineer Bullet**:
   > *Engineered real-time 6-DoF visual teleoperation using monocular OpenCV ArUco pose estimation and camera calibration; implemented closed-loop differential IK, 1 Euro adaptive signal filtering, quaternion SLERP interpolation, and cross-robot benchmarking suites.*

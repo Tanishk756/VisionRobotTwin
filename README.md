@@ -9,7 +9,7 @@
 [![Perception: OpenCV](https://img.shields.io/badge/Perception-OpenCV%204.8+-red.svg)](https://opencv.org/)
 [![CI Validation](https://github.com/Tanishk756/VisionRobotTwin/actions/workflows/tests.yml/badge.svg)](https://github.com/Tanishk756/VisionRobotTwin/actions/workflows/tests.yml)
 
-**Current Stable Release**: `v1.2.0` | **Development Branch**: `release/v1.2.0` | **Maintainer**: [Tanishk Singhal](https://github.com/Tanishk756) ([tanisksinghal6285@gmail.com](mailto:tanisksinghal6285@gmail.com))
+**Current Release**: `v1.2.0` | **Maintainer**: [Tanishk Singhal](https://github.com/Tanishk756) ([tanisksinghal6285@gmail.com](mailto:tanisksinghal6285@gmail.com))
 
 [Changelog](CHANGELOG.md) • [Validation Matrix](VALIDATION.md) • [Architecture](ARCHITECTURE.md) • [Portfolio Guide](PORTFOLIO.md) • [Authors](AUTHORS.md) • [Citation](CITATION.cff) • [Contributing](CONTRIBUTING.md) • [Security](SECURITY.md)
 
@@ -166,20 +166,8 @@ Evaluates kinematics, manipulability, and planning across identical 3D target po
 ```powershell
 python tools/compare_robots.py --robots panda kuka_iiwa --headless
 ```
-Artifacts are saved to `benchmarks/robot_comparison_YYYYMMDD_HHMMSS/` (`summary.json` and `results.csv`).
 
-#### PyBullet Simulation Benchmark Results (15 Shared Reachable Targets)
-
-| Benchmark Metric | Franka Emika Panda | KUKA LBR iiwa |
-| :--- | :---: | :---: |
-| **IK Solve Time (Mean / P95)** | 1.21 ms / 1.48 ms | 0.93 ms / 1.11 ms |
-| **FK Measured IK Position Residual** | 1.22 mm | 20.82 mm |
-| **Dynamic Position Error (Mean / P95)** | 19.72 mm / 128.72 mm | 23.81 mm / 154.03 mm |
-| **Dynamic Orientation Error (Mean)** | 0.16 deg | 5.77 deg |
-| **Yoshikawa Manipulability (Mean / Min)** | 0.0565 / 0.0377 | 0.0624 / 0.0510 |
-| **RRT Planning Time / Success** | 26.84 ms (100%) | 59.00 ms (100%) |
-
-### 2. Task-Space Research Experiment Suite & Benchmarking
+### 2. Task-Space Research Experiment Suite & Reference Benchmarks
 A reproducible research-grade task-space benchmarking framework comparing Franka Emika Panda vs KUKA LBR iiwa across identical Cartesian trajectories in PyBullet:
 ```powershell
 python tools/run_taskspace_experiments.py --all --repeats 3 --headless
@@ -190,15 +178,15 @@ python tools/run_taskspace_experiments.py --all --repeats 3 --headless
 > [!NOTE]
 > Under the v1.2 PyBullet reference configuration, 45 of 60 deterministic tracking trials satisfied the configured completion criteria. 15 KUKA IK trials did not satisfy the 10 mm completion threshold under this configuration due to numerical IK offsets, whereas Resolved-Rate velocity control achieved 100% completion success across all paths. Both reference obstacle-reach planning runs produced collision-free plans satisfying the explicit 25 mm endpoint criterion.
 
-| Experiment | Metric | Panda (IK) | Panda (Resolved-Rate) | KUKA iiwa (IK) | KUKA iiwa (Resolved-Rate) |
-| :--- | :--- | :---: | :---: | :---: | :---: |
-| **Line (10 cm)** | **RMSE Pos** / **Joint Travel** | 2.02 mm / 0.36 rad | 10.23 mm / 0.38 rad | 20.45 mm / 0.28 rad | 11.02 mm / 0.28 rad |
-| **Circle ($R=5\text{ cm}$)** | **RMSE Pos** / **Joint Travel** | 30.80 mm / 0.81 rad | 24.73 mm / 0.74 rad | 21.18 mm / 0.60 rad | 25.04 mm / 0.60 rad |
-| **Figure Eight** | **RMSE Pos** / **Joint Travel** | 20.15 mm / 0.84 rad | 18.68 mm / 0.85 rad | 21.30 mm / 0.76 rad | 19.08 mm / 0.77 rad |
-| **Waypoint Box** | **RMSE Pos** / **Joint Travel** | 15.53 mm / 0.58 rad | 19.07 mm / 0.59 rad | 21.06 mm / 0.44 rad | 19.45 mm / 0.44 rad |
-| **SE3 Sweep ($\pm 20^\circ$)** | **RMSE Pos** / **Mean Orn** | 11.10 mm / 0.61 rad | **6.52 mm** / 0.80 rad | 20.68 mm / 0.43 rad | **7.68 mm** / 0.79 rad |
+| Experiment | Panda IK RMSE | Panda RR RMSE | KUKA IK RMSE | KUKA RR RMSE | Success Pattern |
+| :--- | :---: | :---: | :---: | :---: | :---: |
+| **Line (10 cm)** | 2.39 mm | 12.27 mm | 20.44 mm | 13.06 mm | Panda 100% / KUKA RR 100% |
+| **Circle ($R=5\text{ cm}$)** | 27.46 mm | 22.38 mm | 20.99 mm | 22.67 mm | Panda 100% / KUKA RR 100% |
+| **Figure Eight** | 10.81 mm | 15.38 mm | 20.92 mm | 15.71 mm | Panda 100% / KUKA RR 100% |
+| **Waypoint Box** | 6.56 mm | 13.95 mm | 20.81 mm | 14.32 mm | Panda 100% / KUKA RR 100% |
+| **SE3 Sweep ($\pm 20^\circ$)** | 10.31 mm | 5.95 mm | 20.63 mm | 7.19 mm | Panda 100% / KUKA RR 100% |
 
-Full research report, plots, and methodology: [EXPERIMENTS.md](EXPERIMENTS.md) • [Reference Report](docs/experiments/v1.2_reference/REPORT.md)
+Complete quantitative metrics, time series, and 3D trajectory plots are available in [docs/experiments/v1.2_reference/REPORT.md](docs/experiments/v1.2_reference/REPORT.md).
 
 ---
 
