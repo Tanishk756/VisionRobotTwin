@@ -166,11 +166,12 @@ Artifacts are saved to `benchmarks/robot_comparison_YYYYMMDD_HHMMSS/` (`summary.
 
 | Benchmark Metric | Franka Emika Panda | KUKA LBR iiwa |
 | :--- | :---: | :---: |
-| **IK Solve Time (Mean / P95)** | 2.06 ms / 3.05 ms | 1.32 ms / 1.48 ms |
-| **FK Measured IK Residual** | 1.19 mm | 18.85 mm |
-| **Dynamic Execution Error** | 35.05 mm | 18.87 mm |
-| **Yoshikawa Manipulability** | 0.0600 | 0.0647 |
-| **RRT Planning Time / Success** | 52.84 ms (100%) | 67.11 ms (100%) |
+| **IK Solve Time (Mean / P95)** | 1.21 ms / 1.48 ms | 0.93 ms / 1.11 ms |
+| **FK Measured IK Position Residual** | 1.22 mm | 20.82 mm |
+| **Dynamic Position Error (Mean / P95)** | 19.72 mm / 128.72 mm | 23.81 mm / 154.03 mm |
+| **Dynamic Orientation Error (Mean)** | 0.16 deg | 5.77 deg |
+| **Yoshikawa Manipulability (Mean / Min)** | 0.0565 / 0.0377 | 0.0624 / 0.0510 |
+| **RRT Planning Time / Success** | 26.84 ms (100%) | 59.00 ms (100%) |
 
 ### 2. Cross-Controller Benchmark Tool
 Compares Inverse Kinematics Position Control vs Resolved-Rate Jacobian Velocity Control:
@@ -179,14 +180,17 @@ python tools/compare_controllers.py --robot panda --headless
 ```
 Artifacts are saved to `benchmarks/controller_comparison_YYYYMMDD_HHMMSS/` (`summary.json` and `results.csv`).
 
-#### PyBullet Simulation Benchmark Results (Franka Panda, 10 Trials @ 2.0s)
+#### PyBullet Simulation Benchmark Results (Franka Panda, 10 Trials @ 2.0s + 0.5s Settle)
 
 | Performance Metric | IK Position Control | Resolved-Rate Velocity Control |
 | :--- | :---: | :---: |
-| **Mean Tracking Error** | **3.774 mm** | 4.698 mm |
-| **Final Settled Position Error** | 5.887 mm | **1.118 mm** |
-| **Settled within Tolerance** | 50.0% | **100.0%** |
-| **Total Joint Travel Distance** | 15.962 rad | **11.849 rad** (25.8% smoother) |
+| **Mean Dynamic Tracking Error** | 11.730 mm | **4.699 mm** |
+| **P95 Dynamic Tracking Error** | 30.443 mm | **11.440 mm** |
+| **Final Settled Position Error** | 7.976 mm | **0.056 mm** |
+| **Final Orientation Error** | 6.968 deg | **1.072 deg** |
+| **Settled within 5.0 mm Tolerance** | 30.0% | **100.0%** |
+| **Time to Final Goal Tolerance** | 2.272 s | **1.719 s** |
+| **Total Joint Travel Distance** | **11.362 rad** | 13.138 rad |
 
 ---
 
@@ -213,7 +217,7 @@ pytest -v
 | `test_calibration_quality.py` | Camera Calibration Heuristics & Diagnostics | **PASS** |
 | `test_extrinsics_math.py` | World-Anchor Extrinsic Calibration Math | **PASS** |
 | `test_transforms.py` | SE(3) Lie Group Matrix & Quaternion Conversions | **PASS** |
-| **Total Automated Tests** | **Full Multi-Robot Robotics Suite** | **106 / 106 PASSING** |
+| **Total Automated Tests** | **Full Multi-Robot Robotics Suite** | **112 / 112 PASSING** |
 
 ---
 

@@ -39,7 +39,7 @@ This document provides a strict, evidence-grounded validation report for all per
 +-------------------------------------------------------------------------------+
 | PARAMETER                            | STATUS / VALUE                         |
 +-------------------------------------------------------------------------------+
-| Automated Unit & Integration Tests   | PASSING (106 / 106 tests passing)      |
+| Automated Unit & Integration Tests   | PASSING (112 / 112 tests passing)      |
 | Continuous Integration (CI)          | Configured (Windows Python 3.11 & 3.12)|
 | Supported Manipulators               | Franka Emika Panda & KUKA LBR iiwa     |
 | Physics Simulation Clock Rate        | 240 Hz Target (Fixed 1/240s timestep)  |
@@ -59,33 +59,42 @@ This document provides a strict, evidence-grounded validation report for all per
 > All metrics below represent rigorous, reproducible **PyBullet Physics Simulation Benchmarks** evaluated across identical 6-DoF candidate target distributions and settled initializations. They do not represent physical hardware trials.
 
 ### A. Cross-Robot Kinematics & Planning Benchmark (`tools/compare_robots.py`)
-*Evaluated on 15 shared reachable targets accepted by both manipulators ($IK_{\text{residual}} < 25\text{ mm}$).*
+*Evaluated on 15 shared reachable SE(3) targets accepted by both manipulators ($IK_{\text{pos residual}} \le 25\text{ mm}$, $IK_{\text{orn residual}} \le 10^\circ$).*
 
 | Metric | Franka Emika Panda | KUKA LBR iiwa |
 | :--- | :---: | :---: |
 | **Shared Targets Evaluated** | 15 / 15 (100%) | 15 / 15 (100%) |
-| **IK Solve Time (Mean / P95)** | 2.06 ms / 3.05 ms | 1.32 ms / 1.48 ms |
-| **FK Measured IK Position Residual (Mean / P95)** | 1.19 mm / 3.01 mm | 18.85 mm / 23.36 mm |
-| **Dynamic Execution Tracking Error (Mean / P95)** | 35.05 mm / 37.15 mm | 18.87 mm / 23.41 mm |
-| **Yoshikawa Manipulability Index $w(\mathbf{q})$** | 0.0600 | 0.0647 |
-| **Jacobian Condition Number $\kappa(\mathbf{J})$** | 8.80 | 8.53 |
+| **IK Solve Time (Mean / P95)** | 1.21 ms / 1.48 ms | 0.93 ms / 1.11 ms |
+| **FK Measured IK Position Residual (Mean / P95)** | 1.22 mm / 1.69 mm | 20.82 mm / 21.73 mm |
+| **FK Measured IK Orientation Residual (Mean)** | 0.016 deg | 0.088 deg |
+| **Dynamic Execution Tracking Samples** | 7,200 | 7,200 |
+| **Dynamic Position Tracking Error (Mean / P95)** | 19.72 mm / 128.72 mm | 23.81 mm / 154.03 mm |
+| **Dynamic Orientation Tracking Error (Mean)** | 0.16 deg | 5.77 deg |
+| **Final Position / Orientation Error (Mean)** | 19.48 mm / 0.23 deg | 40.21 mm / 6.46 deg |
+| **Yoshikawa Manipulability Index $w(\mathbf{q})$ (Mean / Min)** | 0.0565 / 0.0377 | 0.0624 / 0.0510 |
+| **Max Jacobian Condition Number $\kappa(\mathbf{J})$** | 10.00 | 12.78 |
+| **Direct Free Path Rate** | 100.0% (15/15) | 93.3% (14/15) |
 | **RRT-Connect Planning Success Rate** | 100.0% (15/15) | 100.0% (15/15) |
-| **RRT-Connect Planning Time (Mean)** | 52.84 ms | 67.11 ms |
-| **Planned Joint Path Length (Mean)** | 2.534 rad | 2.391 rad |
+| **RRT-Connect Planning Time (Mean)** | 26.84 ms | 59.00 ms |
+| **Planned Joint Path Length (Mean)** | 0.443 rad | 0.734 rad |
 
 ### B. Cross-Controller Tracking & Convergence Benchmark (`tools/compare_controllers.py`)
-*Evaluated on Franka Panda across 10 identical 3D trajectories ($T=2.0\text{s}$, 240 Hz fixed-step physics, settled start).*
+*Evaluated on Franka Panda across 10 identical 3D trajectories ($T=2.0\text{s}$, 0.5s settle stage @ 5.0 mm tolerance, 240 Hz fixed-step physics, settled start).*
 
 | Performance Metric | IK Position Control | Resolved-Rate Velocity Control |
 | :--- | :---: | :---: |
-| **Mean Cartesian Tracking Error** | **3.774 mm** | 4.698 mm |
-| **P95 Cartesian Tracking Error** | **7.763 mm** | 7.848 mm |
-| **Final Settled Position Error** | 5.887 mm | **1.118 mm** |
-| **Settled within 2.0 mm Tolerance** | 50.0% | **100.0%** |
-| **Measured Peak Joint Velocity** | 0.261 rad/s | 0.470 rad/s |
-| **Total Joint Travel Distance** | 15.962 rad | **11.849 rad** (25.8% smoother) |
-| **Trajectory Completion Rate** | 100% | 100% |
+| **Requested / Executed Trajectories** | 10 / 10 (100%) | 10 / 10 (100%) |
+| **Mean Dynamic Position Tracking Error** | 11.730 mm | **4.699 mm** |
+| **P95 Dynamic Position Tracking Error** | 30.443 mm | **11.440 mm** |
+| **Final Position Error** | 7.976 mm | **0.056 mm** |
+| **Mean Dynamic Orientation Error** | 7.244 deg | **5.443 deg** |
+| **Final Orientation Error** | 6.968 deg | **1.072 deg** |
+| **Settled within 5.0 mm Final-Goal Tolerance** | 30.0% | **100.0%** |
+| **Time to Final Goal Tolerance ($t_{\text{tol}}$)** | 2.272 s | **1.719 s** |
+| **Measured Peak Joint Velocity** | 0.261 rad/s | 0.469 rad/s |
+| **Total Joint Travel Distance** | **11.362 rad** | 13.138 rad |
+| **Min Yoshikawa Manipulability** | 0.0376 | 0.0352 |
 
 **Engineering Trade-Off Analysis**:
-- **IK Position Control** demonstrates lower transient tracking error along high-speed quintic segments.
-- **Resolved-Rate Velocity Control** provides superior final Cartesian convergence accuracy (1.118 mm vs 5.887 mm), 100% tolerance settling, and 25.8% reduced joint angular displacement via continuous damped velocity integration.
+- **IK Position Control** achieves low peak joint velocities (0.261 rad/s) and minimal total joint displacement (11.36 rad).
+- **Resolved-Rate Velocity Control** provides dramatically superior dynamic tracking (4.70 mm vs 11.73 mm), near-zero final position error (0.056 mm vs 7.976 mm), 100% tolerance settling within 1.72s, and precise orientation alignment (1.07 deg final error).
