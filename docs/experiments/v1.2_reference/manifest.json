@@ -1,11 +1,11 @@
 {
   "version": "1.2.0-dev",
-  "git_commit_sha": "2eacd290c13ca7acc404aa4541d2e1adfd1ac5d5",
-  "timestamp_utc": "2026-09-14T09:06:51.981158+00:00",
+  "git_commit_sha": "8ffaf5ba868157c845a45480e7b89fab00304e78",
+  "timestamp_utc": "2026-09-14T10:35:20.228260+00:00",
   "environment": {
     "python_version": "3.12.10",
     "opencv_version": "5.0.0",
-    "numpy_version": "2.5.3",
+    "numpy_version": "2.2.6",
     "pybullet_version": "202010061",
     "os": "Windows",
     "architecture": "AMD64"

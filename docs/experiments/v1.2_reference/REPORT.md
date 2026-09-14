@@ -2,8 +2,8 @@
 
 > [!NOTE]
 > **REFERENCE PYBULLET SIMULATION RESULTS**  
-> Generated: 2026-09-14T09:06:51.981158+00:00 UTC  
-> Software Version: 1.2.0-dev | Commit: `2eacd290c13ca7acc404aa4541d2e1adfd1ac5d5`  
+> Generated: 2026-09-14T10:35:20.228260+00:00 UTC  
+> Software Version: 1.2.0-dev | Commit: `8ffaf5ba868157c845a45480e7b89fab00304e78`  
 > Physics Engine: PyBullet 202010061 (`DIRECT` mode, fixed timestep dt = 0.004167s / 240 Hz)  
 
 ---
@@ -22,7 +22,7 @@ This benchmark suite provides a mathematically rigorous, reproducible experiment
 | :--- | :--- | :--- |
 | **OS** | `Windows` | 10.0.26200 |
 | **Python** | `3.12.10` | CPython |
-| **NumPy** | `2.5.3` | Vectorized algebra |
+| **NumPy** | `2.2.6` | Vectorized algebra |
 | **PyBullet** | `202010061` | Physics client `DIRECT` |
 | **Physics Frequency** | `240 Hz` | `dt = 0.004167s` |
 | **Position Tolerance** | `5.0 mm` | Settled final position threshold |
@@ -123,8 +123,8 @@ A dedicated obstacle avoidance experiment tests the complete collision-aware pla
 
 | Robot | Direct Path State | RRT-Connect Status | Plan Time (ms) | Raw Waypoints | Smoothed Waypoints | Raw Travel (rad) | Smoothed Travel (rad) | Min Clearance (m) | Execution | Final Error (mm) |
 | :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
-| **PANDA** | `BLOCKED` | `SUCCESS` | 1112.2 ms | 50 | 14 | 2.39 rad | 1.70 rad | 0.0027 m | **PASS** | 1.20 mm |
-| **KUKA_IIWA** | `BLOCKED` | `SUCCESS` | 610.0 ms | 36 | 4 | 1.70 rad | 1.30 rad | 0.0056 m | **PASS** | 18.82 mm |
+| **PANDA** | `BLOCKED` | `SUCCESS` | 1288.2 ms | 50 | 14 | 2.39 rad | 1.70 rad | 0.0027 m | **PASS** | 1.20 mm |
+| **KUKA_IIWA** | `BLOCKED` | `SUCCESS` | 757.3 ms | 36 | 4 | 1.70 rad | 1.30 rad | 0.0056 m | **PASS** | 18.82 mm |
 
 ## 8. Failure Cases & Singularity Telemetry
 
