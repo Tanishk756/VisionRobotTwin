@@ -15,7 +15,8 @@ htmlcov/
 logs/*.log
 demo/data/*.csv
 demo/recordings/
-benchmarks/
+/benchmarks/
+/experiments/
 screenshots/*.png
 screenshots/*.json
 
