@@ -9,6 +9,7 @@ Supports:
 """
 
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Optional, Tuple, Union
 import time
 import numpy as np
@@ -56,7 +57,7 @@ class WorkspaceMapper:
         self.ws_config = ws_config
         self.tf_config = tf_config or TransformConfig()
 
-        # Build T_base_camera from nominal/calibrated extrinsics
+        # Build T_base_camera from nominal or calibrated extrinsics
         self._T_base_camera = create_homogeneous_matrix(
             rotation=self.tf_config.camera_euler_rpy_rad,
             translation=self.tf_config.camera_position_in_robot_base,
@@ -65,6 +66,22 @@ class WorkspaceMapper:
         self._last_commanded_position: Optional[np.ndarray] = None
         self._last_commanded_orientation: Optional[np.ndarray] = None
         self._last_update_time: Optional[float] = None
+
+        # Check for calibrated extrinsics
+        if getattr(self.tf_config, "is_calibrated_extrinsics", False) and getattr(self.tf_config, "extrinsics_file", None) is not None:
+            ext_file = Path(self.tf_config.extrinsics_file)
+            if ext_file.exists():
+                try:
+                    from vision.extrinsics import ExtrinsicCalibration
+                    calib_ext = ExtrinsicCalibration.load(ext_file)
+                    self._T_base_camera = calib_ext.T_robot_camera_matrix.copy()
+                    self.tf_config.is_calibrated_extrinsics = True
+                    logger.info(f"Loaded calibrated extrinsics from {ext_file}")
+                except Exception as e:
+                    logger.warning(f"Failed to load extrinsics from {ext_file}: {e}. Using nominal extrinsics.")
+                    self.tf_config.is_calibrated_extrinsics = False
+            else:
+                self.tf_config.is_calibrated_extrinsics = False
 
         # Camera-to-Robot interaction frame transformation matrix
         # Maps camera task-space delta (dx_cam, dy_cam, dz_cam) -> robot delta (dz_cam, -dx_cam, -dy_cam)

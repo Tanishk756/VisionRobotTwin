@@ -1,15 +1,15 @@
-# VisionRobotTwin: Real-Time Vision-Guided Robotic Manipulator Digital Twin
+# VisionRobotTwin: Multi-Manipulator Vision-Guided Robotics Research Platform
 
-> **Real-Time 6-DoF Vision-Guided Robotic Manipulation using ArUco Pose Estimation, Inverse Kinematics, and PyBullet Physics**
+> **Real-Time Vision-Guided Robotic Manipulation Digital Twin supporting Franka Emika Panda & KUKA LBR iiwa with Generic Kinematics, Resolved-Rate Control, Singularity Monitoring, Collision Planning, and Cross-Robot Benchmarking**
 
 [![Python 3.10+](https://img.shields.io/badge/Python-3.10%20%7C%203.11%20%7C%203.12-blue.svg)](https://www.python.org/)
-[![Release: v1.1.0](https://img.shields.io/badge/Release-v1.1.0-brightgreen.svg)](https://github.com/Tanishk756/VisionRobotTwin/releases/tag/v1.1.0)
+[![Release: v1.2.0](https://img.shields.io/badge/Release-v1.2.0-brightgreen.svg)](https://github.com/Tanishk756/VisionRobotTwin/releases/tag/v1.2.0)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
-[![PyBullet](https://img.shields.io/badge/Physics-PyBullet-orange.svg)](https://pybullet.org/)
-[![OpenCV](https://img.shields.io/badge/Perception-OpenCV%204.8+-red.svg)](https://opencv.org/)
+[![Physics: PyBullet](https://img.shields.io/badge/Physics-PyBullet-orange.svg)](https://pybullet.org/)
+[![Perception: OpenCV](https://img.shields.io/badge/Perception-OpenCV%204.8+-red.svg)](https://opencv.org/)
 [![CI Validation](https://github.com/Tanishk756/VisionRobotTwin/actions/workflows/tests.yml/badge.svg)](https://github.com/Tanishk756/VisionRobotTwin/actions/workflows/tests.yml)
 
-**Current Release**: `v1.1.0` | **Maintainer**: [Tanishk Singhal](https://github.com/Tanishk756) ([tanisksinghal6285@gmail.com](mailto:tanisksinghal6285@gmail.com))
+**Current Release**: `v1.2.0` | **Maintainer**: [Tanishk Singhal](https://github.com/Tanishk756) ([tanisksinghal6285@gmail.com](mailto:tanisksinghal6285@gmail.com))
 
 [Changelog](CHANGELOG.md) • [Validation Matrix](VALIDATION.md) • [Architecture](ARCHITECTURE.md) • [Portfolio Guide](PORTFOLIO.md) • [Authors](AUTHORS.md) • [Citation](CITATION.cff) • [Contributing](CONTRIBUTING.md) • [Security](SECURITY.md)
 
@@ -17,31 +17,35 @@
 
 ## 📌 Overview
 
-**VisionRobotTwin** is a real-time, closed-loop vision-guided robotics software system that connects a webcam video stream to a high-fidelity **Franka Emika Panda (7-DoF)** digital twin simulated in **PyBullet**.
+**VisionRobotTwin** is a robot-agnostic vision-guided manipulation and digital-twin research framework in Python, OpenCV, and PyBullet supporting:
+- **Franka Emika Panda** and **KUKA LBR iiwa** (7-DoF manipulators)
+- **Generic Forward Kinematics (FK)** and **Inverse Kinematics (IK)** with measured FK residuals
+- **Geometric Spatial Jacobian** computation
+- **Resolved-rate Cartesian velocity control** with adaptive Damped Least-Squares (DLS)
+- **Yoshikawa manipulability and SVD singularity analysis**
+- **Null-space joint centering** for kinematic redundancy resolution
+- **Joint quintic polynomial** and **Cartesian SE(3) SLERP trajectories**
+- **Self and environment collision checking** with simulation state preservation
+- **Bidirectional RRT-Connect motion planning** with randomized path shortcutting
+- **Reproducible task-space benchmarking suite** across standardized trajectories
+- **Camera intrinsic and world-anchor extrinsic calibration tooling**
 
-A physical or synthetic **ArUco marker** is detected in 3D space, its 6-DoF metric pose is estimated using camera intrinsics and Perspective-n-Point (PnP), filtered to eliminate high-frequency sensor noise, transformed across rigid coordinate frames ($SE(3)$), mapped and clamped into the reachable robot workspace, and resolved into 7-DoF joint position commands via numerical **Damped Least-Squares Inverse Kinematics (IK)**.
-
-The system features:
-1. **Manual Teleoperation Tracking Mode**: The Franka Panda end-effector tracks physical ArUco marker translation and orientation in real time.
-2. **Autonomous Pick-and-Place Mode**: A perception-gated finite state machine coordinates multi-frame target stabilization, approach, descent, physical distance-gated virtual grasping, elevation, transfer, and release between detected target markers.
-
----
-
-## 📸 Demonstrations & Visual Overview
-
-### Synthetic End-to-End Simulation Demo (15s Digital Twin Session)
-![VisionRobotTwin Demo](demo/demo.gif)
-
-*Left: Real-time OpenCV HUD with ArUco 6-DoF tracking, filtering, and telemetry. Right: PyBullet 3D Franka Panda physics digital twin with trajectory visualizer.*
+The platform natively supports multiple 7-DoF industrial manipulators with strongly typed capability specifications, preventing non-existent hardware features (e.g. grippers on standard arms) from causing runtime errors.
 
 ---
 
-### High-Resolution Snapshots
+## 🤖 Supported Robot Matrix & Capabilities
 
-| Manual 6-DoF Teleoperation Tracking | Autonomous Pick & Place Sequence |
-| :---: | :---: |
-| ![Manual Tracking](screenshots/manual_tracking.png) | ![Pick and Place](screenshots/pick_and_place.png) |
-| *OpenCV HUD showing 6-DoF pose estimation, filtering, workspace mapping, and Franka Panda digital twin tracking.* | *Autonomous State Machine executing perception-gated approach, descent, distance-validated grasp, lift, transfer, and place.* |
+| Capability | Franka Emika Panda | KUKA LBR iiwa |
+| :--- | :---: | :---: |
+| **7-DoF Arm** | ✅ YES | ✅ YES |
+| **Vision Target Tracking** | ✅ YES | ✅ YES |
+| **Generic IK** | ✅ YES | ✅ YES |
+| **Resolved-Rate Control** | ✅ YES | ✅ YES |
+| **Collision Planning** | ✅ YES | ✅ YES |
+| **Gripper** | ✅ YES (2-Finger Parallel) | ❌ NO (Bare Flange) |
+| **Autonomous Pick / Place** | ✅ YES | ❌ NO (Disabled Cleanly) |
+| **URDF Source** | `pybullet_data/franka_panda/panda.urdf` | `pybullet_data/kuka_iiwa/model.urdf` |
 
 ---
 
@@ -49,51 +53,59 @@ The system features:
 
 ```mermaid
 flowchart TD
-    subgraph Perception Layer ["📷 Perception Layer"]
-        A[Physical Camera / Synthetic Generator] --> B[OpenCV 4.8+ Frame Capture]
-        B --> C[ArUco Detector DICT_4X4_50]
-        C --> D[PnP 6-DoF Pose Estimation]
-        D --> E[Adaptive Pose Filter EMA / 1-Euro & SLERP]
+    subgraph Perception ["📷 Perception Layer"]
+        A[Physical Camera / Synthetic Generator] --> B[OpenCV 4.8+ ArUco Pose Estimation]
+        B --> C[Adaptive Filter EMA / 1-Euro & SLERP]
     end
 
-    subgraph Kinematics & Transformation Layer ["📐 Kinematics & Transform Layer"]
-        E --> F["SE(3) Transform: T_base_marker = T_base_cam @ T_cam_marker"]
-        F --> G[Workspace Mapper & Time-Based Slew Limiter]
-        G --> H[Safety Bounds & NaN/Inf Protection]
-        H --> I[PyBullet Damped Least-Squares IK Solver]
+    subgraph Mapping ["📐 Workspace & Transform Layer"]
+        C --> D["SE(3) Coordinate Mapping: T_base_marker = T_base_cam @ T_cam_marker"]
+        D --> E[Workspace Bounding Box & Slew Limiter]
     end
 
-    subgraph Simulation & Control Layer ["🤖 Simulation & Control Digital Twin"]
-        I --> J[Joint Position Controller]
-        J --> K[Franka Emika Panda 7-DoF Digital Twin]
-        K --> L[Distance-Gated Virtual Gripper Manager]
-        K --> M[3D Trajectory Visualizer]
+    subgraph RoboticsStack ["🦾 Generic Robotics Stack"]
+        E --> F{Controller Selection}
+        F -->|Position IK| G[GenericIKSolver: Damped Least Squares]
+        F -->|Resolved-Rate| H[ResolvedRateController: J_dls @ Twist + Null-Space]
+        G --> I[Trajectory Generator: Quintic & SE3 SLERP]
+        H --> I
+        I --> J[CollisionChecker & RRT-Connect Planner]
     end
 
-    subgraph State Management & HUD ["📊 State Management & HUD"]
-        N[Perception-Gated State Machine FSM] --> G
-        K --> O[Forward Kinematics Error Telemetry]
-        O --> P[Live OpenCV Heads-Up Display HUD]
+    subgraph Execution ["🤖 PyBullet Multi-Robot Digital Twin"]
+        J --> K[GenericRobotController]
+        K --> L[Franka Emika Panda / KUKA LBR iiwa]
+        L --> M[Manipulability Telemetry & Trajectory Visualizer]
     end
 ```
 
 ---
 
-## 📐 Coordinate Frames & Transformation Mathematics
+## 🔬 Core Robotics Algorithms
 
-The rigid-body transformation pipeline uses homogeneous $SE(3)$ representations:
+### 1. Geometric Jacobian & Manipulability
+The spatial Jacobian $\mathbf{J}(\mathbf{q}) \in \mathbb{R}^{6 \times n}$ maps joint velocities to end-effector spatial twists:
 
-$$\mathbf{T} = \begin{bmatrix} \mathbf{R} & \mathbf{t} \\ \mathbf{0}_{1\times3} & 1 \end{bmatrix} \in SE(3), \quad \mathbf{R} \in SO(3), \quad \mathbf{t} \in \mathbb{R}^3$$
+$$\mathbf{v} = \begin{bmatrix} \mathbf{v}_{\text{linear}} \\ \boldsymbol{\omega}_{\text{angular}} \end{bmatrix} = \mathbf{J}(\mathbf{q}) \dot{\mathbf{q}}$$
 
-### Coordinate Frames:
-- **$\mathcal{F}_C$ (Camera Optical Frame)**: $+X$ right, $+Y$ down, $+Z$ optical depth into scene.
-- **$\mathcal{F}_M$ (ArUco Marker Frame)**: Local planar frame centered at marker origin.
-- **$\mathcal{F}_B$ (Robot Base Frame)**: $+X$ forward, $+Y$ left, $+Z$ vertical upward.
-- **$\mathcal{F}_E$ (End-Effector Flange Frame)**: Tool center point (TCP) at `panda_grasptarget` (Link 11).
+Yoshikawa's manipulability measure $w(\mathbf{q})$ and Jacobian condition number $\kappa(\mathbf{J})$ are computed via Singular Value Decomposition (SVD):
 
-### Transformation Modes:
-- **`relative` mode (default)**: Intuitive teleoperation mapping Cartesian displacements relative to interaction center.
-- **`se3` mode**: Computes direct rigid transformation using configured or hand-eye calibrated camera-to-robot extrinsics ($\mathbf{T}_{B \to M} = \mathbf{T}_{B \to C} \cdot \mathbf{T}_{C \to M}$).
+$$w(\mathbf{q}) = \sqrt{\det(\mathbf{J} \mathbf{J}^T)} = \prod_{i=1}^6 \sigma_i, \quad \kappa(\mathbf{J}) = \frac{\sigma_{\max}}{\sigma_{\min}}$$
+
+### 2. Adaptive Damped Least-Squares (DLS) Resolved-Rate Control
+To prevent joint velocity explosion near kinematic singularities, the controller computes the regularized pseudoinverse:
+
+$$\mathbf{J}_{\text{dls}} = \mathbf{J}^T (\mathbf{J} \mathbf{J}^T + \lambda^2 \mathbf{I})^{-1}$$
+
+where damping factor $\lambda(\sigma_{\min})$ smoothly scales between $\lambda_{\min}$ and $\lambda_{\max}$ as $\sigma_{\min}$ approaches the singularity threshold.
+
+### 3. Null-Space Redundancy Optimization
+For 7-DoF redundant manipulators, secondary joint centering biases the arm towards its natural rest posture $\mathbf{q}_{\text{rest}}$ without disturbing the primary end-effector tracking task:
+
+$$\dot{\mathbf{q}} = \mathbf{J}_{\text{dls}} \mathbf{v}_{\text{task}} + (\mathbf{I} - \mathbf{J}_{\text{dls}} \mathbf{J}) \left( -k_{\text{null}} \nabla H(\mathbf{q}) \right)$$
+
+### 4. Collision-Aware RRT-Connect Motion Planning
+When obstacles block the direct linear joint path, a bidirectional RRT-Connect planner searches joint space for collision-free trajectories, followed by randomized path shortcutting to remove redundant motion.
 
 ---
 
@@ -102,97 +114,93 @@ $$\mathbf{T} = \begin{bmatrix} \mathbf{R} & \mathbf{t} \\ \mathbf{0}_{1\times3} 
 ### Prerequisites
 - Windows 10 or Windows 11
 - Python 3.10, 3.11, or 3.12
-- Laptop Webcam or USB Camera (or use `--synthetic` for offline simulation)
+- Laptop Webcam or USB Camera (or `--synthetic` for offline simulation)
 
 ### Automated Setup
-Clone the repository and run the automated setup script:
 ```powershell
 git clone https://github.com/Tanishk756/VisionRobotTwin.git
 cd VisionRobotTwin
 setup.bat
 ```
 
-### Manual Setup
+---
+
+## 🎮 CLI Usage & Multi-Robot Execution
+
+### Robot Discovery & Model Inspection
 ```powershell
-# 1. Create and activate virtual environment
-python -m venv .venv
-.\.venv\Scripts\activate.bat
+# List available registered robot models
+python main.py --list-robots
 
-# 2. Upgrade pip and install dependencies
-python -m pip install --upgrade pip
-python -m pip install -r requirements-dev.txt
+# Inspect detailed Franka Panda specs (DoF, joint limits, reach, EE link)
+python main.py --robot-info panda
 
-# 3. Generate ArUco marker assets
-python tools\generate_aruco_markers.py
+# Inspect detailed KUKA LBR iiwa specs
+python main.py --robot-info kuka_iiwa
+```
 
-# 4. Run automated test suite
-pytest -v
+### Running Simulations
+```powershell
+# Run Franka Panda with synthetic vision (default)
+python main.py --robot panda --synthetic
+
+# Run KUKA LBR iiwa with synthetic vision
+python main.py --robot kuka_iiwa --synthetic
+
+# Run with Resolved-Rate Cartesian Velocity Control
+python main.py --robot panda --controller resolved-rate --synthetic
+
+# Run with Obstacle Scene
+python main.py --robot panda --scene obstacles --synthetic
+
+# Run with Physical Webcam (Index 0)
+python main.py --robot panda --camera 0
 ```
 
 ---
 
-## 🖨️ Marker Generation & Roles
+## 📊 Cross-Robot & Cross-Controller Benchmarking
 
-Run the marker generator to create printable fiducials in `assets/markers/`:
+### 1. Cross-Robot Benchmark Tool
+Evaluates kinematics, manipulability, and planning across identical 3D target points:
 ```powershell
-python tools\generate_aruco_markers.py
+python tools/compare_robots.py --robots panda kuka_iiwa --headless
 ```
 
-| Marker ID | Role | Semantic Purpose |
-| :---: | :---: | :--- |
-| **ID 0** | `MANUAL TARGET` | Controls Franka Panda end-effector in Manual Tracking Mode |
-| **ID 1** | `PICK LOCATION` | Sets Cartesian target for Autonomous Pick phase |
-| **ID 2** | `PLACE LOCATION` | Sets Cartesian target for Autonomous Place phase |
+### 2. Task-Space Research Experiment Suite & Reference Benchmarks
+A reproducible research-grade task-space benchmarking framework comparing Franka Emika Panda vs KUKA LBR iiwa across identical Cartesian trajectories in PyBullet:
+```powershell
+python tools/run_taskspace_experiments.py --all --repeats 3 --headless
+```
+
+#### Multi-Robot & Multi-Controller Reference Benchmark Matrix (PyBullet Simulation)
+
+> [!NOTE]
+> Under the v1.2 PyBullet reference configuration, 45 of 60 deterministic tracking trials satisfied the configured completion criteria. 15 KUKA IK trials did not satisfy the 10 mm completion threshold under this configuration due to numerical IK offsets, whereas Resolved-Rate velocity control achieved 100% completion success across all paths. Both reference obstacle-reach planning runs produced collision-free plans satisfying the explicit 25 mm endpoint criterion.
+
+| Experiment | Panda IK RMSE | Panda RR RMSE | KUKA IK RMSE | KUKA RR RMSE | Success Pattern |
+| :--- | :---: | :---: | :---: | :---: | :---: |
+| **Line (10 cm)** | 2.39 mm | 12.27 mm | 20.44 mm | 13.06 mm | Panda 100% / KUKA RR 100% |
+| **Circle ($R=5\text{ cm}$)** | 27.46 mm | 22.38 mm | 20.99 mm | 22.67 mm | Panda 100% / KUKA RR 100% |
+| **Figure Eight** | 10.81 mm | 15.38 mm | 20.92 mm | 15.71 mm | Panda 100% / KUKA RR 100% |
+| **Waypoint Box** | 6.56 mm | 13.95 mm | 20.81 mm | 14.32 mm | Panda 100% / KUKA RR 100% |
+| **SE3 Sweep ($\pm 20^\circ$)** | 10.31 mm | 5.95 mm | 20.63 mm | 7.19 mm | Panda 100% / KUKA RR 100% |
+
+Complete quantitative metrics, time series, and 3D trajectory plots are available in [docs/experiments/v1.2_reference/REPORT.md](docs/experiments/v1.2_reference/REPORT.md).
 
 ---
 
-## 🎯 Camera Calibration Procedure
+## 🛡️ Validation & Tiered Status
 
-For metric 6-DoF pose accuracy, calibrate your camera using a standard $9 \times 6$ chessboard:
-```powershell
-python tools\calibrate_camera.py --camera 0 --cols 9 --rows 6 --square-size 0.025
-```
-- Hold the chessboard pattern in front of the camera at multiple angles and depths.
-- Press `[SPACE]` when the pattern is highlighted in green (capture 15–20 frames).
-- Press `[C]` to compute intrinsics and save to `calibration/camera_calibration.npz`.
-- *If no calibration file exists, the system automatically uses a default pinhole model and informs the operator via the HUD.*
+VisionRobotTwin strictly distinguishes between automated unit verification, simulation benchmarks, and physical testing:
 
----
-
-## 🎮 Running the Application
-
-### Launching Options
-```powershell
-# Launch with physical camera (Index 0, Manual Mode)
-python main.py --camera 0
-
-# Launch in Autonomous Pick-and-Place Mode (Perception-gated)
-python main.py --mode auto
-
-# Launch in Synthetic Simulation Mode (offline testing)
-python main.py --synthetic
-
-# Launch in Bounded Headless Mode (CI automated validation)
-python main.py --synthetic --headless --max-frames 120
-
-# Run live benchmark utility
-python tools/benchmark_live.py --synthetic --duration 5.0
-```
-
-### Keyboard Controls
-
-| Key | Action | Description |
-| :---: | :---: | :--- |
-| **`Q` / `ESC`** | **Quit** | Gracefully disconnects PyBullet, releases camera, closes windows |
-| **`H`** | **Home** | Resets manipulator to safe default joint configuration |
-| **`SPACE`** | **Hold / Resume** | Pauses robot motion and holds current target pose |
-| **`M`** | **Manual Mode** | Activates live marker teleoperation |
-| **`A`** | **Auto Mode** | Initiates perception-gated Pick-and-Place sequence |
-| **`R`** | **Reset** | Resets simulation objects, grasp constraints, and state machine |
-| **`T`** | **Toggle Trajectory** | Toggles 3D end-effector trailing line visualizer |
-| **`S`** | **Screenshot** | Saves timestamped snapshots of both Camera HUD and PyBullet window |
-| **`D`** | **Debug** | Toggles verbose debugging telemetry |
-| **`C`** | **Calibration Info** | Prints camera intrinsics matrix and principal point to console |
+| Validation Tier | Environment | Status | Description |
+| :--- | :--- | :---: | :--- |
+| **Automated Software Validation** | GitHub Actions / Windows pytest | **`PASS` (131 / 131)** | Full unit, mathematical, and integration test suite across Python 3.11 & 3.12. |
+| **PyBullet Reference Experiments** | 240 Hz Physics Twin | **`AVAILABLE`** | Reproducible multi-robot & multi-controller benchmark suite in PyBullet. |
+| **Basic Physical Webcam Smoke** | Monocular Webcam Teleoperation | **`USER-CONFIRMED / PASS`** | Operator-verified ArUco marker teleoperation smoke test (v1.1 baseline). |
+| **Physical Calibrated Camera Benchmark** | Chessboard Metric Rig | **`NOT YET MEASURED`** | Optical calibration metrics pending physical lab capture. |
+| **Physical Panda / KUKA Hardware** | Physical Manipulator Arm | **`NOT TESTED`** | All robotics execution is validated strictly within simulation. |
 
 ---
 
@@ -202,123 +210,61 @@ python tools/benchmark_live.py --synthetic --duration 5.0
 pytest -v
 ```
 
-### Test Suite Overview:
-- `test_transforms.py`: Orthogonality of $SO(3)$, Euler/Quaternion roundtrips, $SE(3)$ analytical matrix inversion, composition.
-- `test_filters.py`: Exponential moving average, noise reduction, 1-Euro adaptive cutoff, quaternion SLERP.
-- `test_workspace.py`: Workspace boundary clamping, SE(3) vs relative modes, time-based slew limiting, NaN/Inf protection.
-- `test_state_machine.py`: Perception gating (consecutive detections), lost-tracking recovery, waypoint timeouts, grasp rejection.
-- `test_gripper_physics.py`: Distance-gated constraint attachment ($< 5.5\text{ cm}$ threshold) and clean release.
-- `test_camera.py`: Explicit synthetic mode and physical camera failure handling.
-- `test_headless_integration.py`: Bounded headless runtime pipeline validation.
-- `test_ik_and_robot.py`: PyBullet IK solution generation, joint limit rejection, and dynamic end-effector tracking against test tolerance.
-- `test_simulation_clock.py`: Multi-substep accumulator, fixed 1/240 s physics scheduling, and remainder preservation.
-- `test_logger.py`: Hierarchical logging namespace under `VisionRobotTwin.*`, file handler formatting, dynamic loglevel reconfiguration.
-- `test_pause_and_context.py`: True joint-freeze pause/HOLD, relative orientation reference reset on operator context change, bounded perception buffers.
-- `test_benchmark_pipeline.py`: Benchmark runner execution on shared frame processing pipeline.
-- `test_auto_integration.py`: Full closed-loop perception-gated pick-and-place through SEARCH state completion.
-- `test_version.py`: Canonical version metadata and CLI `--version` verification.
+| Test Suite | Focus Area | Status |
+| :--- | :--- | :---: |
+| `test_experiment_suite.py` | Task-Space Trajectories, Feasibility, Metrics, Headless Trials | **PASS** |
+| `test_robot_registry.py` | Model Registry, Metadata, and Capabilities | **PASS** |
+| `test_multi_robot_controller.py` | Generic Robot Controller, Panda & KUKA Loading | **PASS** |
+| `test_multi_robot_ik.py` | Multi-Robot Inverse Kinematics & Limit Rejection | **PASS** |
+| `test_jacobian.py` | Spatial Jacobian & Finite-Difference Verification | **PASS** |
+| `test_manipulability.py` | Yoshikawa Index, SVD Condition, Singularity Warnings | **PASS** |
+| `test_differential_ik.py` | Resolved-Rate Control, DLS Damping, Null-Space | **PASS** |
+| `test_trajectory.py` | Joint Quintic Polynomials & Cartesian SE(3) SLERP | **PASS** |
+| `test_collision.py` | Self-Collision Queries, State Restoration, Allowed Contacts | **PASS** |
+| `test_planning.py` | Direct Path Check, RRT-Connect, Impossible Scene | **PASS** |
+| `test_runtime_integration.py` | MotionManager, Rate Limiter, FK Residual, Controller Selection | **PASS** |
+| `test_robot_benchmark.py` | Headless Cross-Robot & Cross-Controller Suites | **PASS** |
+| `test_auto_integration.py` | End-to-End Autonomous Pick-and-Place FSM | **PASS** |
+| `test_calibration_quality.py` | Camera Calibration Heuristics & Diagnostics | **PASS** |
+| `test_extrinsics_math.py` | World-Anchor Extrinsic Calibration Math | **PASS** |
+| `test_transforms.py` | SE(3) Lie Group Matrix & Quaternion Conversions | **PASS** |
+| **Total Automated Tests** | **Full Multi-Robot Robotics Suite** | **131 / 131 PASSING** |
 
 ---
 
-## 📊 Verification & Benchmarks
-
-| Metric / Parameter | Status | Value / Measurement |
-| :--- | :---: | :--- |
-| **Automated Tests** | **PASS** | **49 / 49 passing (49 automated unit/integration tests at v1.1.0)** |
-| **Physics Scheduling** | **PASS** | **Fixed timestep: 1/240 s (240 Hz target scheduled via accumulator)** |
-| **Synthetic Pipeline Tracking** | **PASS** | **Verified in PyBullet closed-loop simulation** |
-| **Basic Physical Webcam Smoke Test** | **USER-CONFIRMED / PASS** | Manual Marker-0 teleoperation interaction verified on live webcam |
-| **Physical Calibrated Benchmarks** | *NOT YET MEASURED* | Hardware dependent (Run `tools/benchmark_live.py`) |
-| **Physical Camera Calibration** | *NOT TESTED* | Default pinhole fallback active until `calibrate_camera.py` run |
-| **Physical Franka Manipulator** | *NOT TESTED* | Simulation / digital twin implementation |
-
-*See [VALIDATION.md](VALIDATION.md) for full subsystem audit details.*
-
----
-
-## 📂 Project Directory Tree
+## 📂 Project Structure
 
 ```
 VisionRobotTwin/
-│
-├── main.py                     # Main application entry point & perception-control loop
-├── visionrobottwin_version.py  # Canonical package version definition (1.1.0)
-├── requirements.txt            # Production dependencies
-├── requirements-dev.txt        # Development and testing dependencies
-├── pytest.ini                  # Pytest configuration
-├── setup.bat                   # Automated Windows environment setup script
-├── run.bat                     # Windows application launcher script
-├── README.md                   # Comprehensive project documentation
-├── ARCHITECTURE.md             # Deep-dive systems architecture and math specification
-├── PORTFOLIO.md                # Robotics portfolio, interview Q&A, and resume guide
-├── VALIDATION.md               # Strict validation report and subsystem matrix
-├── CHANGELOG.md                # Semantic version changelog
-├── RELEASE_NOTES_v1.1.0.md     # Formal release notes
-├── AUTHORS.md                  # Author and maintainer attribution
-├── CITATION.cff                # Academic and project citation metadata
-├── CONTRIBUTING.md             # Community contribution guidelines
-├── SECURITY.md                 # Security and simulation safety policy
-├── LICENSE                     # MIT Open-Source License
-├── .gitignore                  # Git ignore rules
-│
-├── .github/workflows/          # GitHub Actions CI Workflows
-│   └── tests.yml               # Automated multi-Python test runner (Windows Python 3.11/3.12)
-│
+├── main.py                     # Main application entry point & CLI
 ├── config/                     # Centralized Strongly-Typed Settings
-│   ├── __init__.py
-│   └── settings.py             # Dataclasses for Camera, ArUco, Robot, Sim, Workspace
-│
-├── vision/                     # Computer Vision & Pose Estimation
-│   ├── __init__.py
-│   ├── camera.py               # Hardware camera capture & synthetic frame fallback
-│   ├── aruco_detector.py       # OpenCV 4.8+ ArUco detection & 2D rendering
-│   ├── pose_estimator.py       # 6-DoF Perspective-n-Point (PnP) pose solver
-│   └── calibration.py          # Camera intrinsics loader & pinhole model generator
-│
-├── robotics/                   # Robotics Kinematics, Control, & Simulation
-│   ├── __init__.py
-│   ├── coordinate_transform.py # SE(3) Lie group homogeneous matrices & conversions
-│   ├── workspace_mapper.py     # Cartesian mapping, boundary clamping, relative orientation reference
-│   ├── inverse_kinematics.py   # PyBullet Damped Least-Squares IK solver & limit rejection
-│   ├── robot_controller.py     # Franka Panda URDF inspector & joint controller
-│   ├── simulator.py            # PyBullet physics manager, targets & trajectory lines
-│   ├── gripper.py              # Distance-gated virtual gripper & constraint manager
-│   └── state_machine.py        # Perception-gated Finite State Machine & bounded buffers
-│
-├── utils/                      # Utilities & Monitoring
-│   ├── __init__.py
-│   ├── simulation_clock.py     # Fixed-step accumulator physics scheduler
-│   ├── filters.py              # EMA filter, 1 Euro adaptive filter, Quaternion SLERP
-│   ├── telemetry.py            # Live OpenCV HUD overlay renderer
-│   ├── logger.py               # Hierarchical structured application logger
-│   └── fps_counter.py          # Real-time sliding window FPS counter
-│
-├── tools/                      # Standalone CLI Utilities
-│   ├── generate_aruco_markers.py # Printable marker and card generator
-│   ├── calibrate_camera.py     # Interactive chessboard calibration tool (RMS error px)
-│   ├── benchmark_live.py       # Physical & synthetic benchmark tool
-│   └── generate_demo_gif.py    # Automated demo GIF recorder
-│
-├── assets/markers/             # Printable PNG marker images
-├── calibration/                # Camera Calibration Storage (.npz)
-├── screenshots/                # Captured HUD and simulation snapshots
-├── demo/                       # 15-second animated demonstration GIF
-└── tests/                      # Comprehensive Unit & Integration Test Suite (49 tests)
-    ├── test_auto_integration.py
-    ├── test_benchmark_pipeline.py
-    ├── test_camera.py
-    ├── test_filters.py
-    ├── test_gripper_physics.py
-    ├── test_headless_integration.py
-    ├── test_ik_and_robot.py
-    ├── test_logger.py
-    ├── test_pause_and_context.py
-    ├── test_pose_utils.py
-    ├── test_simulation_clock.py
-    ├── test_state_machine.py
-    ├── test_transforms.py
-    ├── test_version.py
-    └── test_workspace.py
+├── vision/                     # OpenCV Perception, ArUco, & Calibration
+├── robotics/                   # Core Robotics Engine
+│   ├── robot_model.py          # RobotModelSpec & RobotCapabilities dataclasses
+│   ├── robot_registry.py       # RobotRegistry singleton (Panda, KUKA iiwa)
+│   ├── robot_controller.py     # GenericRobotController (Position Rate Limiting)
+│   ├── inverse_kinematics.py   # GenericIKSolver (FK Residual Measurement)
+│   ├── kinematics.py           # Geometric Jacobian, SVD Manipulability, DLS
+│   ├── differential_ik.py      # ResolvedRateController with Null-Space Projection
+│   ├── motion_manager.py       # MotionManager runtime planning & execution layer
+│   ├── trajectory.py           # Joint Quintic Polynomial & Cartesian SE(3) SLERP
+│   ├── collision.py            # CollisionChecker (True Self-Collision Queries)
+│   ├── planning.py             # Bidirectional RRT-Connect (Explicit Root Tracking)
+│   ├── coordinate_transform.py # SE(3) Lie Group Transformations
+│   ├── workspace_mapper.py     # Workspace Bounding & Slew Rate Limiting
+│   ├── gripper.py              # Virtual Gripper Attachment Manager
+│   ├── state_machine.py        # Perception-Gated Autonomous State Machine
+│   ├── simulator.py            # PyBullet Environment & Multi-Robot Lifecycle
+│   └── adapters/               # Robot-Specific Configurations (Panda, KUKA)
+├── tools/                      # Benchmarking & Calibration CLI Tools
+│   ├── compare_robots.py       # Cross-Robot Kinematics & Planning Benchmark
+│   ├── compare_controllers.py  # IK vs Resolved-Rate Benchmark
+│   ├── run_taskspace_experiments.py # Reproducible Task-Space Experiment Suite
+│   ├── calibrate_camera.py     # Chessboard Intrinsic Calibration
+│   ├── calibrate_extrinsics.py # World-Anchor Extrinsic Calibration
+│   ├── benchmark_live.py       # Standstill & Dynamic Tracking Benchmark
+│   └── generate_aruco_markers.py # Printable Marker Generator
+└── tests/                      # 131 Automated Unit & Integration Tests
 ```
 
 ---

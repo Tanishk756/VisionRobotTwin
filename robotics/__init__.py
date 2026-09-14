@@ -11,8 +11,10 @@ from robotics.coordinate_transform import (
     rotation_matrix_to_quaternion,
 )
 from robotics.workspace_mapper import WorkspaceMapper, MappedTarget
-from robotics.inverse_kinematics import PandaIKSolver, IKResult
-from robotics.robot_controller import PandaRobotController, JointInfo
+from robotics.inverse_kinematics import PandaIKSolver, IKResult, IKStatus
+from robotics.robot_model import RobotModelSpec, RobotCapabilities
+from robotics.robot_registry import RobotRegistry, get_robot_registry, list_available_robots, create_robot_adapter
+from robotics.robot_controller import GenericRobotController, PandaRobotController, JointInfo
 from robotics.gripper import VirtualGripper
 from robotics.simulator import PyBulletSimulator
 from robotics.state_machine import RoboticStateMachine, RobotState
@@ -30,6 +32,14 @@ __all__ = [
     "MappedTarget",
     "PandaIKSolver",
     "IKResult",
+    "IKStatus",
+    "RobotModelSpec",
+    "RobotCapabilities",
+    "RobotRegistry",
+    "get_robot_registry",
+    "list_available_robots",
+    "create_robot_adapter",
+    "GenericRobotController",
     "PandaRobotController",
     "JointInfo",
     "VirtualGripper",

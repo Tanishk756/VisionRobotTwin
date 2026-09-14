@@ -33,6 +33,7 @@ class ArUcoConfig:
     target_marker_id: int = 0    # Manual tracking target marker
     pick_marker_id: int = 1      # Pick waypoint marker for autonomous mode
     place_marker_id: int = 2     # Place waypoint marker for autonomous mode
+    anchor_marker_id: int = 10   # World / Robot base calibration anchor marker
     draw_axes_length_m: float = 0.035
     border_bits: int = 1
 
@@ -67,7 +68,8 @@ class TransformConfig:
       T_base_marker = T_base_camera @ T_camera_marker
     """
     transform_mode: str = "relative"  # 'relative' (intuitive teleoperation) or 'se3' (rigid transformation)
-    is_calibrated_extrinsics: bool = False  # Flag denoting nominal vs calibrated hand-eye extrinsics
+    is_calibrated_extrinsics: bool = False  # Flag denoting nominal vs calibrated extrinsics
+    extrinsics_file: Path = Path("calibration/extrinsics.json")
 
     # Nominal Camera placed in front of robot looking slightly downward:
     # Camera frame: X right, Y down, Z forward
@@ -76,13 +78,17 @@ class TransformConfig:
     # Pitch camera ~15 degrees down looking toward robot center
     camera_euler_rpy_rad: Tuple[float, float, float] = (np.pi, 0.26, 0.0)
 
+    # Configured anchor location in robot base frame:
+    anchor_position_in_robot_base: Tuple[float, float, float] = (0.50, 0.0, 0.0)
+    anchor_euler_rpy_rad: Tuple[float, float, float] = (np.pi, 0.0, 0.0)
+
     # Tool orientation offset to keep Franka gripper pointing downward [x, y, z, w]
     tool_orientation_offset: Tuple[float, float, float, float] = (1.0, 0.0, 0.0, 0.0)
 
 
 @dataclass
 class WorkspaceConfig:
-    """Workspace bounding and scaling limits for the Franka Panda manipulator."""
+    """Workspace bounding and scaling limits for the manipulator."""
     # Robot Base Cartesian limits (meters)
     x_min: float = 0.25
     x_max: float = 0.70
@@ -130,7 +136,7 @@ class RobotConfig:
 
     # Controller gains and limits
     max_joint_velocity_radps: float = 2.0
-    position_gain: float = 0.15
+    position_gain: float = 0.75
     velocity_gain: float = 1.0
     max_joint_force: float = 200.0
 
@@ -183,6 +189,10 @@ class AppConfig:
     state_machine: StateMachineConfig = field(default_factory=StateMachineConfig)
     
     # App-level operational flags
+    robot_name: str = "panda"  # 'panda' or 'kuka_iiwa'
+    controller_type: str = "ik"  # 'ik' or 'resolved-rate'
+    trajectory_mode: str = "quintic"  # 'direct' or 'quintic'
+    scene_type: str = "standard"  # 'standard' or 'obstacles'
     mode: str = "manual"  # 'manual' or 'auto'
     control_mode: str = "6dof"  # '6dof' (position + orientation) or '3dof' (position only)
     debug: bool = False

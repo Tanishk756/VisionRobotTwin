@@ -40,7 +40,7 @@ class SyntheticFrameGenerator:
         dict_id = getattr(cv2.aruco, self.aruco_config.dictionary_name, cv2.aruco.DICT_4X4_50)
         self.dictionary = cv2.aruco.getPredefinedDictionary(dict_id)
         self.marker_imgs = {}
-        for mid in [0, 1, 2]:
+        for mid in [0, 1, 2, 10]:
             marker_px = 160
             img = np.zeros((marker_px, marker_px), dtype=np.uint8)
             cv2.aruco.generateImageMarker(self.dictionary, mid, marker_px, img, 1)
@@ -56,7 +56,13 @@ class SyntheticFrameGenerator:
         angle: float = 0.0,
     ) -> None:
         """Draws a single ArUco marker onto the target frame with border."""
-        marker_img = self.marker_imgs.get(marker_id, self.marker_imgs[0])
+        if marker_id not in self.marker_imgs:
+            marker_px = 160
+            img = np.zeros((marker_px, marker_px), dtype=np.uint8)
+            cv2.aruco.generateImageMarker(self.dictionary, marker_id, marker_px, img, 1)
+            self.marker_imgs[marker_id] = img
+
+        marker_img = self.marker_imgs[marker_id]
         m_h, m_w = marker_img.shape
         scaled_w = int(m_w * scale)
         scaled_h = int(m_h * scale)
@@ -102,11 +108,18 @@ class SyntheticFrameGenerator:
             cv2.line(frame, (x, 0), (x, self.height), (42, 42, 48), 1)
 
         # Synthetic motion trajectory / marker layout
-        if state == "MANUAL":
+        if marker_id == self.aruco_config.target_marker_id or state in ("MANUAL", "TRACK", "HOLD"):
             center_x = self.width / 2.0 + 180.0 * math.sin(t * 0.8)
             center_y = self.height / 2.0 + 100.0 * math.cos(t * 1.2)
             scale = 1.0 + 0.20 * math.sin(t * 0.5)  # Simulates depth (Z) movement
             angle = math.degrees(math.sin(t * 0.4) * 0.30)
+            self._draw_marker_on_canvas(frame, marker_id, center_x, center_y, scale, angle)
+        elif marker_id == getattr(self.aruco_config, "anchor_marker_id", 10):
+            # World anchor: stationary in center of view
+            center_x = self.width / 2.0
+            center_y = self.height / 2.0 + 30.0
+            scale = 1.0
+            angle = 0.0
             self._draw_marker_on_canvas(frame, marker_id, center_x, center_y, scale, angle)
         elif state in ("HOME", "SEARCH", "RETURN_HOME"):
             # In AUTO SEARCH / gating: Render BOTH Pick Marker (ID 1) and Place Marker (ID 2)

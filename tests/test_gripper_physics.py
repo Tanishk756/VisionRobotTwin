@@ -36,7 +36,7 @@ def test_gripper_distance_gated_attachment():
         ik_res = sim.ik_solver.solve(target_near)
         assert ik_res.success
         sim.controller.set_arm_joint_positions(ik_res.joint_positions)
-        for _ in range(120):
+        for _ in range(240):
             sim.step()
 
         # Attempt grasp -> must SUCCEED

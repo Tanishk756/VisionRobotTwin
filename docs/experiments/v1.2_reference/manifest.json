@@ -1,0 +1,163 @@
+{
+  "version": "1.2.0-dev",
+  "git_commit_sha": "f316b08c80db165a05983cb6bc9b2fcadbeafc04",
+  "timestamp_utc": "2026-09-14T11:09:13.744574+00:00",
+  "environment": {
+    "python_version": "3.12.10",
+    "opencv_version": "5.0.0",
+    "numpy_version": "2.2.6",
+    "pybullet_package_version": "3.2.7",
+    "pybullet_api_version": "202010061",
+    "os": "Windows",
+    "architecture": "AMD64"
+  },
+  "execution": {
+    "robots": [
+      "panda",
+      "kuka_iiwa"
+    ],
+    "controllers": [
+      "ik",
+      "resolved-rate"
+    ],
+    "physics_frequency_hz": 240,
+    "timestep_dt_s": 0.004166666666666667,
+    "deterministic_repeats": 3,
+    "random_seed": 42
+  },
+  "tolerances": {
+    "settle_tolerance_mm": 5.0,
+    "success_position_tolerance_mm": 10.0,
+    "success_orientation_tolerance_deg": 10.0,
+    "preflight_position_residual_threshold_mm": 25.0,
+    "preflight_orientation_residual_threshold_deg": 10.0,
+    "planning_execution_position_tolerance_mm": 25.0
+  },
+  "trajectory_definitions": {
+    "line": {
+      "name": "LINE",
+      "description": "Straight 10 cm horizontal Cartesian translation with fixed orientation.",
+      "center_position": [
+        0.48,
+        0.0,
+        0.35
+      ],
+      "geometry_parameters": {
+        "length_m": 0.1,
+        "axis": "Y",
+        "path_type": "Straight Cartesian Line"
+      },
+      "default_duration_s": 2.0,
+      "effective_duration_s": 2.0,
+      "duration_overridden": false,
+      "orientation_profile": "Fixed downward [1, 0, 0, 0]",
+      "rotation_axis": "None (Fixed)",
+      "physics_hz": 240,
+      "sample_count": 481,
+      "preflight_sample_stride": 1,
+      "preflight_checked_samples": 481,
+      "is_se3": false
+    },
+    "circle": {
+      "name": "CIRCLE",
+      "description": "Continuous horizontal task-space circle (R = 5 cm) with fixed orientation.",
+      "center_position": [
+        0.48,
+        0.0,
+        0.35
+      ],
+      "geometry_parameters": {
+        "radius_m": 0.05,
+        "plane": "XY",
+        "path_type": "Continuous Planar Circle"
+      },
+      "default_duration_s": 3.0,
+      "effective_duration_s": 3.0,
+      "duration_overridden": false,
+      "orientation_profile": "Fixed downward [1, 0, 0, 0]",
+      "rotation_axis": "None (Fixed)",
+      "physics_hz": 240,
+      "sample_count": 721,
+      "preflight_sample_stride": 1,
+      "preflight_checked_samples": 721,
+      "is_se3": false
+    },
+    "figure_eight": {
+      "name": "FIGURE_EIGHT",
+      "description": "Lemniscate figure-eight trajectory (X peak amplitude: 4 cm, Y peak amplitude: 3 cm).",
+      "center_position": [
+        0.48,
+        0.0,
+        0.35
+      ],
+      "geometry_parameters": {
+        "amplitude_x_m": 0.04,
+        "amplitude_y_m": 0.03,
+        "plane": "XY",
+        "path_type": "Lemniscate (Figure-Eight)"
+      },
+      "default_duration_s": 4.0,
+      "effective_duration_s": 4.0,
+      "duration_overridden": false,
+      "orientation_profile": "Fixed downward [1, 0, 0, 0]",
+      "rotation_axis": "None (Fixed)",
+      "physics_hz": 240,
+      "sample_count": 961,
+      "preflight_sample_stride": 1,
+      "preflight_checked_samples": 961,
+      "is_se3": false
+    },
+    "waypoint_box": {
+      "name": "WAYPOINT_BOX",
+      "description": "Smooth 4-corner closed box path (6 cm x 6 cm) in the XY plane.",
+      "center_position": [
+        0.48,
+        0.0,
+        0.35
+      ],
+      "geometry_parameters": {
+        "size_x_m": 0.06,
+        "size_y_m": 0.06,
+        "plane": "XY",
+        "corners": 4,
+        "path_type": "4-Corner Rectangular Route"
+      },
+      "default_duration_s": 4.0,
+      "effective_duration_s": 4.0,
+      "duration_overridden": false,
+      "orientation_profile": "Fixed downward [1, 0, 0, 0]",
+      "rotation_axis": "None (Fixed)",
+      "physics_hz": 240,
+      "sample_count": 961,
+      "preflight_sample_stride": 1,
+      "preflight_checked_samples": 961,
+      "is_se3": false
+    },
+    "se3_sweep": {
+      "name": "SE3_SWEEP",
+      "description": "6-DoF trajectory with +/-20 deg X-axis roll rotation via quaternion SLERP and 2 cm X harmonic translation.",
+      "center_position": [
+        0.48,
+        0.0,
+        0.35
+      ],
+      "geometry_parameters": {
+        "harmonic_translation_axis": "X",
+        "harmonic_amplitude_m": 0.02,
+        "rotation_axis": "X",
+        "max_roll_deg": 20.0,
+        "path_type": "6-DoF Roll SLERP + Harmonic Translation"
+      },
+      "default_duration_s": 3.0,
+      "effective_duration_s": 3.0,
+      "duration_overridden": false,
+      "orientation_profile": "Quaternion SLERP roll sweep (+/-20 deg around X-axis)",
+      "rotation_axis": "X (Roll)",
+      "physics_hz": 240,
+      "sample_count": 721,
+      "preflight_sample_stride": 1,
+      "preflight_checked_samples": 721,
+      "is_se3": true
+    }
+  }
+}

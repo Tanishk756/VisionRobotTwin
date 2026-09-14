@@ -24,6 +24,15 @@ class TelemetryData:
     robot_ee_pos: Optional[Tuple[float, float, float]] = None
     tracking_error_m: Optional[float] = None
     ik_status: str = "IDLE"
+    robot_name: str = "PANDA"
+    controller_type: str = "IK"
+    manipulability: Optional[float] = None
+    jacobian_condition: Optional[float] = None
+    sigma_min: Optional[float] = None
+    singularity_state: str = "NORMAL"
+    collision_state: str = "CLEAR"
+    planner_state: str = "IDLE"
+    trajectory_progress_pct: Optional[float] = None
     fps: float = 0.0
     sim_fps: float = 0.0
     physics_target_hz: float = 240.0
@@ -31,6 +40,8 @@ class TelemetryData:
     physics_actual_step_rate: float = 240.0
     lost_tracking_time_s: float = 0.0
     is_calibrated: bool = False
+    is_calibrated_extrinsics: bool = False
+    transform_mode: str = "relative"
     workspace_clamped: bool = False
     debug_mode: bool = False
 
@@ -181,7 +192,7 @@ class TelemetryOverlay:
             raw_str = f"Raw:    [{rx:+6.3f}, {ry:+6.3f}, {rz:+6.3f}] m"
         else:
             raw_str = "Raw:    [  --- ,   --- ,   --- ] m"
-        cv2.putText(frame, raw_str, (x + 12, y + 78), cv2.FONT_HERSHEY_SIMPLEX, 0.42, self.COLOR_MUTED, 1, cv2.LINE_AA)
+        cv2.putText(frame, raw_str, (x + 12, y + 74), cv2.FONT_HERSHEY_SIMPLEX, 0.42, self.COLOR_MUTED, 1, cv2.LINE_AA)
 
         # Filtered Pose
         if data.filtered_pos_cam:
@@ -189,21 +200,31 @@ class TelemetryOverlay:
             filt_str = f"Filt:   [{fx:+6.3f}, {fy:+6.3f}, {fz:+6.3f}] m"
         else:
             filt_str = "Filt:   [  --- ,   --- ,   --- ] m"
-        cv2.putText(frame, filt_str, (x + 12, y + 104), cv2.FONT_HERSHEY_SIMPLEX, 0.42, self.COLOR_CYAN, 1, cv2.LINE_AA)
+        cv2.putText(frame, filt_str, (x + 12, y + 98), cv2.FONT_HERSHEY_SIMPLEX, 0.42, self.COLOR_CYAN, 1, cv2.LINE_AA)
 
         # Distance
         dist_str = f"Distance: {data.marker_distance_m * 100:.1f} cm" if data.marker_distance_m is not None else "Distance: ---"
-        cv2.putText(frame, dist_str, (x + 12, y + 130), cv2.FONT_HERSHEY_SIMPLEX, 0.42, self.COLOR_TEXT, 1, cv2.LINE_AA)
+        cv2.putText(frame, dist_str, (x + 12, y + 122), cv2.FONT_HERSHEY_SIMPLEX, 0.42, self.COLOR_TEXT, 1, cv2.LINE_AA)
 
-        # Calibration status
-        cal_str = "Calibrated: YES (intrinsics)" if data.is_calibrated else "Calibrated: NO (synthetic default)"
+        # Intrinsics status
+        cal_str = "INTRINSICS: CALIBRATED" if data.is_calibrated else "INTRINSICS: FALLBACK PINHOLE"
         cal_col = self.COLOR_GREEN if data.is_calibrated else self.COLOR_YELLOW
-        cv2.putText(frame, cal_str, (x + 12, y + 158), cv2.FONT_HERSHEY_SIMPLEX, 0.40, cal_col, 1, cv2.LINE_AA)
+        cv2.putText(frame, cal_str, (x + 12, y + 148), cv2.FONT_HERSHEY_SIMPLEX, 0.40, cal_col, 1, cv2.LINE_AA)
 
-        # Pose Quality Note
+        # Extrinsics status
+        if data.transform_mode == "se3":
+            ext_str = "EXTRINSICS: CALIBRATED" if data.is_calibrated_extrinsics else "EXTRINSICS: NOMINAL"
+            ext_col = self.COLOR_GREEN if data.is_calibrated_extrinsics else self.COLOR_YELLOW
+        else:
+            ext_str = "TRANSFORM: RELATIVE TELEOP"
+            ext_col = self.COLOR_CYAN
+        cv2.putText(frame, ext_str, (x + 12, y + 172), cv2.FONT_HERSHEY_SIMPLEX, 0.40, ext_col, 1, cv2.LINE_AA)
+
+        # Guidance note
         if not data.is_calibrated:
-            cv2.putText(frame, "(!) Run tools/calibrate_camera.py", (x + 12, y + 180), cv2.FONT_HERSHEY_SIMPLEX, 0.38, self.COLOR_YELLOW, 1, cv2.LINE_AA)
-            cv2.putText(frame, "    for metric calibration", (x + 12, y + 196), cv2.FONT_HERSHEY_SIMPLEX, 0.38, self.COLOR_YELLOW, 1, cv2.LINE_AA)
+            cv2.putText(frame, "Run tools/calibrate_camera.py", (x + 12, y + 200), cv2.FONT_HERSHEY_SIMPLEX, 0.36, self.COLOR_MUTED, 1, cv2.LINE_AA)
+        elif data.transform_mode == "se3" and not data.is_calibrated_extrinsics:
+            cv2.putText(frame, "Run tools/calibrate_extrinsics.py", (x + 12, y + 200), cv2.FONT_HERSHEY_SIMPLEX, 0.36, self.COLOR_MUTED, 1, cv2.LINE_AA)
 
     def _draw_robot_panel(self, frame: np.ndarray, data: TelemetryData, x: int, y: int) -> None:
         pw, ph = 310, 235
@@ -256,10 +277,23 @@ class TelemetryOverlay:
             err_col = self.COLOR_MUTED
         cv2.putText(frame, err_str, (x + 12, y + 130), cv2.FONT_HERSHEY_SIMPLEX, 0.44, err_col, 1, cv2.LINE_AA)
 
-        # Manipulator Info
-        cv2.putText(frame, "Model: Franka Emika Panda (7-DoF)", (x + 12, y + 158), cv2.FONT_HERSHEY_SIMPLEX, 0.40, self.COLOR_TEXT, 1, cv2.LINE_AA)
-        cv2.putText(frame, "Control: Joint Velocity / Position", (x + 12, y + 180), cv2.FONT_HERSHEY_SIMPLEX, 0.40, self.COLOR_MUTED, 1, cv2.LINE_AA)
-        cv2.putText(frame, "Solver: Damped Least-Squares IK", (x + 12, y + 202), cv2.FONT_HERSHEY_SIMPLEX, 0.40, self.COLOR_MUTED, 1, cv2.LINE_AA)
+        # Manipulator & Controller Info
+        robot_line = f"ROBOT: {data.robot_name} | CTRL: {data.controller_type}"
+        cv2.putText(frame, robot_line, (x + 12, y + 156), cv2.FONT_HERSHEY_SIMPLEX, 0.38, self.COLOR_TEXT, 1, cv2.LINE_AA)
+
+        # Manipulability & Singularity Metrics
+        if data.manipulability is not None:
+            m_str = f"Manip: {data.manipulability:.3f} | Cond: {data.jacobian_condition:.1f}" if data.jacobian_condition else f"Manip: {data.manipulability:.3f}"
+            m_col = self.COLOR_RED if data.singularity_state == "WARNING" else self.COLOR_GREEN
+        else:
+            m_str = "Manip: --- | Cond: ---"
+            m_col = self.COLOR_MUTED
+        cv2.putText(frame, m_str, (x + 12, y + 178), cv2.FONT_HERSHEY_SIMPLEX, 0.38, m_col, 1, cv2.LINE_AA)
+
+        # Collision & Planner State
+        plan_str = f"Plan: {data.planner_state} | Col: {data.collision_state}"
+        plan_col = self.COLOR_RED if data.collision_state != "CLEAR" else self.COLOR_CYAN
+        cv2.putText(frame, plan_str, (x + 12, y + 200), cv2.FONT_HERSHEY_SIMPLEX, 0.38, plan_col, 1, cv2.LINE_AA)
 
     def _draw_bottom_bar(self, frame: np.ndarray, data: TelemetryData, width: int, height: int) -> None:
         self._draw_panel(frame, 15, height - 38, width - 30, 28, alpha=0.85)

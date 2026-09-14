@@ -1,146 +1,132 @@
 # Systems Architecture & Technical Specification
 
-## VisionRobotTwin (v1.1 Engineering Hardening)
+## VisionRobotTwin (v1.2.0 Multi-Manipulator Architecture)
 
 ---
 
 ## 1. System Overview
 
-VisionRobotTwin is designed as a modular, high-throughput perception-to-action robotics control pipeline. The software architecture strictly decouples:
-- **Perception Subsystem**: Frame capture, fiducial detection, camera calibration, and 6-DoF pose estimation.
-- **Kinematics & Transformation Subsystem**: Coordinate transformations ($SE(3)$), workspace bounding, time-based slew limiting, and inverse kinematics.
-- **Control & Simulation Subsystem**: Digital twin physics stepping, joint position control, distance-gated virtual grasp constraints, and telemetry.
-- **State Machine Subsystem**: Perception-gated behavior control, timeout handling, and autonomous sequencing.
+VisionRobotTwin is architected as a modular, robot-agnostic digital twin and vision-guided robotics control framework. The system strictly separates perception, geometric transformation, kinematics, differential control, trajectory generation, collision checking, motion planning, and physics simulation.
 
 ```mermaid
 graph TB
-    subgraph Vision ["Perception Subsystem"]
-        Cam[Camera / Synthetic Gen] --> Gray[Grayscale & Preprocessing]
-        Gray --> Det[cv2.aruco.ArucoDetector]
-        Det --> PnP[PnP Pose Estimation]
-        PnP --> Calib[Camera Calibration Intrinsics]
+    subgraph Perception ["1. Perception Subsystem"]
+        Cam[Hardware Camera / Synthetic Stream] --> Det[cv2.aruco.ArucoDetector]
+        Det --> PnP[PnP 6-DoF Pose Solver]
+        PnP --> Calib[Intrinsics / Extrinsics Models]
         PnP --> PoseFilt[PoseFilter: EMA / 1-Euro & SLERP]
     end
 
-    subgraph Kinematics ["Kinematics Subsystem"]
-        PoseFilt --> SE3["SE(3) Coordinate Transform: T_B_M = T_B_C @ T_C_M"]
-        SE3 --> WSMapper[Workspace Mapper & Bounds Clamping]
+    subgraph Kinematics ["2. Multi-Robot Kinematics Layer"]
+        PoseFilt --> SE3["SE(3) Coordinate Transformation"]
+        SE3 --> WSMapper[Workspace Mapper & Bounds Enforcer]
         WSMapper --> SlewRate[Time-Based Slew Rate Limiter]
-        SlewRate --> IKSolver[Damped Least-Squares IK]
+        SlewRate --> Router{Controller Type}
+        Router -->|Position Control| IKSolver[Generic Damped Least-Squares IK]
+        Router -->|Velocity Control| DiffIK[Resolved-Rate Cartesian Velocity Controller]
     end
 
-    subgraph Simulation ["Digital Twin Simulation"]
-        IKSolver --> MotorCtrl[Joint Motor Position Control]
-        MotorCtrl --> Panda[Franka Panda Manipulator (7-DoF)]
-        Panda --> Gripper[Distance-Gated Virtual Gripper Manager]
-        Panda --> PhysStep[PyBullet Physics Engine (240 Hz)]
+    subgraph Planning ["3. Trajectory & Motion Planning"]
+        IKSolver --> ColCheck[CollisionChecker: Self & Environment]
+        DiffIK --> ColCheck
+        ColCheck -->|Path Blocked| RRT[Bidirectional RRT-Connect Planner]
+        RRT --> Shortcut[Randomized Path Shortcutting]
+        Shortcut --> TrajGen[Quintic Joint / Cartesian SE(3) Trajectory]
+        ColCheck -->|Path Free| TrajGen
     end
 
-    subgraph Telemetry ["Telemetry & UI"]
-        Panda --> FwdKin[Forward Kinematics & Tracking Error]
-        FwdKin --> HUD[OpenCV Heads-Up Display]
+    subgraph Simulation ["4. PyBullet Multi-Robot Digital Twin"]
+        TrajGen --> RobotCtrl[GenericRobotController: Panda / KUKA iiwa]
+        RobotCtrl --> PhysStep[PyBullet Physics Stepping at 240 Hz]
+        RobotCtrl --> GripperMgr[Virtual Gripper Manager (if supported)]
+    end
+
+    subgraph Monitoring ["5. Telemetry & Analytics"]
+        RobotCtrl --> Jacob[Geometric Jacobian & SVD Manipulability]
+        Jacob --> HUD[Live OpenCV Heads-Up Display HUD]
         PhysStep --> TrajViz[3D Trajectory Debug Lines]
     end
 ```
 
 ---
 
-## 2. Mathematical Formulations
+## 2. Multi-Robot Abstraction & Registry
 
-### 2.1 PnP Pose Estimation & Camera Model
-Given a set of 3D object points $\mathbf{P}_i = [X_i, Y_i, Z_i]^T$ in marker frame $\mathcal{F}_M$ and corresponding 2D image coordinates $\mathbf{p}_i = [u_i, v_i]^T$, the perspective projection under the pinhole camera model is:
+### 2.1 Model Registry Pattern
+Manipulator models are decoupled from control logic through `RobotModelSpec` and `RobotRegistry`:
+- `RobotCapabilities`: Immutable capability descriptor (`has_gripper`, `supports_pick_place`, `supports_velocity_control`, `supports_self_collision`).
+- `RobotModelSpec`: Strongly typed metadata containing URDF path, base pose, joint name regex patterns, end-effector link candidates, joint limit overrides, and default home posture.
+- `RobotRegistry`: Thread-safe registry providing dynamic lookup, validation, and adapter factory methods.
 
-$$s \begin{bmatrix} u_i \\ v_i \\ 1 \end{bmatrix} = \mathbf{K} \left( \mathbf{R}_{C \to M} \mathbf{P}_i + \mathbf{t}_{C \to M} \right)$$
+### 2.2 Supported Robot Specifications
 
-Where the intrinsic camera matrix $\mathbf{K}$ is defined as:
-
-$$\mathbf{K} = \begin{bmatrix} f_x & 0 & c_x \\ 0 & f_y & c_y \\ 0 & 0 & 1 \end{bmatrix}$$
-
-The Infinitesimal Plane-based Pose Estimation (IPPE) solver resolves $\mathbf{R}_{C \to M} \in SO(3)$ and $\mathbf{t}_{C \to M} \in \mathbb{R}^3$.
-
-### 2.2 SE(3) Transformation Pipeline
-Rigid transformations are represented as $4 \times 4$ matrices in $SE(3)$:
-
-$$\mathbf{T} = \begin{bmatrix} \mathbf{R} & \mathbf{t} \\ \mathbf{0}_{1\times3} & 1 \end{bmatrix}$$
-
-Given the camera mounting transform $\mathbf{T}_{B \to C}$ in robot base coordinates $\mathcal{F}_B$ and the detected marker transform $\mathbf{T}_{C \to M}$ in camera optical coordinates $\mathcal{F}_C$, the global marker pose $\mathbf{T}_{B \to M}$ is computed as:
-
-$$\mathbf{T}_{B \to M} = \mathbf{T}_{B \to C} \cdot \mathbf{T}_{C \to M}$$
-
-Matrix inversion is performed analytically:
-
-$$\mathbf{T}^{-1} = \begin{bmatrix} \mathbf{R}^T & -\mathbf{R}^T \mathbf{t} \\ \mathbf{0}_{1\times3} & 1 \end{bmatrix}$$
-
-### 2.3 1 Euro Adaptive Filtering
-To eliminate optical tracking jitter at low velocities without introducing phase lag during rapid motion, the 1 Euro filter adjusts its low-pass cutoff frequency $\hat{f}_c$ dynamically:
-
-$$\hat{f}_c = f_{c,\min} + \beta \|\dot{\mathbf{x}}\|, \quad \alpha = \frac{1}{1 + \frac{1}{2\pi \hat{f}_c \Delta t}}$$
-$$\hat{\mathbf{x}}_k = \alpha \mathbf{x}_k + (1 - \alpha) \hat{\mathbf{x}}_{k-1}$$
+| Specification | Franka Emika Panda | KUKA LBR iiwa |
+| :--- | :--- | :--- |
+| **Model ID** | `panda` | `kuka_iiwa` |
+| **Arm DoF** | 7 Revolute Joints | 7 Revolute Joints |
+| **URDF File** | `franka_panda/panda.urdf` | `kuka_iiwa/model.urdf` |
+| **End-Effector Link** | `panda_grasptarget` (Link 11) | `lbr_iiwa_link_7` (Link 6) |
+| **Controllable Arm Joints** | `[0, 1, 2, 3, 4, 5, 6]` | `[0, 1, 2, 3, 4, 5, 6]` |
+| **Gripper Joints** | `[9, 10]` (`panda_finger_joint1/2`) | None (Flange Mount Only) |
+| **Spherical Reach** | $0.855\text{ m}$ | $0.820\text{ m}$ |
 
 ---
 
-## 3. Kinematics & Joint Control
+## 3. Kinematics, Control, & Differential Solvers
 
-### 3.1 Inverse Kinematics (PyBullet Damped Least-Squares)
-The Franka Emika Panda arm has 7 revolute joints ($\mathbf{q} \in \mathbb{R}^7$). The relationship between end-effector Cartesian velocity $\dot{\mathbf{x}} \in \mathbb{R}^6$ and joint velocities $\dot{\mathbf{q}}$ is governed by the manipulator Jacobian $\mathbf{J}(\mathbf{q}) \in \mathbb{R}^{6 \times 7}$:
+### 3.1 Geometric Jacobian Calculation
+For an $n$-DoF manipulator, the geometric Jacobian $\mathbf{J}(\mathbf{q}) \in \mathbb{R}^{6 \times n}$ maps joint velocities $\dot{\mathbf{q}}$ to the end-effector Cartesian spatial twist $\mathbf{v} = [\mathbf{v}_{\text{lin}}^T, \boldsymbol{\omega}_{\text{ang}}^T]^T$:
 
-$$\dot{\mathbf{x}} = \mathbf{J}(\mathbf{q}) \dot{\mathbf{q}}$$
+$$\mathbf{v} = \mathbf{J}(\mathbf{q}) \dot{\mathbf{q}} = \begin{bmatrix} \mathbf{J}_{\text{linear}}(\mathbf{q}) \\ \mathbf{J}_{\text{angular}}(\mathbf{q}) \end{bmatrix} \dot{\mathbf{q}}$$
 
-To handle kinematic singularities and joint limits gracefully, Damped Least-Squares (DLS) is employed:
+### 3.2 Yoshikawa Manipulability & Singularity Telemetry
+Manipulability is evaluated via Singular Value Decomposition (SVD) of $\mathbf{J} = \mathbf{U} \mathbf{\Sigma} \mathbf{V}^T$:
+- **Yoshikawa Index**: $w(\mathbf{q}) = \sqrt{\det(\mathbf{J} \mathbf{J}^T)} = \prod_{i=1}^6 \sigma_i$
+- **Condition Number**: $\kappa(\mathbf{J}) = \frac{\sigma_{\max}}{\sigma_{\min}}$
+- **Singularity Warning State**: Triggered when $\sigma_{\min} < \sigma_{\text{threshold}}$ (default $0.05$).
 
-$$\Delta \mathbf{q} = \mathbf{J}^T (\mathbf{J} \mathbf{J}^T + \lambda^2 \mathbf{I})^{-1} \mathbf{e}_{\text{task}} + (\mathbf{I} - \mathbf{J}^\dagger \mathbf{J}) \nabla H(\mathbf{q})$$
+### 3.3 Adaptive DLS Resolved-Rate Cartesian Controller
+To track Cartesian velocity demands while avoiding infinite joint speeds near singularities, the controller computes the Damped Least-Squares (DLS) pseudoinverse:
 
-Where:
-- $\lambda$ is the damping constant ($\approx 0.01$).
-- $\mathbf{e}_{\text{task}} = \mathbf{x}_{\text{desired}} - \mathbf{x}_{\text{current}}$ is Cartesian position and orientation error.
-- $(\mathbf{I} - \mathbf{J}^\dagger \mathbf{J}) \nabla H(\mathbf{q})$ projects nullspace optimization toward nominal rest posture $\mathbf{q}_{\text{home}}$ to keep the arm away from joint limits.
+$$\mathbf{J}_{\text{dls}} = \mathbf{J}^T \left( \mathbf{J} \mathbf{J}^T + \lambda^2 \mathbf{I}_6 \right)^{-1}$$
 
-### 3.2 Time-Based Cartesian and Angular Slew Limiter
-Displacement increments are bounded per elapsed time $\Delta t$:
+The damping factor $\lambda(\sigma_{\min})$ adapts continuously:
 
-$$\Delta \mathbf{p} = \text{clip}\left(\mathbf{p}_{\text{target}} - \mathbf{p}_{\text{prev}}, \|\Delta \mathbf{p}\| \le v_{\max} \Delta t\right)$$
-$$\Delta \theta = \text{SLERP}\left(\mathbf{q}_{\text{prev}}, \mathbf{q}_{\text{target}}, \min\left(1.0, \frac{\omega_{\max} \Delta t}{\theta_{\text{dist}}}\right)\right)$$
+$$\lambda = \begin{cases}
+\lambda_{\min} & \text{if } \sigma_{\min} \ge \sigma_{\text{threshold}} \\
+\sqrt{\lambda_{\min}^2 + (1 - (\sigma_{\min}/\sigma_{\text{threshold}})^2)(\lambda_{\max}^2 - \lambda_{\min}^2)} & \text{if } \sigma_{\min} < \sigma_{\text{threshold}}
+\end{cases}$$
 
----
+### 3.4 Null-Space Joint Centering
+For redundant 7-DoF manipulators ($n > 6$), secondary joint centering projects the gradient of a joint-centering potential $H(\mathbf{q})$ onto the Jacobian null space:
 
-## 4. State Machine & Perception Gating
+$$\dot{\mathbf{q}} = \mathbf{J}_{\text{dls}} \mathbf{v}_{\text{task}} + (\mathbf{I}_n - \mathbf{J}_{\text{dls}} \mathbf{J}) \left( -k_{\text{null}} \nabla H(\mathbf{q}) \right)$$
 
-The deterministic Finite State Machine transitions through 11 operational states:
-
-```mermaid
-stateDiagram-v2
-    [*] --> HOME
-    HOME --> SEARCH: Init Complete
-    
-    state "Manual Mode" as ManualGroup {
-        SEARCH --> TRACK: Marker ID 0 Detected
-        TRACK --> HOLD: Marker Occluded (Immediate)
-        HOLD --> TRACK: Marker Reacquired
-        HOLD --> SEARCH: Search Timeout Exceeded (> 2.5s)
-    }
-
-    state "Autonomous Mode (Perception Gated)" as AutoGroup {
-        SEARCH --> APPROACH: Both Markers Verified (N >= 5 detections)
-        APPROACH --> PICK: Waypoint Reached
-        PICK --> LIFT: Grasp Verified (Distance < 5.5cm)
-        LIFT --> MOVE_TO_PLACE: Lift Waypoint Reached
-        MOVE_TO_PLACE --> PLACE: Place Waypoint Reached
-        PLACE --> RETURN_HOME: Grasp Released
-        RETURN_HOME --> SEARCH: Cycle Complete
-    }
-
-    APPROACH --> ERROR: Waypoint Timeout Exceeded
-    PICK --> ERROR: Grasp Distance Rejection
-    MOVE_TO_PLACE --> ERROR: Waypoint Timeout Exceeded
-    ERROR --> SEARCH: State Machine Reset
-```
+Where $H(\mathbf{q}) = \sum_{i=1}^n \left( \frac{q_i - q_{\text{rest}, i}}{q_{\text{high}, i} - q_{\text{low}, i}} \right)^2$.
 
 ---
 
-## 5. Software Safety & Failure Recovery
+## 4. Trajectory Generation & Motion Planning
 
-1. **Workspace Boundary Enforcer**: Cartesian coordinates are strictly clipped to the bounding box $[0.25 \le X \le 0.70\text{ m}, -0.40 \le Y \le 0.40\text{ m}, 0.08 \le Z \le 0.65\text{ m}]$.
-2. **Time-Based Slew Rate Limiter**: Maximum linear velocity $v_{\max} = 0.40\text{ m/s}$ and angular velocity $\omega_{\max} = 1.57\text{ rad/s}$ prevent joint shock and jerk.
-3. **Distance-Gated Virtual Grasp**: Physical proximity check ($\le 5.5\text{ cm}$) prevents remote or detached grasping.
-4. **NaN & Infinity Rejection**: Non-finite numerical inputs trigger immediate safe fallback.
-5. **Clean Resource Cleanup**: Signal handlers and context destructors ensure `cv2.destroyAllWindows()`, `camera.release()`, and `p.disconnect()` execute under all exit conditions.
+### 4.1 Joint-Space Quintic Polynomials
+Trajectories between configurations $\mathbf{q}_0$ and $\mathbf{q}_1$ over duration $T$ enforce $C^2$ continuity:
+- Boundary conditions: $\mathbf{q}(0) = \mathbf{q}_0$, $\mathbf{q}(T) = \mathbf{q}_1$, $\dot{\mathbf{q}}(0) = \dot{\mathbf{q}}(T) = \mathbf{0}$, $\ddot{\mathbf{q}}(0) = \ddot{\mathbf{q}}(T) = \mathbf{0}$.
+- Evaluator generates smooth, bounded positions, velocities, and accelerations at arbitrary time $t \in [0, T]$.
+
+### 4.2 Cartesian SE(3) Trajectory (Quintic Position + Quaternion SLERP)
+- Position: Interpolated via 3-axis quintic polynomial.
+- Orientation: Interpolated along the shortest geodesic arc on $SO(3)$ via Spherical Linear Interpolation (SLERP):
+  $$\mathbf{q}(t) = \frac{\sin((1 - \alpha)\theta)}{\sin\theta} \mathbf{q}_0 + \frac{\sin(\alpha\theta)}{\sin\theta} \mathbf{q}_1, \quad \alpha = t / T$$
+
+### 4.3 Collision-Aware RRT-Connect Planner
+- **Direct Path Optimization**: Checks linear joint interpolation first. If collision-free, executes immediately.
+- **Bidirectional RRT-Connect**: Grows two trees rooted at $\mathbf{q}_{\text{start}}$ and $\mathbf{q}_{\text{goal}}$ with goal bias $\beta = 0.05$ and step size $\Delta q = 0.10\text{ rad}$.
+- **Randomized Shortcutting**: Post-processes the RRT path by randomly sampling non-adjacent waypoint pairs and connecting them directly if the line segment is collision-free.
+
+---
+
+## 5. Perception-Gated Autonomous State Machine
+
+The FSM checks robot hardware capabilities at runtime:
+- **Panda (Gripper Supported)**: Enables full 11-state autonomous Pick-and-Place sequence (`HOME` $\to$ `SEARCH` $\to$ `APPROACH` $\to$ `PICK` $\to$ `LIFT` $\to$ `MOVE_TO_PLACE` $\to$ `PLACE` $\to$ `RETURN_HOME`).
+- **KUKA iiwa (No Gripper)**: Safely disables pick-and-place states, providing full 6-DoF manual tracking, waypoint positioning, and trajectory planning without runtime failures.
