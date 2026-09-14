@@ -1,10 +1,10 @@
 # VisionRobotTwin Task-Space Benchmark Experiment Report
 
 > [!NOTE]
-> **REFERENCE PYBULLET SIMULATION RESULTS**  
-> Generated: 2026-09-14T10:35:20.228260+00:00 UTC  
-> Software Version: 1.2.0-dev | Commit: `8ffaf5ba868157c845a45480e7b89fab00304e78`  
-> Physics Engine: PyBullet 202010061 (`DIRECT` mode, fixed timestep dt = 0.004167s / 240 Hz)  
+> **REFERENCE PYBULLET SIMULATION RESULTS**<br>
+> Generated: 2026-09-14T11:09:13.744574+00:00 UTC<br>
+> Software Version: 1.2.0-dev | Commit: `f316b08c80db165a05983cb6bc9b2fcadbeafc04`<br>
+> Physics Engine: PyBullet package `3.2.7` (API: `202010061`) (`DIRECT` mode, fixed timestep dt = 0.004167s / 240 Hz)
 
 ---
 
@@ -22,66 +22,95 @@ This benchmark suite provides a mathematically rigorous, reproducible experiment
 | :--- | :--- | :--- |
 | **OS** | `Windows` | 10.0.26200 |
 | **Python** | `3.12.10` | CPython |
-| **NumPy** | `2.2.6` | Vectorized algebra |
-| **PyBullet** | `202010061` | Physics client `DIRECT` |
+| **NumPy** | `2.2.6` | Vectorized linear algebra |
+| **PyBullet Package** | `3.2.7` | Physics client `DIRECT` |
+| **PyBullet API** | `202010061` | Internal C API version |
 | **Physics Frequency** | `240 Hz` | `dt = 0.004167s` |
-| **Position Tolerance** | `5.0 mm` | Settled final position threshold |
-| **Orientation Tolerance** | `5.0 deg` | Settled final orientation threshold |
-| **Statistical Repeats** | `3` | Independent deterministic trials |
-| **Random Seed** | `42` | Deterministic initialization |
+| **Settle Tolerance** | `5.0 mm` | Settled final position threshold |
+| **Success Position Tolerance** | `10.0 mm` | Trial completion position threshold |
+| **Success Orientation Tolerance** | `10.0 deg` | Trial completion orientation threshold |
+| **Planning Position Tolerance** | `25.0 mm` | Obstacle reach final endpoint threshold |
+| **Deterministic Repeats** | `3` | Deterministic repeatability executions |
+| **Random Seed** | `42` | Deterministic initialization seed |
 
 ## 3. Shared Feasibility Preflight
 
-Before executing any trajectory trial, the entire desired task-space curve is sampled at dense intervals. Both Franka Emika Panda and KUKA LBR iiwa solvers verify that inverse kinematics solutions exist with Cartesian position residual $\le 25\text{ mm}$ and orientation error $\le 10^\circ$ across every single waypoint.
+Before executing any trajectory trial, the entire desired task-space curve is sampled at dense intervals. Both Franka Emika Panda and KUKA LBR iiwa solvers verify that inverse kinematics solutions exist with Cartesian position residual $\le 25\text{ mm}$ and orientation error $\le 10^\circ$ across every checked waypoint.
 
-| Trajectory | Shared Feasible | Panda Feasible | KUKA Feasible | Max Pos Residual (mm) | Max Orn Residual (deg) | Policy |
-| :--- | :---: | :---: | :---: | :---: | :---: | :--- |
-| `line` | **PASS** | PASS | PASS | 20.08 mm | 0.08° | `EXACT_PATH` |
-| `circle` | **PASS** | PASS | PASS | 20.28 mm | 0.08° | `EXACT_PATH` |
-| `figure_eight` | **PASS** | PASS | PASS | 20.24 mm | 0.08° | `EXACT_PATH` |
-| `waypoint_box` | **PASS** | PASS | PASS | 20.19 mm | 0.08° | `EXACT_PATH` |
-| `se3_sweep` | **PASS** | PASS | PASS | 20.08 mm | 0.08° | `EXACT_PATH` |
+| Trajectory | Shared Feasible | Panda Feasible | KUKA Feasible | Checked Samples | Total Samples | Stride | Max Pos Residual (mm) | Max Orn Residual (deg) | Policy |
+| :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :--- |
+| `line` | **PASS** | PASS | PASS | 481 | 481 | 1 | 20.08 mm | 0.08° | `EXACT_PATH` |
+| `circle` | **PASS** | PASS | PASS | 721 | 721 | 1 | 20.28 mm | 0.08° | `EXACT_PATH` |
+| `figure_eight` | **PASS** | PASS | PASS | 961 | 961 | 1 | 20.24 mm | 0.08° | `EXACT_PATH` |
+| `waypoint_box` | **PASS** | PASS | PASS | 961 | 961 | 1 | 20.19 mm | 0.08° | `EXACT_PATH` |
+| `se3_sweep` | **PASS** | PASS | PASS | 721 | 721 | 1 | 20.08 mm | 0.08° | `EXACT_PATH` |
+
+Every generated trajectory sample was checked during preflight verification (`preflight_sample_stride = 1`).
 
 ## 4. Task Definitions
 
-1. **LINE**: 10 cm horizontal Cartesian translation at $z = 0.35\text{ m}$. Tests standard linear path tracking.
-2. **CIRCLE**: Continuous circular trajectory ($R = 5\text{ cm}$) in the XY plane. Tests continuous non-linear tracking.
-3. **FIGURE EIGHT**: Lemniscate of Gerono ($A_x = 5\text{ cm}, A_y = 5\text{ cm}$). Tests smooth velocity reversals and directional inflection points.
-4. **WAYPOINT BOX**: 4-point closed rectangular path ($6\text{ cm} \times 6\text{ cm}$) with quintic inter-waypoint blending. Tests corner transitions.
-5. **SE3 ORIENTATION SWEEP**: Harmonic translation combined with continuous $\pm 20^\circ$ roll oscillation using quaternion SLERP. Tests 6-DoF full-pose tracking.
+1. **LINE**: Straight 10 cm horizontal Cartesian translation with fixed orientation.
+   - Center Position: `[0.48, 0.0, 0.35]`
+   - Geometry: `{'length_m': 0.1, 'axis': 'Y', 'path_type': 'Straight Cartesian Line'}`
+   - Duration: `2.0 s` (481 samples @ 240 Hz)
+   - Orientation Profile: `Fixed downward [1, 0, 0, 0]` (Rotation Axis: `None (Fixed)`)
+
+2. **CIRCLE**: Continuous horizontal task-space circle (R = 5 cm) with fixed orientation.
+   - Center Position: `[0.48, 0.0, 0.35]`
+   - Geometry: `{'radius_m': 0.05, 'plane': 'XY', 'path_type': 'Continuous Planar Circle'}`
+   - Duration: `3.0 s` (721 samples @ 240 Hz)
+   - Orientation Profile: `Fixed downward [1, 0, 0, 0]` (Rotation Axis: `None (Fixed)`)
+
+3. **FIGURE_EIGHT**: Lemniscate figure-eight trajectory (X peak amplitude: 4 cm, Y peak amplitude: 3 cm).
+   - Center Position: `[0.48, 0.0, 0.35]`
+   - Geometry: `{'amplitude_x_m': 0.04, 'amplitude_y_m': 0.03, 'plane': 'XY', 'path_type': 'Lemniscate (Figure-Eight)'}`
+   - Duration: `4.0 s` (961 samples @ 240 Hz)
+   - Orientation Profile: `Fixed downward [1, 0, 0, 0]` (Rotation Axis: `None (Fixed)`)
+
+4. **WAYPOINT_BOX**: Smooth 4-corner closed box path (6 cm x 6 cm) in the XY plane.
+   - Center Position: `[0.48, 0.0, 0.35]`
+   - Geometry: `{'size_x_m': 0.06, 'size_y_m': 0.06, 'plane': 'XY', 'corners': 4, 'path_type': '4-Corner Rectangular Route'}`
+   - Duration: `4.0 s` (961 samples @ 240 Hz)
+   - Orientation Profile: `Fixed downward [1, 0, 0, 0]` (Rotation Axis: `None (Fixed)`)
+
+5. **SE3_SWEEP**: 6-DoF trajectory with +/-20 deg X-axis roll rotation via quaternion SLERP and 2 cm X harmonic translation.
+   - Center Position: `[0.48, 0.0, 0.35]`
+   - Geometry: `{'harmonic_translation_axis': 'X', 'harmonic_amplitude_m': 0.02, 'rotation_axis': 'X', 'max_roll_deg': 20.0, 'path_type': '6-DoF Roll SLERP + Harmonic Translation'}`
+   - Duration: `3.0 s` (721 samples @ 240 Hz)
+   - Orientation Profile: `Quaternion SLERP roll sweep (+/-20 deg around X-axis)` (Rotation Axis: `X (Roll)`)
 
 ## 5. Cross-Robot & Cross-Controller Summary Matrix
 
 | Experiment | Metric | Panda (IK) | Panda (Resolved-Rate) | KUKA iiwa (IK) | KUKA iiwa (Resolved-Rate) |
 | :--- | :--- | :---: | :---: | :---: | :---: |
-| **Line** | **RMSE Pos (mm)** | 2.02 | 10.23 | 20.45 | 11.02 |
-| | **P95 Pos (mm)** | 3.22 | 17.14 | 20.50 | 17.23 |
+| **Line** | **RMSE Pos (mm)** | 2.39 | 12.27 | 20.44 | 13.06 |
+| | **P95 Pos (mm)** | 3.96 | 20.78 | 20.50 | 20.82 |
 | | **Mean Orn (deg)** | 0.00° | 0.01° | 0.07° | 0.05° |
-| | **Joint Travel (rad)** | 0.46 rad | 0.45 rad | 1.72 rad | 0.66 rad |
+| | **Joint Travel (rad)** | 0.46 rad | 0.44 rad | 1.68 rad | 0.64 rad |
 | | **Min Manipulability** | 0.08 | 0.08 | 0.08 | 0.08 |
 | | **Success Rate** | **100%** | **100%** | **0%** | **100%** |
-| **Circle** | **RMSE Pos (mm)** | 30.80 | 24.73 | 21.18 | 25.04 |
-| | **P95 Pos (mm)** | 61.49 | 40.13 | 24.11 | 40.10 |
+| **Circle** | **RMSE Pos (mm)** | 27.46 | 22.38 | 20.99 | 22.67 |
+| | **P95 Pos (mm)** | 53.21 | 35.96 | 23.40 | 35.91 |
 | | **Mean Orn (deg)** | 0.02° | 0.01° | 0.07° | 0.02° |
-| | **Joint Travel (rad)** | 1.37 rad | 1.68 rad | 3.07 rad | 1.89 rad |
-| | **Min Manipulability** | 0.08 | 0.08 | 0.06 | 0.07 |
+| | **Joint Travel (rad)** | 1.55 rad | 1.77 rad | 3.13 rad | 2.00 rad |
+| | **Min Manipulability** | 0.08 | 0.07 | 0.06 | 0.07 |
 | | **Success Rate** | **100%** | **100%** | **0%** | **100%** |
-| **Figure Eight** | **RMSE Pos (mm)** | 20.15 | 18.68 | 21.30 | 19.08 |
-| | **P95 Pos (mm)** | 49.17 | 35.88 | 23.51 | 35.89 |
+| **Figure Eight** | **RMSE Pos (mm)** | 10.81 | 15.38 | 20.92 | 15.71 |
+| | **P95 Pos (mm)** | 29.06 | 29.75 | 22.24 | 29.77 |
 | | **Mean Orn (deg)** | 0.01° | 0.01° | 0.07° | 0.02° |
-| | **Joint Travel (rad)** | 1.33 rad | 1.27 rad | 3.00 rad | 1.46 rad |
+| | **Joint Travel (rad)** | 1.80 rad | 1.56 rad | 3.16 rad | 1.79 rad |
+| | **Min Manipulability** | 0.07 | 0.08 | 0.07 | 0.07 |
+| | **Success Rate** | **100%** | **100%** | **0%** | **100%** |
+| **Waypoint Box** | **RMSE Pos (mm)** | 6.56 | 13.95 | 20.81 | 14.32 |
+| | **P95 Pos (mm)** | 14.81 | 21.26 | 21.82 | 21.24 |
+| | **Mean Orn (deg)** | 0.00° | 0.01° | 0.07° | 0.02° |
+| | **Joint Travel (rad)** | 1.32 rad | 1.28 rad | 2.74 rad | 1.55 rad |
 | | **Min Manipulability** | 0.08 | 0.08 | 0.07 | 0.07 |
 | | **Success Rate** | **100%** | **100%** | **0%** | **100%** |
-| **Waypoint Box** | **RMSE Pos (mm)** | 15.53 | 19.07 | 21.06 | 19.45 |
-| | **P95 Pos (mm)** | 28.53 | 28.26 | 22.62 | 28.25 |
-| | **Mean Orn (deg)** | 0.01° | 0.01° | 0.07° | 0.02° |
-| | **Joint Travel (rad)** | 1.28 rad | 1.24 rad | 2.67 rad | 1.44 rad |
-| | **Min Manipulability** | 0.08 | 0.08 | 0.07 | 0.07 |
-| | **Success Rate** | **100%** | **100%** | **0%** | **100%** |
-| **Se3 Sweep** | **RMSE Pos (mm)** | 11.10 | 6.52 | 20.68 | 7.68 |
-| | **P95 Pos (mm)** | 24.76 | 14.84 | 21.56 | 15.48 |
-| | **Mean Orn (deg)** | 8.32° | 7.10° | 1.33° | 7.01° |
-| | **Joint Travel (rad)** | 0.91 rad | 1.49 rad | 3.14 rad | 1.71 rad |
+| **Se3 Sweep** | **RMSE Pos (mm)** | 10.31 | 5.95 | 20.63 | 7.19 |
+| | **P95 Pos (mm)** | 22.88 | 13.48 | 21.20 | 14.21 |
+| | **Mean Orn (deg)** | 8.23° | 6.64° | 0.98° | 6.72° |
+| | **Joint Travel (rad)** | 1.86 rad | 2.78 rad | 5.15 rad | 3.42 rad |
 | | **Min Manipulability** | 0.08 | 0.08 | 0.08 | 0.08 |
 | | **Success Rate** | **100%** | **100%** | **0%** | **100%** |
 
@@ -121,16 +150,20 @@ Before executing any trajectory trial, the entire desired task-space curve is sa
 
 A dedicated obstacle avoidance experiment tests the complete collision-aware planning stack when moving between points $[0.42, -0.18, 0.35]$ and $[0.42, 0.18, 0.35]$ separated by a rigid box obstacle at $[0.42, 0.0, 0.35]$.
 
+Under this PyBullet configuration, planning PASS requires collision-free trajectory execution AND a final endpoint error $\le 25.0\text{ mm}$. This criterion validates high-level obstacle clearing and endpoint arrival, distinct from the 5.0 mm continuous settled tracking tolerance.
+
 | Robot | Direct Path State | RRT-Connect Status | Plan Time (ms) | Raw Waypoints | Smoothed Waypoints | Raw Travel (rad) | Smoothed Travel (rad) | Min Clearance (m) | Execution | Final Error (mm) |
 | :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
-| **PANDA** | `BLOCKED` | `SUCCESS` | 1288.2 ms | 50 | 14 | 2.39 rad | 1.70 rad | 0.0027 m | **PASS** | 1.20 mm |
-| **KUKA_IIWA** | `BLOCKED` | `SUCCESS` | 757.3 ms | 36 | 4 | 1.70 rad | 1.30 rad | 0.0056 m | **PASS** | 18.82 mm |
+| **PANDA** | `BLOCKED` | `SUCCESS` | 1473.5 ms | 50 | 14 | 2.39 rad | 1.70 rad | 0.0027 m | **PASS** | 1.20 mm |
+| **KUKA_IIWA** | `BLOCKED` | `SUCCESS` | 669.6 ms | 36 | 4 | 1.70 rad | 1.30 rad | 0.0056 m | **PASS** | 18.82 mm |
 
 ## 8. Failure Cases & Singularity Telemetry
 
-- **Collisions**: 0 unintended collisions were observed during standard task-space tracking trials across all shared feasible trajectories.
-- **Singularity Warnings**: Near-singularity events (condition number $> 100$ or $\sigma_{\min} < 0.01$) were monitored at 240 Hz throughout each trial.
-- **Feasibility Verification**: All 5 benchmark trajectories were preflight-verified feasible on both manipulators before running.
+- **Feasibility**: 5 shared-feasible trajectories verified, 0 failed feasibility preflight trajectories.
+- **Trial Execution**: 60 executed trials (45 successful, 15 failed), 0 skipped trials due to preflight gating.
+- **Collisions**: Recorded 0 self-collisions and 0 environment-collisions across all executed trials.
+- **Singularity Warnings**: 0 total near-singularity warning steps (condition number $> 100$ or $\sigma_{\min} < 0.01$) observed during execution.
+- **Joint Limit Events**: 0 joint-limit violations observed during execution.
 
 ## 9. Limitations & Conservative Interpretation
 
