@@ -261,7 +261,15 @@ def verify_experiment_results_consistency(
             if not isinstance(stats, dict) or "trials_count" not in stats:
                 continue
 
-            robot, ctrl = combo_key.split("_", 1) if "_" in combo_key else (combo_key, "")
+            if combo_key.startswith("kuka_iiwa_"):
+                robot = "kuka_iiwa"
+                ctrl = combo_key[len("kuka_iiwa_"):]
+            elif combo_key.startswith("panda_"):
+                robot = "panda"
+                ctrl = combo_key[len("panda_"):]
+            else:
+                robot, ctrl = combo_key.split("_", 1) if "_" in combo_key else (combo_key, "")
+
             # Find matching trials
             matching = [
                 m for m in all_trial_metrics
