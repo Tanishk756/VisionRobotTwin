@@ -26,7 +26,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from robotics.robot_registry import get_robot_registry
 from robotics.robot_controller import GenericRobotController
 from robotics.inverse_kinematics import GenericIKSolver
-from robotics.kinematics import compute_jacobian, compute_manipulability
+from robotics.kinematics import compute_jacobian, compute_manipulability, compute_fk_at_configuration
 from robotics.trajectory import JointQuinticTrajectory
 from robotics.collision import CollisionChecker
 from robotics.planning import RRTConnectPlanner, is_joint_path_collision_free
@@ -40,8 +40,10 @@ def generate_shared_benchmark_targets(
     target_count: int = 15,
     max_candidates: int = 200,
     headless: bool = True,
-) -> Tuple[List[Tuple[np.ndarray, np.ndarray]], Dict[str, int]]:
-    """Generates 6-DoF target poses verified reachable within residual tolerances by BOTH Panda and KUKA."""
+    position_tolerance_m: float = 0.025,
+    orientation_tolerance_deg: float = 10.0,
+) -> Tuple[List[Tuple[np.ndarray, np.ndarray]], Dict[str, Any]]:
+    """Generates true shared 6-DoF SE(3) target poses verified reachable within residual tolerances by BOTH Panda and KUKA."""
     client_id = p.connect(p.DIRECT if headless else p.GUI)
     p.setAdditionalSearchPath(pybullet_data.getDataPath(), physicsClientId=client_id)
 
@@ -86,16 +88,18 @@ def generate_shared_benchmark_targets(
     )
 
     rng = np.random.RandomState(seed)
-    default_orn = np.array([1.0, 0.0, 0.0, 0.0], dtype=np.float64)
+    shared_orn = np.array([1.0, 0.0, 0.0, 0.0], dtype=np.float64)
+    orn_tol_rad = float(np.radians(orientation_tolerance_deg))
 
     accepted_targets: List[Tuple[np.ndarray, np.ndarray]] = []
     candidate_count = 0
-    rejected_count = 0
+    rejected_pos_count = 0
+    rejected_orn_count = 0
 
     # Grid search across the shared workspace volume
-    xs = np.linspace(0.35, 0.55, 4)
-    ys = np.linspace(-0.20, 0.20, 4)
-    zs = np.linspace(0.20, 0.40, 3)
+    xs = np.linspace(0.40, 0.55, 4)
+    ys = np.linspace(-0.15, 0.15, 4)
+    zs = np.linspace(0.20, 0.35, 3)
 
     grid_candidates = []
     for x in xs:
@@ -107,36 +111,59 @@ def generate_shared_benchmark_targets(
         if len(accepted_targets) >= target_count:
             break
         candidate_count += 1
-        res_p = panda_ik.solve(pos, None)
-        res_k = kuka_ik.solve(pos, None)
-        if res_p.success and res_k.success and res_p.residual_position_m < 0.05 and res_k.residual_position_m < 0.05:
-            accepted_targets.append((pos, None))
+        res_p = panda_ik.solve(pos, shared_orn)
+        res_k = kuka_ik.solve(pos, shared_orn)
+
+        p_pos_ok = res_p.success and res_p.residual_position_m <= position_tolerance_m
+        k_pos_ok = res_k.success and res_k.residual_position_m <= position_tolerance_m
+        p_orn_ok = res_p.success and res_p.residual_orientation_rad <= orn_tol_rad
+        k_orn_ok = res_k.success and res_k.residual_orientation_rad <= orn_tol_rad
+
+        if p_pos_ok and k_pos_ok and p_orn_ok and k_orn_ok:
+            accepted_targets.append((pos, shared_orn.copy()))
         else:
-            rejected_count += 1
+            if not (p_pos_ok and k_pos_ok):
+                rejected_pos_count += 1
+            elif not (p_orn_ok and k_orn_ok):
+                rejected_orn_count += 1
 
     # Random generation if more targets needed
     while len(accepted_targets) < target_count and candidate_count < max_candidates:
         candidate_count += 1
         pos = np.array([
-            rng.uniform(0.35, 0.55),
-            rng.uniform(-0.22, 0.22),
-            rng.uniform(0.18, 0.42),
+            rng.uniform(0.38, 0.55),
+            rng.uniform(-0.18, 0.18),
+            rng.uniform(0.18, 0.38),
         ], dtype=np.float64)
-        res_p = panda_ik.solve(pos, None)
-        res_k = kuka_ik.solve(pos, None)
-        if res_p.success and res_k.success and res_p.residual_position_m < 0.05 and res_k.residual_position_m < 0.05:
-            accepted_targets.append((pos, None))
+        res_p = panda_ik.solve(pos, shared_orn)
+        res_k = kuka_ik.solve(pos, shared_orn)
+
+        p_pos_ok = res_p.success and res_p.residual_position_m <= position_tolerance_m
+        k_pos_ok = res_k.success and res_k.residual_position_m <= position_tolerance_m
+        p_orn_ok = res_p.success and res_p.residual_orientation_rad <= orn_tol_rad
+        k_orn_ok = res_k.success and res_k.residual_orientation_rad <= orn_tol_rad
+
+        if p_pos_ok and k_pos_ok and p_orn_ok and k_orn_ok:
+            accepted_targets.append((pos, shared_orn.copy()))
         else:
-            rejected_count += 1
+            if not (p_pos_ok and k_pos_ok):
+                rejected_pos_count += 1
+            elif not (p_orn_ok and k_orn_ok):
+                rejected_orn_count += 1
 
     p.disconnect(physicsClientId=client_id)
 
     meta = {
+        "requested_targets": target_count,
         "candidate_count": candidate_count,
         "accepted_shared_targets": len(accepted_targets),
-        "rejected_candidates": rejected_count,
+        "rejected_position": rejected_pos_count,
+        "rejected_orientation": rejected_orn_count,
+        "shared_SE3_position_tolerance_mm": float(position_tolerance_m * 1000.0),
+        "shared_SE3_orientation_tolerance_deg": float(orientation_tolerance_deg),
     }
     return accepted_targets, meta
+
 
 
 def benchmark_robot(
@@ -209,7 +236,10 @@ def benchmark_robot(
     manipulabilities = []
     condition_numbers = []
     sigmas_min = []
-    dynamic_tracking_errors_mm = []
+    dynamic_pos_errors_mm = []
+    dynamic_orn_errors_deg = []
+    final_pos_errors_mm = []
+    final_orn_errors_deg = []
     planning_successes = []
     planning_times_ms = []
     path_lengths_rad = []
@@ -251,15 +281,36 @@ def benchmark_robot(
                 )
                 p.stepSimulation(physicsClientId=client_id)
 
-                ee_curr_pos, _ = controller.get_end_effector_pose()
-                # Compute FK of desired trajectory sample for rigorous dynamic tracking comparison
-                # Query actual link state for sample target
-                # Instantaneous Cartesian tracking error:
-                # We compare current simulated EE position with the expected target position at final step or sample
-                # For dynamic trajectory tracking error:
-                if step_idx == steps_per_traj - 1:
-                    final_ee_err_mm = float(np.linalg.norm(pos - ee_curr_pos)) * 1000.0
-                    dynamic_tracking_errors_mm.append(final_ee_err_mm)
+                ee_curr_pos, ee_curr_orn = controller.get_end_effector_pose()
+
+                # Desired pose from trajectory sample forward kinematics
+                fk_des_pos, fk_des_orn = compute_fk_at_configuration(
+                    client_id, body_id, controller.arm_joint_indices, list(sample.position), controller.ee_link_index
+                )
+                step_pos_err = float(np.linalg.norm(fk_des_pos - ee_curr_pos)) * 1000.0
+                dynamic_pos_errors_mm.append(step_pos_err)
+
+                dot_step = float(np.abs(np.dot(
+                    fk_des_orn / np.linalg.norm(fk_des_orn),
+                    ee_curr_orn / np.linalg.norm(ee_curr_orn),
+                )))
+                step_orn_err = float(np.degrees(2.0 * np.arccos(np.clip(dot_step, -1.0, 1.0))))
+                dynamic_orn_errors_deg.append(step_orn_err)
+
+            # Final trajectory endpoint errors against commanded target
+            ee_final_pos, ee_final_orn = controller.get_end_effector_pose()
+            final_p_err = float(np.linalg.norm(pos - ee_final_pos)) * 1000.0
+            final_pos_errors_mm.append(final_p_err)
+
+            if orn is not None:
+                dot_final = float(np.abs(np.dot(
+                    orn / np.linalg.norm(orn),
+                    ee_final_orn / np.linalg.norm(ee_final_orn),
+                )))
+                final_o_err = float(np.degrees(2.0 * np.arccos(np.clip(dot_final, -1.0, 1.0))))
+            else:
+                final_o_err = 0.0
+            final_orn_errors_deg.append(final_o_err)
 
             # C. Collision-Aware Planning from prev_q to q_sol
             is_free, _ = is_joint_path_collision_free(
@@ -288,7 +339,10 @@ def benchmark_robot(
     valid_ik_pos = [v for v in ik_pos_residuals_mm if np.isfinite(v)]
     valid_ik_orn = [v for v in ik_orn_residuals_deg if np.isfinite(v)]
     valid_cond = [v for v in condition_numbers if np.isfinite(v)]
-    valid_dyn_err = [v for v in dynamic_tracking_errors_mm if np.isfinite(v)]
+    valid_dyn_pos = [v for v in dynamic_pos_errors_mm if np.isfinite(v)]
+    valid_dyn_orn = [v for v in dynamic_orn_errors_deg if np.isfinite(v)]
+    valid_fin_pos = [v for v in final_pos_errors_mm if np.isfinite(v)]
+    valid_fin_orn = [v for v in final_orn_errors_deg if np.isfinite(v)]
 
     result = {
         "robot_id": robot_id_name,
@@ -305,8 +359,17 @@ def benchmark_robot(
         "min_manipulability": float(np.min(manipulabilities)) if manipulabilities else 0.0,
         "mean_manipulability": float(np.mean(manipulabilities)) if manipulabilities else 0.0,
         "max_jacobian_condition_number": float(np.max(valid_cond)) if valid_cond else 0.0,
-        "mean_dynamic_tracking_error_mm": float(np.mean(valid_dyn_err)) if valid_dyn_err else 0.0,
-        "p95_dynamic_tracking_error_mm": float(np.percentile(valid_dyn_err, 95)) if valid_dyn_err else 0.0,
+        "dynamic_samples_count": len(valid_dyn_pos),
+        "mean_dynamic_position_error_mm": float(np.mean(valid_dyn_pos)) if valid_dyn_pos else 0.0,
+        "p95_dynamic_position_error_mm": float(np.percentile(valid_dyn_pos, 95)) if valid_dyn_pos else 0.0,
+        "mean_dynamic_orientation_error_deg": float(np.mean(valid_dyn_orn)) if valid_dyn_orn else 0.0,
+        "p95_dynamic_orientation_error_deg": float(np.percentile(valid_dyn_orn, 95)) if valid_dyn_orn else 0.0,
+        "mean_final_position_error_mm": float(np.mean(valid_fin_pos)) if valid_fin_pos else 0.0,
+        "p95_final_position_error_mm": float(np.percentile(valid_fin_pos, 95)) if valid_fin_pos else 0.0,
+        "mean_final_orientation_error_deg": float(np.mean(valid_fin_orn)) if valid_fin_orn else 0.0,
+        "p95_final_orientation_error_deg": float(np.percentile(valid_fin_orn, 95)) if valid_fin_orn else 0.0,
+        "mean_dynamic_tracking_error_mm": float(np.mean(valid_dyn_pos)) if valid_dyn_pos else 0.0,
+        "p95_dynamic_tracking_error_mm": float(np.percentile(valid_dyn_pos, 95)) if valid_dyn_pos else 0.0,
         "collision_free_direct_path_rate": float(direct_free_count / max(len(targets), 1)),
         "rrt_planning_success_rate": float(np.mean(planning_successes)),
         "mean_planning_time_ms": float(np.mean(planning_times_ms)) if planning_times_ms else 0.0,
@@ -319,7 +382,7 @@ def main():
     parser = argparse.ArgumentParser(description="Cross-Robot Kinematic and Planning Benchmark Tool.")
     parser.add_argument("--robots", nargs="+", default=["panda", "kuka_iiwa"], help="Robots to benchmark.")
     parser.add_argument("--trials", type=int, default=15, help="Number of benchmark target poses.")
-    parser.add_argument("--trajectory-duration", type=float, default=1.5, help="Trajectory duration (s).")
+    parser.add_argument("--trajectory-duration", type=float, default=2.0, help="Trajectory duration (s).")
     parser.add_argument("--headless", action="store_true", default=True, help="Run simulation headless.")
     parser.add_argument("--output-dir", type=str, default=None, help="Output directory path.")
     args = parser.parse_args()
@@ -331,12 +394,13 @@ def main():
     print(f"\n{'='*75}")
     print(f" VisionRobotTwin Cross-Robot Benchmark Suite (PyBullet Simulation)")
     print(f" Target Robots: {', '.join(args.robots)} | Target Trials: {args.trials}")
+    print(f" Trajectory Duration: {args.trajectory_duration:.1f}s")
     print(f"{'='*75}\n")
 
     targets, target_meta = generate_shared_benchmark_targets(
         seed=42, target_count=args.trials, headless=args.headless
     )
-    print(f"[*] Target Generation: Candidates={target_meta['candidate_count']}, Accepted={target_meta['accepted_shared_targets']}, Rejected={target_meta['rejected_candidates']}")
+    print(f"[*] Target Generation: Candidates={target_meta['candidate_count']}, Accepted={target_meta['accepted_shared_targets']}, Rejected Pos={target_meta['rejected_position']}, Rejected Orn={target_meta['rejected_orientation']}")
     results = {}
 
     for r_id in args.robots:
@@ -359,7 +423,6 @@ def main():
     csv_path = out_dir / "results.csv"
     import csv
     with open(csv_path, "w", newline="", encoding="utf-8") as f:
-        # Exclude nested dict for CSV
         csv_rows = []
         for r_res in results.values():
             flat_res = {k: v for k, v in r_res.items() if not isinstance(v, dict)}
@@ -373,7 +436,7 @@ def main():
 
     # Print Table
     print(f"\n{'-'*95}")
-    print(f"{'Metric':<35} | {'Panda':<25} | {'KUKA iiwa':<25}")
+    print(f"{'Metric':<38} | {'Panda':<25} | {'KUKA iiwa':<25}")
     print(f"{'-'*95}")
     keys_to_print = [
         ("DoF", "dof", "{:d}"),
@@ -384,8 +447,12 @@ def main():
         ("Mean IK Position Residual (mm)", "mean_ik_residual_position_mm", "{:.3f} mm"),
         ("P95 IK Position Residual (mm)", "p95_ik_residual_position_mm", "{:.3f} mm"),
         ("Mean IK Orientation Residual (deg)", "mean_ik_residual_orientation_deg", "{:.3f} deg"),
-        ("Mean Dynamic Tracking Error (mm)", "mean_dynamic_tracking_error_mm", "{:.3f} mm"),
-        ("P95 Dynamic Tracking Error (mm)", "p95_dynamic_tracking_error_mm", "{:.3f} mm"),
+        ("Dynamic Tracking Samples", "dynamic_samples_count", "{:d}"),
+        ("Mean Dynamic Position Error (mm)", "mean_dynamic_position_error_mm", "{:.3f} mm"),
+        ("P95 Dynamic Position Error (mm)", "p95_dynamic_position_error_mm", "{:.3f} mm"),
+        ("Mean Dynamic Orientation Error (deg)", "mean_dynamic_orientation_error_deg", "{:.3f} deg"),
+        ("Mean Final Position Error (mm)", "mean_final_position_error_mm", "{:.3f} mm"),
+        ("Mean Final Orientation Error (deg)", "mean_final_orientation_error_deg", "{:.3f} deg"),
         ("Mean Manipulability (Yoshikawa)", "mean_manipulability", "{:.4f}"),
         ("Min Manipulability", "min_manipulability", "{:.4f}"),
         ("Max Jacobian Condition", "max_jacobian_condition_number", "{:.2f}"),
@@ -400,7 +467,7 @@ def main():
         k_val = results.get("kuka_iiwa", {}).get(k, "N/A")
         p_str = fmt.format(p_val) if isinstance(p_val, (int, float, bool)) else str(p_val)
         k_str = fmt.format(k_val) if isinstance(k_val, (int, float, bool)) else str(k_val)
-        print(f"{label:<35} | {p_str:<25} | {k_str:<25}")
+        print(f"{label:<38} | {p_str:<25} | {k_str:<25}")
     print(f"{'-'*95}")
     print(f"\n[+] Benchmark complete. Artifacts exported to: {out_dir}\n")
 
