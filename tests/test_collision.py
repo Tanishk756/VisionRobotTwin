@@ -81,8 +81,8 @@ def test_collision_detection_with_obstacle(pybullet_scene):
     assert (body_id, obstacle_id) in result.colliding_bodies
 
 
-def test_self_collision_detection(pybullet_scene):
-    """Verifies self-collision is detected when robot arm is folded into itself."""
+def test_self_collision_detection_panda(pybullet_scene):
+    """Verifies self-collision is detected when Franka Panda arm is folded into itself."""
     client_id, table_id, obstacle_id = pybullet_scene
     registry = get_robot_registry()
     spec = registry.get_robot_spec("panda")
@@ -95,11 +95,46 @@ def test_self_collision_detection(pybullet_scene):
         robot_id=body_id,
         table_id=table_id,
         obstacle_ids=[obstacle_id],
+        allowed_self_link_pairs=spec.allowed_self_collision_pairs,
     )
 
-    # Joint configuration causing forearm/wrist to fold back into the base link 0
-    folded_q = [0.0, 1.5, 0.0, 3.0, 0.0, 0.0, 0.0]
+    # 1. Home pose must be clear of self-collision
+    home_res = checker.check_collision()
+    assert not home_res.self_collision
+
+    # 2. Known folded Panda configuration causing forearm/wrist to collide with base link 0
+    folded_q = [0.0, 1.5, 0.0, -3.0, 0.0, 3.5, 0.0]
     result = checker.check_collision(joint_positions=folded_q)
+    assert isinstance(result, CollisionResult)
+    assert result.in_collision
+    assert result.self_collision
+    assert (body_id, body_id) in result.colliding_bodies
+
+
+def test_self_collision_detection_kuka(pybullet_scene):
+    """Verifies self-collision is detected when KUKA LBR iiwa arm is folded into itself."""
+    client_id, table_id, obstacle_id = pybullet_scene
+    registry = get_robot_registry()
+    spec = registry.get_robot_spec("kuka_iiwa")
+
+    body_id = p.loadURDF(spec.urdf_path, useFixedBase=True, physicsClientId=client_id)
+    controller = GenericRobotController(client_id, body_id, spec)
+
+    checker = CollisionChecker(
+        physics_client_id=client_id,
+        robot_id=body_id,
+        table_id=table_id,
+        obstacle_ids=[obstacle_id],
+        allowed_self_link_pairs=spec.allowed_self_collision_pairs,
+    )
+
+    # 1. Home pose must be clear of self-collision
+    home_res = checker.check_collision()
+    assert not home_res.self_collision
+
+    # 2. Known folded KUKA configuration causing upper link 6 to collide with base link 0
+    folded_kuka_q = [0.0, 2.0, 0.0, -2.0, 0.0, 2.0, 0.0]
+    result = checker.check_collision(joint_positions=folded_kuka_q)
     assert isinstance(result, CollisionResult)
     assert result.in_collision
     assert result.self_collision

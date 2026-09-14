@@ -39,6 +39,7 @@ class PandaAdapter(RobotAdapter):
                 default_ee_orientation=(1.0, 0.0, 0.0, 0.0),
                 spherical_reach_m=0.855,
                 min_reach_m=0.10,
+                allowed_self_collision_pairs=[(9, 10)],
             )
         super().__init__(spec)
 

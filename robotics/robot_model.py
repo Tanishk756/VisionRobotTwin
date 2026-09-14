@@ -42,3 +42,4 @@ class RobotModelSpec:
     default_ee_orientation: Tuple[float, float, float, float] = (1.0, 0.0, 0.0, 0.0)
     spherical_reach_m: float = 0.855
     min_reach_m: float = 0.10
+    allowed_self_collision_pairs: List[Tuple[int, int]] = field(default_factory=list)

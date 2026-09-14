@@ -215,11 +215,20 @@ class PyBulletSimulator:
         )
 
         from robotics.collision import CollisionChecker
+        allowed_mount_pairs = []
+        if self.table_id is not None:
+            allowed_mount_pairs.extend([
+                (self.robot_id, -1, self.table_id, -1),
+                (self.robot_id, 0, self.table_id, -1),
+            ])
+
         self.collision_checker = CollisionChecker(
             physics_client_id=self.client_id,
             robot_id=self.robot_id,
             table_id=self.table_id,
             obstacle_ids=self.obstacle_ids,
+            allowed_link_pairs=allowed_mount_pairs,
+            allowed_self_link_pairs=self.robot_spec.allowed_self_collision_pairs,
         )
 
         from robotics.differential_ik import ResolvedRateController

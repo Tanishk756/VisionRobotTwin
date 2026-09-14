@@ -56,34 +56,50 @@ class CollisionChecker:
         self.allowed_link_pairs = set(allowed_link_pairs) if allowed_link_pairs else set()
         self.allowed_self_links = set(allowed_self_link_pairs) if allowed_self_link_pairs else set()
 
-        # Build adjacent / allowed self-link pairs from URDF kinematics tree
+        # Build adjacent / allowed self-link pairs from kinematics tree
         self.adjacent_links: Set[Tuple[int, int]] = set()
         num_joints = p.getNumJoints(self.robot_id, physicsClientId=self.client_id)
 
-        # Build link tree adjacency graph (including base link -1)
         from collections import deque
-        adj: Dict[int, Set[int]] = {i: set() for i in range(-1, num_joints)}
+        direct_adj: Dict[int, Set[int]] = {i: set() for i in range(-1, num_joints)}
+        fixed_adj: Dict[int, Set[int]] = {i: set() for i in range(-1, num_joints)}
+
         for i in range(num_joints):
             info = p.getJointInfo(self.robot_id, i, physicsClientId=self.client_id)
             parent_link = int(info[16])
             child_link = i
-            adj[parent_link].add(child_link)
-            adj[child_link].add(parent_link)
+            direct_adj[parent_link].add(child_link)
+            direct_adj[child_link].add(parent_link)
+            if info[2] == p.JOINT_FIXED:
+                fixed_adj[parent_link].add(child_link)
+                fixed_adj[child_link].add(parent_link)
 
-        # Allow self contact for links within topological tree distance <= 4
-        # (accounts for intermediate fixed joints and adjacent mechanical collars)
-        for start in adj:
-            dist = {start: 0}
+        # 1. Direct parent-child links
+        for u in direct_adj:
+            for v in direct_adj[u]:
+                self.adjacent_links.add((u, v))
+                self.adjacent_links.add((v, u))
+
+        # 2. Fixed-joint connected rigid subassemblies (transitive closure over fixed joints)
+        for start in fixed_adj:
+            visited = {start}
             q = deque([start])
             while q:
-                u = q.popleft()
-                if dist[u] <= 4:
-                    self.adjacent_links.add((start, u))
-                    self.adjacent_links.add((u, start))
-                    for v in adj[u]:
-                        if v not in dist:
-                            dist[v] = dist[u] + 1
-                            q.append(v)
+                curr = q.popleft()
+                for neighbor in fixed_adj[curr]:
+                    if neighbor not in visited:
+                        visited.add(neighbor)
+                        q.append(neighbor)
+            for node in visited:
+                self.adjacent_links.add((start, node))
+                self.adjacent_links.add((node, start))
+
+        # 3. Connections between direct parent-child neighbors and fixed subassemblies
+        for fixed_node in fixed_adj:
+            for fixed_connected in fixed_adj[fixed_node]:
+                for u in direct_adj[fixed_node]:
+                    self.adjacent_links.add((u, fixed_connected))
+                    self.adjacent_links.add((fixed_connected, u))
 
     def add_obstacle(self, obstacle_id: int) -> None:
         """Adds an obstacle body to monitored collision objects."""
