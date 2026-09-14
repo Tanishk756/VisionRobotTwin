@@ -340,6 +340,17 @@ def test_manifest_generation_and_serialization():
     assert username not in json_str.lower()
 
 
+def test_manifest_explicit_git_commit_sha():
+    """Validates manifest generation with explicitly provided git commit SHA."""
+    test_sha = "abcdef1234567890abcdef1234567890abcdef12"
+    manifest = generate_experiment_manifest(
+        git_commit_sha=test_sha,
+    )
+    assert manifest.git_commit_sha == test_sha
+    m_dict = manifest.to_dict()
+    assert m_dict["git_commit_sha"] == test_sha
+
+
 # =============================================================================
 # 5. HEADLESS BOUNDED TRIAL & PLANNING EXECUTION TESTS
 # =============================================================================

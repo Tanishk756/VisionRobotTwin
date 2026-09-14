@@ -1214,20 +1214,24 @@ def generate_experiment_manifest(
     repeats: int = 1,
     random_seed: int = 42,
     physics_hz: int = 240,
+    git_commit_sha: Optional[str] = None,
 ) -> ExperimentManifest:
     """Builds a deterministic experiment manifest without machine-specific absolute paths or usernames."""
-    git_sha = "unknown"
-    try:
-        git_res = subprocess.run(
-            ["git", "rev-parse", "HEAD"],
-            capture_output=True,
-            text=True,
-            timeout=5,
-        )
-        if git_res.returncode == 0:
-            git_sha = git_res.stdout.strip()
-    except Exception:
-        pass
+    if git_commit_sha:
+        git_sha = str(git_commit_sha).strip()
+    else:
+        git_sha = "unknown"
+        try:
+            git_res = subprocess.run(
+                ["git", "rev-parse", "HEAD"],
+                capture_output=True,
+                text=True,
+                timeout=5,
+            )
+            if git_res.returncode == 0:
+                git_sha = git_res.stdout.strip()
+        except Exception:
+            pass
 
     pybullet_ver = "unknown"
     try:

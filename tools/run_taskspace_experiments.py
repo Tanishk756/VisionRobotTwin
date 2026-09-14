@@ -425,6 +425,7 @@ def main() -> int:
     parser.add_argument("--headless", action="store_true", default=True, help="Run in headless mode (DIRECT physics)")
     parser.add_argument("--gui", action="store_true", help="Run with PyBullet GUI")
     parser.add_argument("--publish-reference", action="store_true", help="Publish output as reference results in docs/experiments/v1.2_reference/")
+    parser.add_argument("--commit-sha", type=str, default=None, help="Explicit git commit SHA to record in manifest")
     args = parser.parse_args()
 
     gui_mode = args.gui and not args.headless
@@ -586,6 +587,7 @@ def main() -> int:
         repeats=args.repeats,
         random_seed=args.seed,
         physics_hz=args.physics_hz,
+        git_commit_sha=args.commit_sha,
     )
     manifest_path = run_dir / "manifest.json"
     with open(manifest_path, "w", encoding="utf-8") as f:
