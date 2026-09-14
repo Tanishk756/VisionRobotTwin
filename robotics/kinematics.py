@@ -25,6 +25,42 @@ class ManipulabilityMetrics:
     near_singularity: bool
 
 
+def compute_fk_at_configuration(
+    physics_client_id: int,
+    robot_id: int,
+    arm_joint_indices: List[int],
+    joint_positions: List[float],
+    ee_link_index: int,
+) -> Tuple[np.ndarray, np.ndarray]:
+    """Computes forward kinematics (EE position and quaternion) for a candidate joint configuration.
+
+    Temporarily applies joint_positions in PyBullet, queries forward kinematics via getLinkState,
+    and unconditionally restores original joint positions and velocities.
+
+    Args:
+        physics_client_id: PyBullet client ID.
+        robot_id: PyBullet robot body ID.
+        arm_joint_indices: Controllable arm joint indices.
+        joint_positions: Candidate joint positions (rad).
+        ee_link_index: Link index for the end effector.
+
+    Returns:
+        (position, quaternion_xyzw) as (np.ndarray shape (3,), np.ndarray shape (4,)).
+    """
+    saved_states = p.getJointStates(robot_id, list(arm_joint_indices), physicsClientId=physics_client_id)
+    try:
+        for j_idx, angle in zip(arm_joint_indices, joint_positions):
+            p.resetJointState(robot_id, int(j_idx), targetValue=float(angle), targetVelocity=0.0, physicsClientId=physics_client_id)
+        link_state = p.getLinkState(robot_id, int(ee_link_index), computeForwardKinematics=True, physicsClientId=physics_client_id)
+        fk_pos = np.array(link_state[0], dtype=np.float64)
+        fk_orn = np.array(link_state[1], dtype=np.float64)
+        return fk_pos, fk_orn
+    finally:
+        for j_idx, state in zip(arm_joint_indices, saved_states):
+            p.resetJointState(robot_id, int(j_idx), targetValue=float(state[0]), targetVelocity=float(state[1]), physicsClientId=physics_client_id)
+
+
+
 def compute_jacobian(
     physics_client_id: int,
     robot_id: int,

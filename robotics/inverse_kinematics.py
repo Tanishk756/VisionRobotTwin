@@ -198,24 +198,17 @@ class GenericIKSolver:
                 arm_poses[idx] = float(np.clip(val, low, high))
 
             # 3. State-Preserving Forward Kinematics (FK) Residual Measurement
-            saved_states = p.getJointStates(self.robot_id, self.arm_joint_indices, physicsClientId=self.client_id)
-            try:
-                for j_idx, angle in zip(self.arm_joint_indices, arm_poses):
-                    p.resetJointState(self.robot_id, j_idx, targetValue=angle, targetVelocity=0.0, physicsClientId=self.client_id)
+            from robotics.kinematics import compute_fk_at_configuration
+            fk_pos, fk_orn = compute_fk_at_configuration(
+                self.client_id, self.robot_id, self.arm_joint_indices, arm_poses, self.ee_link_index
+            )
 
-                link_state = p.getLinkState(self.robot_id, self.ee_link_index, computeForwardKinematics=True, physicsClientId=self.client_id)
-                fk_pos = np.array(link_state[0], dtype=np.float64)
-                fk_orn = np.array(link_state[1], dtype=np.float64)
+            target_pos_arr = np.array(pos, dtype=np.float64)
+            residual_pos_m = float(np.linalg.norm(target_pos_arr - fk_pos))
 
-                target_pos_arr = np.array(pos, dtype=np.float64)
-                residual_pos_m = float(np.linalg.norm(target_pos_arr - fk_pos))
-
-                target_orn_arr = np.array(orn, dtype=np.float64)
-                dot = float(np.abs(np.dot(target_orn_arr / np.linalg.norm(target_orn_arr), fk_orn / np.linalg.norm(fk_orn))))
-                residual_orn_rad = float(2.0 * np.arccos(np.clip(dot, -1.0, 1.0)))
-            finally:
-                for j_idx, state in zip(self.arm_joint_indices, saved_states):
-                    p.resetJointState(self.robot_id, j_idx, targetValue=state[0], targetVelocity=state[1], physicsClientId=self.client_id)
+            target_orn_arr = np.array(orn, dtype=np.float64)
+            dot = float(np.abs(np.dot(target_orn_arr / np.linalg.norm(target_orn_arr), fk_orn / np.linalg.norm(fk_orn))))
+            residual_orn_rad = float(2.0 * np.arccos(np.clip(dot, -1.0, 1.0)))
 
             # 4. Residual Tolerance Gate
             if residual_pos_m > self.max_residual_position_m:

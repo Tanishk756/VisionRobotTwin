@@ -274,6 +274,11 @@ class VisionRobotTwinApp:
         )
         self._last_loop_time: Optional[float] = None
 
+        # Goal change detection fields for AUTO motion planning
+        self._motion_last_state: Optional[RobotState] = None
+        self._motion_last_goal_pos: Optional[np.ndarray] = None
+        self._motion_last_goal_orn: Optional[np.ndarray] = None
+
     def _init_csv_recorder(self) -> None:
         """Initializes trajectory data logger."""
         self.config.demo_data_dir.mkdir(parents=True, exist_ok=True)
@@ -447,10 +452,46 @@ class VisionRobotTwinApp:
             if commanded_cartesian_target is not None:
                 self.simulator.set_target_visual_position(commanded_cartesian_target)
 
-                if controller_name == "resolved-rate":
-                    # Execute genuine Resolved-Rate differential IK velocity path
+                if self.state_machine.mode == "AUTO":
+                    # Discrete AUTO motions are exclusively owned by MotionManager
+                    if self.state_machine.state in (
+                        RobotState.APPROACH, RobotState.PICK, RobotState.LIFT,
+                        RobotState.MOVE_TO_PLACE, RobotState.PLACE, RobotState.RETURN_HOME
+                    ):
+                        goal_changed = False
+                        if self._motion_last_state != self.state_machine.state:
+                            goal_changed = True
+                        elif self._motion_last_goal_pos is None:
+                            goal_changed = True
+                        else:
+                            pos_diff = float(np.linalg.norm(np.array(commanded_cartesian_target) - self._motion_last_goal_pos))
+                            if pos_diff > 0.005:
+                                goal_changed = True
+                            elif commanded_orientation_target is not None and self._motion_last_goal_orn is not None:
+                                dot = float(np.abs(np.dot(commanded_orientation_target, self._motion_last_goal_orn)))
+                                orn_diff = float(2.0 * np.arccos(np.clip(dot, -1.0, 1.0)))
+                                if orn_diff > np.radians(2.0):
+                                    goal_changed = True
+
+                        if goal_changed:
+                            self._motion_last_state = self.state_machine.state
+                            self._motion_last_goal_pos = np.array(commanded_cartesian_target, dtype=np.float64)
+                            self._motion_last_goal_orn = np.array(commanded_orientation_target, dtype=np.float64) if commanded_orientation_target is not None else None
+                            self.simulator.motion_manager.plan_motion_to_pose(
+                                target_position=commanded_cartesian_target,
+                                target_orientation=commanded_orientation_target,
+                            )
+
+                        is_done, progress = self.simulator.motion_manager.step(effective_dt)
+                        ik_status = f"MOTION_{self.simulator.motion_manager.state_name} ({progress:.0f}%)"
+                    else:
+                        # SEARCH / HOME states in AUTO: hold current position
+                        self.simulator.motion_manager.step(effective_dt)
+                        ik_status = f"AUTO_{self.state_machine.state_name}"
+                elif controller_name == "resolved-rate":
+                    # Execute genuine Resolved-Rate differential IK velocity path for MANUAL teleoperation
                     ik_orn = commanded_orientation_target if self.config.control_mode == "6dof" else None
-                    if (self.state_machine.mode == "MANUAL" and self.state_machine.state == RobotState.TRACK) or self.state_machine.mode == "AUTO":
+                    if self.state_machine.state == RobotState.TRACK:
                         q_dot, m_metrics = self.simulator.resolved_rate_controller.compute_step(
                             target_position=commanded_cartesian_target,
                             target_orientation=ik_orn,
@@ -466,7 +507,7 @@ class VisionRobotTwinApp:
                         )
                         ik_status = "RR_ZERO_HOLD"
                 else:
-                    # Execute standard IK position-control path with rate limiting
+                    # Execute standard IK position-control path with rate limiting for MANUAL teleoperation
                     ik_orn = commanded_orientation_target if self.config.control_mode == "6dof" else None
                     ik_res = self.simulator.ik_solver.solve(
                         target_position=commanded_cartesian_target,
@@ -480,7 +521,10 @@ class VisionRobotTwinApp:
                             enforce_velocity_limits=True,
                         )
             else:
-                if controller_name == "resolved-rate":
+                if self.state_machine.mode == "AUTO":
+                    self.simulator.motion_manager.step(effective_dt)
+                    ik_status = "AUTO_IDLE"
+                elif controller_name == "resolved-rate":
                     self.simulator.controller.set_arm_joint_velocities(
                         [0.0] * len(self.simulator.controller.arm_joint_indices)
                     )
