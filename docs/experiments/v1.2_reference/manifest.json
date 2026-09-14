@@ -1,0 +1,65 @@
+{
+  "version": "1.2.0-dev",
+  "git_commit_sha": "2eacd290c13ca7acc404aa4541d2e1adfd1ac5d5",
+  "timestamp_utc": "2026-09-14T09:06:51.981158+00:00",
+  "environment": {
+    "python_version": "3.12.10",
+    "opencv_version": "5.0.0",
+    "numpy_version": "2.5.3",
+    "pybullet_version": "202010061",
+    "os": "Windows",
+    "architecture": "AMD64"
+  },
+  "execution": {
+    "robots": [
+      "panda",
+      "kuka_iiwa"
+    ],
+    "controllers": [
+      "ik",
+      "resolved-rate"
+    ],
+    "physics_frequency_hz": 240,
+    "timestep_dt_s": 0.004166666666666667,
+    "statistical_repeats": 3,
+    "random_seed": 42
+  },
+  "tolerances": {
+    "position_settling_tolerance_mm": 5.0,
+    "orientation_settling_tolerance_deg": 5.0,
+    "preflight_position_residual_threshold_mm": 25.0,
+    "preflight_orientation_residual_threshold_deg": 10.0
+  },
+  "trajectory_definitions": {
+    "line": {
+      "name": "LINE",
+      "description": "Straight 10 cm horizontal Cartesian translation with fixed orientation.",
+      "default_duration_s": 2.0,
+      "is_se3": false
+    },
+    "circle": {
+      "name": "CIRCLE",
+      "description": "Continuous horizontal task-space circle (R = 5 cm) with fixed orientation.",
+      "default_duration_s": 3.0,
+      "is_se3": false
+    },
+    "figure_eight": {
+      "name": "FIGURE_EIGHT",
+      "description": "Lemniscate figure-eight trajectory with smooth direction reversals.",
+      "default_duration_s": 4.0,
+      "is_se3": false
+    },
+    "waypoint_box": {
+      "name": "WAYPOINT_BOX",
+      "description": "Smooth 4-corner closed box path (6 cm x 6 cm) in the XY plane.",
+      "default_duration_s": 4.0,
+      "is_se3": false
+    },
+    "se3_sweep": {
+      "name": "SE3_SWEEP",
+      "description": "6-DoF trajectory with +/-20 deg quaternion SLERP rotation and harmonic translation.",
+      "default_duration_s": 3.0,
+      "is_se3": true
+    }
+  }
+}

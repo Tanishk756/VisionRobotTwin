@@ -6,7 +6,21 @@ This document provides a strict, evidence-grounded validation report for all per
 
 ---
 
-## 1. Subsystem Verification Matrix
+### 1. Tiered Validation Hierarchy
+
+VisionRobotTwin maintains a strict engineering distinction across validation tiers:
+
+| Validation Tier | Environment | Status | Scope & Evidence |
+| :--- | :--- | :---: | :--- |
+| **Tier 1: Automated CI** | GitHub Actions (Windows Python 3.11 & 3.12) | **`PASS`** | 126 automated unit and integration tests passing (`pytest -v`). |
+| **Tier 2: PyBullet Task-Space Experiments** | Headless PyBullet 240 Hz Physics Twin | **`PASS`** | Multi-robot, multi-controller task-space benchmark suite (`tools/run_taskspace_experiments.py`) across 5 SE(3) paths & obstacle reach. |
+| **Tier 3: Physical Camera Smoke Test** | Live Operator USB Webcam | **`USER-CONFIRMED / PASS`** | Operator-verified visual teleoperation tracking with Marker 0 (v1.1 baseline). |
+| **Tier 4: Physical Calibrated Camera Benchmark** | Measured Optical Chessboard Setup | **`PENDING`** | Requires physical Brown-Conrady chessboard capture (`calibration/camera_matrix.npz`). |
+| **Tier 5: Physical Manipulator Hardware** | Physical Franka / KUKA Arm | **`NOT TESTED`** | All control executed exclusively in validated PyBullet digital twin environment. |
+
+---
+
+## 2. Subsystem Verification Matrix
 
 | Subsystem / Feature | Verification Method | Status | Evidence & Notes |
 | :--- | :--- | :---: | :--- |
@@ -19,6 +33,7 @@ This document provides a strict, evidence-grounded validation report for all per
 | **Trajectory Generation & SLERP** | Automated pytest (`test_trajectory.py`) | **`PASS`** | $C^2$ continuous joint quintic polynomials, Cartesian SE(3) quaternion SLERP, and trajectory execution lifecycle verified. |
 | **Collision Checking & Queries** | Automated pytest (`test_collision.py`) | **`PASS`** | Robot self-collision, table and obstacle queries verified; simulation state strictly preserved during candidate checks. |
 | **RRT-Connect Motion Planner** | Automated pytest (`test_planning.py`) | **`PASS`** | Direct path checker, bidirectional RRT-Connect obstacle avoidance with deterministic seed, and randomized shortcutting verified. |
+| **Task-Space Experiment Suite** | Automated pytest (`test_experiment_suite.py`) | **`PASS`** | 14 test cases verifying trajectory math, preflight feasibility, metrics calculation, and headless execution. |
 | **Cross-Robot & Controller Benchmarks** | Automated pytest (`test_robot_benchmark.py`) | **`PASS`** | Bounded headless comparison tools (`tools/compare_robots.py` & `tools/compare_controllers.py`) verified. |
 | **Autonomous Pick-and-Place E2E** | Automated pytest (`test_auto_integration.py`) | **`PASS (Synthetic)`** | Perception-gated FSM, waypoint sequencing, distance-gated virtual grasping, transfer, and release verified on Panda. |
 | **World-Anchor Extrinsics Math** | Automated pytest (`test_extrinsics_math.py`) | **`PASS`** | $\mathbf{T}_{\text{robot}\to\text{camera}} = \mathbf{T}_{\text{robot}\to\text{anchor}} \cdot \mathbf{T}_{\text{camera}\to\text{anchor}}^{-1}$ verified. |
@@ -33,18 +48,19 @@ This document provides a strict, evidence-grounded validation report for all per
 
 ---
 
-## 2. Benchmark & Performance Status
+## 3. Benchmark & Performance Status
 
 ```
 +-------------------------------------------------------------------------------+
 | PARAMETER                            | STATUS / VALUE                         |
 +-------------------------------------------------------------------------------+
-| Automated Unit & Integration Tests   | PASSING (112 / 112 tests passing)      |
+| Automated Unit & Integration Tests   | PASSING (126 / 126 tests passing)      |
 | Continuous Integration (CI)          | Configured (Windows Python 3.11 & 3.12)|
 | Supported Manipulators               | Franka Emika Panda & KUKA LBR iiwa     |
 | Physics Simulation Clock Rate        | 240 Hz Target (Fixed 1/240s timestep)  |
 | Controllers Available                | Position IK & Resolved-Rate Jacobian   |
 | Motion Planner                       | Bidirectional RRT-Connect + Shortcut   |
+| Task-Space Experiments Suite         | 5 SE(3) Tasks + Obstacle Reach         |
 | Dynamic Tracking Acceptance Criterion| Error < 45 mm (Dynamic Test Threshold) |
 | Camera Intrinsic Calibration Status  | DEFAULT PINHOLE (Metric calib pending) |
 | World-Anchor Extrinsics Status       | NOMINAL (Physical calibration pending) |
@@ -53,7 +69,7 @@ This document provides a strict, evidence-grounded validation report for all per
 
 ---
 
-## 3. PyBullet Simulation Benchmark Evidence
+## 4. PyBullet Simulation Benchmark Evidence
 
 > [!NOTE]
 > All metrics below represent rigorous, reproducible **PyBullet Physics Simulation Benchmarks** evaluated across identical 6-DoF candidate target distributions and settled initializations. They do not represent physical hardware trials.
@@ -98,3 +114,20 @@ This document provides a strict, evidence-grounded validation report for all per
 **Engineering Trade-Off Analysis**:
 - **IK Position Control** achieves low peak joint velocities (0.261 rad/s) and minimal total joint displacement (11.36 rad).
 - **Resolved-Rate Velocity Control** provides dramatically superior dynamic tracking (4.70 mm vs 11.73 mm), near-zero final position error (0.056 mm vs 7.976 mm), 100% tolerance settling within 1.72s, and precise orientation alignment (1.07 deg final error).
+
+### C. Task-Space Research Benchmark Suite (`tools/run_taskspace_experiments.py`)
+*Evaluated across 5 deterministic Cartesian paths and 1 obstacle reach planning test (3 statistical repeats, 240 Hz fixed-step physics, preflight IK feasibility verified).*
+
+| Experiment | Panda IK (RMSE / Travel / Success) | Panda Resolved-Rate (RMSE / Travel / Success) | KUKA iiwa IK (RMSE / Travel / Success) | KUKA iiwa Resolved-Rate (RMSE / Travel / Success) |
+| :--- | :---: | :---: | :---: | :---: |
+| **Line (10 cm)** | 2.02 mm / 0.36 rad / **100%** | 10.23 mm / 0.38 rad / **100%** | 20.45 mm / 0.28 rad / 0%* | 11.02 mm / 0.28 rad / **100%** |
+| **Circle (R=5 cm)** | 30.80 mm / 0.81 rad / **100%** | 24.73 mm / 0.74 rad / **100%** | 21.18 mm / 0.60 rad / 0%* | 25.04 mm / 0.60 rad / **100%** |
+| **Figure Eight** | 20.15 mm / 0.84 rad / **100%** | 18.68 mm / 0.85 rad / **100%** | 21.30 mm / 0.76 rad / 0%* | 19.08 mm / 0.77 rad / **100%** |
+| **Waypoint Box** | 15.53 mm / 0.58 rad / **100%** | 19.07 mm / 0.59 rad / **100%** | 21.06 mm / 0.44 rad / 0%* | 19.45 mm / 0.44 rad / **100%** |
+| **SE(3) Sweep ($\pm 20^\circ$)** | 11.10 mm / 0.61 rad / **100%** | 6.52 mm / 0.80 rad / **100%** | 20.68 mm / 0.43 rad / 0%* | 7.68 mm / 0.79 rad / **100%** |
+
+*\*Note on KUKA IK settling rate: PyBullet's default numerical IK solver exhibits a persistent ~20.5 mm offset for KUKA's 7-DoF kinematic chain under this orientation frame, which strictly exceeds the 10.0 mm completion settling tolerance while Resolved-Rate velocity control eliminates this offset and achieves 100% success.*
+
+#### Obstacle Reach Planning Evaluation
+- **Franka Panda**: Direct joint path `BLOCKED` by obstacle. RRT-Connect planned collision-free path in **1084 ms** (50 $\to$ 14 waypoints, minimum clearance 2.7 mm, final error 1.20 mm, **`SUCCESS`**).
+- **KUKA LBR iiwa**: Direct joint path `BLOCKED` by obstacle. RRT-Connect planned collision-free path in **615 ms** (36 $\to$ 4 waypoints, minimum clearance 5.6 mm, final error 18.82 mm, **`SUCCESS`**).

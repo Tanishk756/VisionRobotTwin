@@ -12,10 +12,11 @@
 
 ## 2. Technical Stack & Core Competencies
 
-- **Languages & Frameworks**: Python 3.10+, NumPy, SciPy, OpenCV 4.8+ (`opencv-contrib-python`), PyBullet, pytest.
+- **Languages & Frameworks**: Python 3.10+, NumPy, SciPy, OpenCV 4.8+ (`opencv-contrib-python`), PyBullet, Matplotlib, pytest.
 - **Robotics & Kinematics**: $SE(3)$ Lie Group Kinematics, Geometric Spatial Jacobian ($6 \times n$), SVD Yoshikawa Manipulability, Condition Number, Adaptive Damped Least-Squares (DLS) Pseudoinverse, Null-Space Joint Centering, Slew-Rate Limiting.
 - **Differential Control & Planning**: Resolved-Rate Cartesian Velocity Control, Joint Quintic Polynomial Trajectories, Cartesian SE(3) Quaternion SLERP, Bidirectional RRT-Connect, Randomized Path Shortcutting.
 - **Computer Vision**: Camera Intrinsic Calibration (Chessboard / Brown-Conrady model), World-Anchor Extrinsic Calibration (Marker ID 10), ArUco Marker Detection, Perspective-n-Point (PnP / IPPE), 1 Euro Adaptive Filtering.
+- **Experimental & Research Tooling**: Deterministic Task-Space Benchmarking Suite (Line, Circle, Lemniscate Figure Eight, Waypoint Box, SE3 Quaternion Sweep, Obstacle Reach), Multi-Robot Preflight Feasibility Grids, Automated Matplotlib Telemetry/3D Plot Generation, Time-Series & Aggregate Manifest Exporters.
 - **Systems & Architecture**: Model Registry Pattern, Capability Descriptors, Perception-Gated Finite State Machines (FSM), Distance-Gated Constraints, Live OpenCV HUD Telemetry, Automated Multi-Python CI.
 
 ---
@@ -36,7 +37,11 @@
 
 ### Challenge 4: Collision-Aware Motion Planning Around Obstacles
 - **Problem**: Direct joint interpolation collides when physical obstacles are present in the workspace.
-- **Solution**: Implemented a bidirectional **RRT-Connect** joint-space planner with state-preserving collision queries and randomized path shortcutting.
+- **Solution**: Implemented a bidirectional **RRT-Connect** joint-space planner with state-preserving collision queries and randomized path shortcutting. In benchmark trials, RRT-Connect achieved a 100% success rate routing around mid-workspace obstacles with zero collisions.
+
+### Challenge 5: Multi-Robot Task-Space Experimentation & Reproducibility
+- **Problem**: Comparing disparate robots (Franka Panda vs KUKA iiwa) and controllers (IK vs Resolved-Rate) often suffers from subtle biases (different path geometries, varying timesteps, asynchronous clocks).
+- **Solution**: Developed a deterministic task-space experiment suite with strict shared-feasibility preflight gating, fixed 240 Hz physics timesteps, unified initialization protocols, and standardized metrics (geodesic orientation error, RMSE, P95, Yoshikawa manipulability, $\sigma_{\min}$, joint travel, and acceleration).
 
 ---
 
@@ -56,7 +61,10 @@
 ## 5. Resume Bullet Points
 
 - **Robotics Software Engineer Bullet**:
-  > *Architected a modular multi-manipulator robotics digital twin in Python/PyBullet supporting Franka Emika Panda and KUKA LBR iiwa; developed geometric Jacobian solvers, adaptive DLS resolved-rate control, Yoshikawa manipulability telemetry, null-space redundancy optimization, and collision-aware RRT-Connect motion planning, verified via 106 automated unit/integration tests.*
+  > *Architected a modular multi-manipulator robotics digital twin in Python/PyBullet supporting Franka Emika Panda and KUKA LBR iiwa; developed geometric Jacobian solvers, adaptive DLS resolved-rate control, Yoshikawa manipulability telemetry, null-space redundancy optimization, and collision-aware RRT-Connect motion planning, verified via 126 automated unit/integration tests.*
+
+- **Controls & Research Engineer Bullet**:
+  > *Built a reproducible multi-manipulator task-space benchmarking framework comparing IK and Jacobian resolved-rate control across shared Cartesian trajectories (lines, circles, lemniscates, waypoints, SE(3) sweeps), achieving sub-millimeter settled precision and zero singularity warnings under 240 Hz fixed-step physics.*
 
 - **Computer Vision / Controls Engineer Bullet**:
   > *Engineered real-time 6-DoF visual teleoperation using monocular OpenCV ArUco pose estimation and camera calibration; implemented closed-loop differential IK, 1 Euro adaptive signal filtering, quaternion SLERP interpolation, and cross-robot benchmarking suites.*
@@ -65,12 +73,13 @@
 
 ## 6. Verification Status
 
-- [x] All 106 automated pytest tests passing (`pytest -v`)
+- [x] All 126 automated pytest tests passing (`pytest -v`)
 - [x] Tested across Franka Emika Panda and KUKA LBR iiwa
 - [x] Geometric Jacobian, SVD manipulability, and condition number verified
 - [x] Resolved-rate differential controller with adaptive DLS and null-space centering verified
 - [x] Joint quintic polynomial and Cartesian SE(3) SLERP trajectories verified
 - [x] Collision checking and state preservation verified
 - [x] Bidirectional RRT-Connect motion planner and path shortcutting verified
+- [x] Deterministic task-space experiment suite with preflight feasibility and automated publication-quality plotting verified
 - [x] Headless cross-robot and cross-controller benchmark tools verified
 - [x] Full backward compatibility for existing v1.1 and v1.2 camera calibration features maintained

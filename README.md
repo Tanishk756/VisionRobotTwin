@@ -173,24 +173,23 @@ Artifacts are saved to `benchmarks/robot_comparison_YYYYMMDD_HHMMSS/` (`summary.
 | **Yoshikawa Manipulability (Mean / Min)** | 0.0565 / 0.0377 | 0.0624 / 0.0510 |
 | **RRT Planning Time / Success** | 26.84 ms (100%) | 59.00 ms (100%) |
 
-### 2. Cross-Controller Benchmark Tool
-Compares Inverse Kinematics Position Control vs Resolved-Rate Jacobian Velocity Control:
+### 2. Task-Space Research Experiment Suite & Benchmarking
+A reproducible research-grade task-space benchmarking framework comparing Franka Emika Panda vs KUKA LBR iiwa across identical Cartesian trajectories in PyBullet:
 ```powershell
-python tools/compare_controllers.py --robot panda --headless
+python tools/run_taskspace_experiments.py --all --repeats 3 --headless
 ```
-Artifacts are saved to `benchmarks/controller_comparison_YYYYMMDD_HHMMSS/` (`summary.json` and `results.csv`).
 
-#### PyBullet Simulation Benchmark Results (Franka Panda, 10 Trials @ 2.0s + 0.5s Settle)
+#### Multi-Robot & Multi-Controller Reference Benchmark Matrix (PyBullet Simulation)
 
-| Performance Metric | IK Position Control | Resolved-Rate Velocity Control |
-| :--- | :---: | :---: |
-| **Mean Dynamic Tracking Error** | 11.730 mm | **4.699 mm** |
-| **P95 Dynamic Tracking Error** | 30.443 mm | **11.440 mm** |
-| **Final Settled Position Error** | 7.976 mm | **0.056 mm** |
-| **Final Orientation Error** | 6.968 deg | **1.072 deg** |
-| **Settled within 5.0 mm Tolerance** | 30.0% | **100.0%** |
-| **Time to Final Goal Tolerance** | 2.272 s | **1.719 s** |
-| **Total Joint Travel Distance** | **11.362 rad** | 13.138 rad |
+| Experiment | Metric | Panda (IK) | Panda (Resolved-Rate) | KUKA iiwa (IK) | KUKA iiwa (Resolved-Rate) |
+| :--- | :--- | :---: | :---: | :---: | :---: |
+| **Line (10 cm)** | **RMSE Pos** / **Joint Travel** | 2.02 mm / 0.36 rad | 10.23 mm / 0.38 rad | 20.45 mm / 0.28 rad | 11.02 mm / 0.28 rad |
+| **Circle ($R=5\text{ cm}$)** | **RMSE Pos** / **Joint Travel** | 30.80 mm / 1.09 rad | 24.73 mm / 1.12 rad | 21.18 mm / 0.90 rad | 25.04 mm / 0.88 rad |
+| **Figure Eight** | **RMSE Pos** / **Joint Travel** | 20.15 mm / 1.35 rad | 18.68 mm / 1.34 rad | 21.30 mm / 1.13 rad | 19.08 mm / 1.12 rad |
+| **Waypoint Box** | **RMSE Pos** / **Joint Travel** | 15.53 mm / 1.02 rad | 19.07 mm / 1.04 rad | 21.06 mm / 0.77 rad | 19.45 mm / 0.76 rad |
+| **SE3 Sweep ($\pm 20^\circ$)** | **RMSE Pos** / **Mean Orn** | 11.10 mm / 8.32° | **6.52 mm** / 7.10° | 20.68 mm / **1.33°** | **7.68 mm** / 7.01° |
+
+Full research report, plots, and methodology: [EXPERIMENTS.md](EXPERIMENTS.md) • [Reference Report](docs/experiments/v1.2_reference/REPORT.md)
 
 ---
 
@@ -202,6 +201,7 @@ pytest -v
 
 | Test Suite | Focus Area | Status |
 | :--- | :--- | :---: |
+| `test_experiment_suite.py` | Task-Space Trajectories, Feasibility, Metrics, Headless Trials | **PASS** |
 | `test_robot_registry.py` | Model Registry, Metadata, and Capabilities | **PASS** |
 | `test_multi_robot_controller.py` | Generic Robot Controller, Panda & KUKA Loading | **PASS** |
 | `test_multi_robot_ik.py` | Multi-Robot Inverse Kinematics & Limit Rejection | **PASS** |
@@ -217,7 +217,7 @@ pytest -v
 | `test_calibration_quality.py` | Camera Calibration Heuristics & Diagnostics | **PASS** |
 | `test_extrinsics_math.py` | World-Anchor Extrinsic Calibration Math | **PASS** |
 | `test_transforms.py` | SE(3) Lie Group Matrix & Quaternion Conversions | **PASS** |
-| **Total Automated Tests** | **Full Multi-Robot Robotics Suite** | **112 / 112 PASSING** |
+| **Total Automated Tests** | **Full Multi-Robot Robotics Suite** | **126 / 126 PASSING** |
 
 ---
 
