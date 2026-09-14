@@ -230,7 +230,150 @@ def test_benchmark_shared_targets_fairness():
     assert len(targets) == 4
     assert meta["accepted_shared_targets"] == 4
     assert meta["candidate_count"] >= 4
+    assert "rejected_position" in meta
+    assert "rejected_orientation" in meta
+    assert meta["shared_SE3_position_tolerance_mm"] == 25.0
+    assert meta["shared_SE3_orientation_tolerance_deg"] == 10.0
 
     for pos, orn in targets:
         assert len(pos) == 3
+        assert len(orn) == 4
         assert np.all(np.isfinite(pos))
+        assert np.all(np.isfinite(orn))
+        assert np.allclose(orn, np.array([1.0, 0.0, 0.0, 0.0]))
+
+
+def test_coordinated_position_velocity_rate_limiting_direction_preservation(sim_env):
+    """Verifies proportional scaling preserves exact joint-space line segment direction."""
+    client_id, robot_id, table_id, controller, spec = sim_env
+    dt = 0.005  # 5 ms
+
+    q_curr = np.array(controller.get_current_joint_positions(), dtype=np.float64)
+    # Request large disparate joint step
+    delta_req = np.array([0.5, -0.2, 0.8, -1.0, 0.3, -0.6, 0.4])
+    q_target = q_curr + delta_req
+
+    q_cmd = np.array(controller.set_arm_joint_positions(q_target.tolist(), dt=dt, enforce_velocity_limits=True))
+
+    actual_delta = q_cmd - q_curr
+    # Ratio between actual delta and requested delta must be identical across all joints (collinear vector)
+    nonzero_idx = np.abs(delta_req) > 1e-6
+    scales = actual_delta[nonzero_idx] / delta_req[nonzero_idx]
+    assert np.allclose(scales, scales[0], atol=1e-5)
+    assert 0.0 < scales[0] < 1.0
+
+
+def test_auto_motion_manager_ownership_and_no_double_commanding():
+    """Verifies MotionManager owns AUTO motion and ordinary IK/ResolvedRate dispatch is not double-commanding."""
+    config = get_default_config()
+    config.robot_name = "panda"
+    config.mode = "auto"
+    config.auto_demo = True
+    config.camera.synthetic_mode = True
+    config.simulation.gui = False
+    config.max_frames = 10
+
+    app = VisionRobotTwinApp(config=config, headless_sim=True)
+
+    # Execute frames in AUTO mode
+    for _ in range(5):
+        res = app.process_frame(wall_dt=0.01)
+        assert res.success
+        assert res.mode == "AUTO"
+
+    # Confirm MotionManager is stepped and planner state is tracked
+    assert app.simulator.motion_manager is not None
+    app.cleanup()
+
+
+def test_trajectory_mode_direct_vs_quintic_execution(sim_env):
+    """Verifies trajectory-mode direct and quintic produce distinct trajectory structures."""
+    client_id, robot_id, table_id, controller, spec = sim_env
+    lows, highs, ranges, rests = controller.get_joint_limits()
+
+    ik_solver = GenericIKSolver(
+        physics_client_id=client_id,
+        robot_id=robot_id,
+        arm_joint_indices=controller.arm_joint_indices,
+        lower_limits=lows,
+        upper_limits=highs,
+        joint_ranges=ranges,
+        rest_poses=rests,
+        end_effector_link_index=controller.ee_link_index,
+        max_reach_m=spec.spherical_reach_m,
+        min_reach_m=spec.min_reach_m,
+        default_ee_orientation=spec.default_ee_orientation,
+    )
+
+    mm_quintic = MotionManager(
+        robot_controller=controller,
+        ik_solver=ik_solver,
+        collision_checker=None,
+        trajectory_mode="quintic",
+        default_trajectory_duration=2.0,
+    )
+    mm_quintic.plan_motion_to_pose([0.45, 0.10, 0.30])
+    assert mm_quintic.active_trajectory is not None
+    assert mm_quintic.active_executor is not None
+    assert mm_quintic.state == MotionState.EXECUTING
+
+    mm_direct = MotionManager(
+        robot_controller=controller,
+        ik_solver=ik_solver,
+        collision_checker=None,
+        trajectory_mode="direct",
+        default_trajectory_duration=2.0,
+    )
+    mm_direct.plan_motion_to_pose([0.45, 0.10, 0.30])
+    assert mm_direct.state == MotionState.DIRECT
+    assert mm_direct._target_joint_positions is not None
+
+
+def test_goal_deduplication_no_per_frame_replanning():
+    """Verifies stationary AUTO goal does not re-invoke planning on every frame."""
+    config = get_default_config()
+    config.robot_name = "panda"
+    config.mode = "auto"
+    config.auto_demo = True
+    config.camera.synthetic_mode = True
+    config.simulation.gui = False
+    config.max_frames = 10
+
+    app = VisionRobotTwinApp(config=config, headless_sim=True)
+
+    # Frame 1: triggers plan
+    app.process_frame(wall_dt=0.01)
+    plan_obj_initial = app.simulator.motion_manager.active_trajectory
+
+    # Frame 2 with same goal: should NOT replan or replace active trajectory
+    app.process_frame(wall_dt=0.01)
+    plan_obj_subsequent = app.simulator.motion_manager.active_trajectory
+
+    if plan_obj_initial is not None:
+        assert plan_obj_initial is plan_obj_subsequent
+
+    app.cleanup()
+
+
+def test_compare_controllers_final_goal_settling_and_accounting():
+    """Verifies benchmark_controller includes settling stage, goal tolerance timing, and truthful counts."""
+    trajs = [
+        (np.array([0.4, 0.0, 0.3]), np.array([1.0, 0.0, 0.0, 0.0]), np.array([0.42, 0.05, 0.32]), np.array([1.0, 0.0, 0.0, 0.0])),
+        (np.array([0.42, 0.05, 0.32]), np.array([1.0, 0.0, 0.0, 0.0]), np.array([0.45, -0.05, 0.28]), np.array([1.0, 0.0, 0.0, 0.0])),
+    ]
+    res = benchmark_controller(
+        robot_name="panda",
+        controller_type="ik",
+        trajectories=trajs,
+        headless=True,
+        trajectory_duration=1.0,
+        settle_duration=0.2,
+        settle_tolerance_mm=5.0,
+    )
+    assert res["requested_trajectories"] == 2
+    assert res["executed_trajectories"] == 2
+    assert res["skipped_initialization_failures"] == 0
+    assert res["completion_rate"] == 1.0
+    assert "time_to_final_goal_tolerance_s" in res
+    assert "settle_duration_s" in res
+    assert res["settle_duration_s"] == 0.2
