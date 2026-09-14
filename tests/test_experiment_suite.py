@@ -15,6 +15,7 @@ import tempfile
 from pathlib import Path
 import numpy as np
 import pytest
+from scipy.spatial.transform import Rotation as R
 
 from robotics.coordinate_transform import compute_angular_distance
 from robotics.experiments import (
@@ -92,10 +93,10 @@ def test_circle_trajectory_radius_and_closure():
 
 
 def test_figure_eight_closure_and_bounds():
-    """Validates figure-eight lemniscate closure, symmetry, and workspace bounds."""
+    """Validates figure-eight lemniscate physical peak amplitudes (4 cm X, 3 cm Y), closure, and derivatives."""
     center = (0.48, 0.0, 0.35)
-    amp_x = 0.05
-    amp_y = 0.05
+    amp_x = 0.04
+    amp_y = 0.03
     traj = generate_figure_eight_trajectory(
         center_pos=center, amplitude_x_m=amp_x, amplitude_y_m=amp_y, duration_s=4.0, physics_hz=240
     )
@@ -103,13 +104,20 @@ def test_figure_eight_closure_and_bounds():
     # Closed loop
     np.testing.assert_allclose(traj.positions[0], traj.positions[-1], atol=1e-4)
 
-    # Bounds: X within [center_x - amp_x, center_x + amp_x]
-    assert np.min(traj.positions[:, 0]) >= center[0] - amp_x - 1e-4
-    assert np.max(traj.positions[:, 0]) <= center[0] + amp_x + 1e-4
+    # Physical peak amplitudes:
+    # X peak amplitude: 4 cm -> [center_x - amp_x, center_x + amp_x]
+    min_x, max_x = np.min(traj.positions[:, 0]), np.max(traj.positions[:, 0])
+    assert math.isclose(min_x, center[0] - amp_x, abs_tol=1e-4)
+    assert math.isclose(max_x, center[0] + amp_x, abs_tol=1e-4)
 
-    # Y within [center_y - amp_y/2, center_y + amp_y/2]
-    assert np.min(traj.positions[:, 1]) >= center[1] - (amp_y / 2.0) - 1e-4
-    assert np.max(traj.positions[:, 1]) <= center[1] + (amp_y / 2.0) + 1e-4
+    # Y peak amplitude: 3 cm -> [center_y - amp_y, center_y + amp_y]
+    min_y, max_y = np.min(traj.positions[:, 1]), np.max(traj.positions[:, 1])
+    assert math.isclose(min_y, center[1] - amp_y, abs_tol=1e-4)
+    assert math.isclose(max_y, center[1] + amp_y, abs_tol=1e-4)
+
+    # Velocity derivatives at boundaries should be zero due to quintic scaling
+    np.testing.assert_allclose(traj.linear_velocities[0], [0, 0, 0], atol=1e-6)
+    np.testing.assert_allclose(traj.linear_velocities[-1], [0, 0, 0], atol=1e-6)
 
 
 def test_waypoint_box_interpolation_and_continuity():
@@ -126,8 +134,8 @@ def test_waypoint_box_interpolation_and_continuity():
     assert max_step_delta_m < 0.01, f"Trajectory step delta too large: {max_step_delta_m} m"
 
 
-def test_se3_orientation_sweep_slerp_normalization():
-    """Validates quaternion unit normalization and angular sweep range during SE(3) sweep."""
+def test_se3_orientation_sweep_slerp_normalization_and_x_axis():
+    """Validates quaternion unit normalization, max roll sweep, and that rotation axis is strictly X."""
     center = (0.48, 0.0, 0.35)
     max_roll = 20.0
     traj = generate_se3_orientation_sweep_trajectory(
@@ -138,8 +146,25 @@ def test_se3_orientation_sweep_slerp_normalization():
     norms = np.linalg.norm(traj.orientations, axis=1)
     np.testing.assert_allclose(norms, 1.0, atol=1e-6)
 
-    # Maximum angular distance from neutral orientation should be approx max_roll degrees
+    # Neutral base orientation
     neutral_orn = traj.orientations[0]
+    r_neutral = R.from_quat(neutral_orn)
+
+    # Verify that the relative rotation axis is strictly X (roll)
+    for k in range(traj.num_samples):
+        r_k = R.from_quat(traj.orientations[k])
+        # Relative rotation R_rel = R_k * R_neutral^T
+        r_rel = r_k * r_neutral.inv()
+        rotvec = r_rel.as_rotvec()  # in radians, vector is axis * angle
+        angle = np.linalg.norm(rotvec)
+        if angle > 1e-4:
+            axis = rotvec / angle
+            # Rotation axis must be [+-1, 0, 0]
+            np.testing.assert_allclose(abs(axis[0]), 1.0, atol=1e-3, err_msg=f"Non-X rotation axis at sample {k}: {axis}")
+            np.testing.assert_allclose(axis[1], 0.0, atol=1e-3, err_msg=f"Y component non-zero at sample {k}: {axis}")
+            np.testing.assert_allclose(axis[2], 0.0, atol=1e-3, err_msg=f"Z component non-zero at sample {k}: {axis}")
+
+    # Maximum angular distance from neutral orientation should be approx max_roll degrees (20 deg)
     ang_dists_deg = [
         math.degrees(compute_angular_distance(traj.orientations[k], neutral_orn))
         for k in range(traj.num_samples)
@@ -149,12 +174,37 @@ def test_se3_orientation_sweep_slerp_normalization():
 
 
 def test_standard_experiment_definitions_and_dict():
-    """Validates standard suite dictionary has all 5 experiment definitions."""
-    trajs = get_standard_experiment_trajectories(duration_scale=1.0, physics_hz=240)
-    for exp_name in ALL_EXPERIMENT_NAMES:
+    """Validates standard suite dictionary has all 5 experiment definitions and canonical durations."""
+    trajs = get_standard_experiment_trajectories(physics_hz=240)
+    canonical_durations = {
+        "line": 2.0,
+        "circle": 3.0,
+        "figure_eight": 4.0,
+        "waypoint_box": 4.0,
+        "se3_sweep": 3.0,
+    }
+    for exp_name, expected_dur in canonical_durations.items():
         assert exp_name in trajs
         assert isinstance(trajs[exp_name], TaskspaceTrajectory)
+        assert math.isclose(trajs[exp_name].duration_s, expected_dur, rel_tol=1e-5)
         assert trajs[exp_name].num_samples > 100
+
+
+def test_trajectory_duration_override_semantics():
+    """Validates that default durations apply when None is passed, and explicit override works."""
+    from robotics.experiments import get_experiment_metadata
+
+    # When override is None, uses default
+    meta_line = get_experiment_metadata("line", duration_override_s=None)
+    assert meta_line["default_duration_s"] == 2.0
+    assert meta_line["effective_duration_s"] == 2.0
+    assert meta_line["duration_overridden"] is False
+
+    # When override is provided, uses override
+    meta_line_ovr = get_experiment_metadata("line", duration_override_s=5.0)
+    assert meta_line_ovr["default_duration_s"] == 2.0
+    assert meta_line_ovr["effective_duration_s"] == 5.0
+    assert meta_line_ovr["duration_overridden"] is True
 
 
 # =============================================================================
@@ -175,6 +225,9 @@ def test_shared_feasibility_preflight_all_standard_experiments():
         assert res.panda_feasible is True
         assert res.kuka_feasible is True
         assert res.status == "SHARED_FEASIBILITY_PASSED"
+        assert res.sample_stride == 10
+        assert res.checked_samples > 0
+        assert res.trajectory_total_samples > 0
 
 
 def test_shared_feasibility_rejection_for_unreachable_target():
@@ -248,6 +301,8 @@ def test_metric_calculations_with_synthetic_signals():
         limit_viol_arr=limit_viol,
         vel_sat_arr=vel_sat,
         settle_tol_mm=5.0,
+        success_position_tolerance_mm=10.0,
+        success_orientation_tolerance_deg=10.0,
         is_se3=False,
     )
 
@@ -315,7 +370,7 @@ def test_manifest_generation_and_serialization():
     manifest = generate_experiment_manifest(
         robot_names=("panda", "kuka_iiwa"),
         controller_types=("ik", "resolved-rate"),
-        repeats=3,
+        deterministic_repeats=3,
         random_seed=42,
         physics_hz=240,
     )
@@ -328,7 +383,19 @@ def test_manifest_generation_and_serialization():
     assert "tolerances" in m_dict
     assert "trajectory_definitions" in m_dict
     assert m_dict["execution"]["physics_frequency_hz"] == 240
-    assert m_dict["execution"]["statistical_repeats"] == 3
+    assert m_dict["execution"]["deterministic_repeats"] == 3
+
+    # Check environment version fields
+    assert "pybullet_package_version" in m_dict["environment"]
+    assert "pybullet_api_version" in m_dict["environment"]
+    assert "python_version" in m_dict["environment"]
+    assert "numpy_version" in m_dict["environment"]
+
+    # Check explicit tolerances
+    assert m_dict["tolerances"]["settle_tolerance_mm"] == 5.0
+    assert m_dict["tolerances"]["success_position_tolerance_mm"] == 10.0
+    assert m_dict["tolerances"]["success_orientation_tolerance_deg"] == 10.0
+    assert m_dict["tolerances"]["planning_execution_position_tolerance_mm"] == 25.0
 
     # Ensure JSON serializable
     json_str = json.dumps(m_dict)
@@ -352,7 +419,132 @@ def test_manifest_explicit_git_commit_sha():
 
 
 # =============================================================================
-# 5. HEADLESS BOUNDED TRIAL & PLANNING EXECUTION TESTS
+# 5. CLI PARSER & PREFLIGHT GATING TESTS
+# =============================================================================
+
+def test_cli_argument_parser_headless_gui_mutual_exclusion():
+    """Validates CLI argument parser handles default headless, explicit flags, and mutual exclusion."""
+    from tools.run_taskspace_experiments import create_experiment_arg_parser
+
+    parser = create_experiment_arg_parser()
+
+    # Default: both are false, resolved to headless=True
+    args = parser.parse_args([])
+    assert args.headless is False
+    assert args.gui is False
+    assert args.trajectory_duration is None
+
+    # Explicit --headless
+    args_headless = parser.parse_args(["--headless"])
+    assert args_headless.headless is True
+    assert args_headless.gui is False
+
+    # Explicit --gui
+    args_gui = parser.parse_args(["--gui"])
+    assert args_gui.gui is True
+    assert args_gui.headless is False
+
+    # Mutual exclusion error when both provided
+    with pytest.raises(SystemExit):
+        parser.parse_args(["--headless", "--gui"])
+
+
+def test_preflight_execution_gating_skips_trials(monkeypatch):
+    """Regression test proving a failed preflight skips cross-robot trials without calling execute_experiment_trial."""
+    from unittest.mock import MagicMock
+    import tools.run_taskspace_experiments as run_exp
+
+    mock_execute_trial = MagicMock()
+    monkeypatch.setattr(run_exp, "execute_experiment_trial", mock_execute_trial)
+
+    # Force check_shared_feasibility to return failure
+    def mock_check_feasibility(*args, **kwargs):
+        return PreflightFeasibilityResult(
+            feasible=False,
+            status="SHARED_FEASIBILITY_FAILED",
+            robots_tested=["panda", "kuka_iiwa"],
+            total_samples=100,
+            robot_max_position_residuals_mm={"panda": 50.0, "kuka_iiwa": 50.0},
+            robot_max_orientation_residuals_deg={"panda": 20.0, "kuka_iiwa": 20.0},
+            robot_feasibility={"panda": False, "kuka_iiwa": False},
+            failure_diagnostics=["Forced mock feasibility failure for gating test"],
+            sample_stride=1,
+            checked_samples=100,
+            trajectory_total_samples=100,
+        )
+
+    monkeypatch.setattr(run_exp, "check_shared_feasibility", mock_check_feasibility)
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        test_args = ["--experiment", "line", "--repeats", "1", "--output-dir", tmpdir]
+        exit_code = run_exp.main(test_args)
+        assert exit_code == 0
+
+        # execute_experiment_trial must NEVER be called because preflight failed
+        mock_execute_trial.assert_not_called()
+
+        # Check summary.json recorded skipped status
+        summary_file = Path(tmpdir) / "summary.json"
+        with open(summary_file, "r") as f:
+            summary = json.load(f)
+
+        assert "line" in summary["tasks"]
+        assert summary["tasks"]["line"]["status"] == "SHARED_FEASIBILITY_FAILED"
+        assert summary["tasks"]["line"]["skipped"] is True
+
+
+def test_result_and_report_consistency_verification():
+    """Validates programmatic verification function catches discrepancies."""
+    from tools.run_taskspace_experiments import verify_experiment_results_consistency
+
+    valid_trial = {
+        "experiment_name": "line",
+        "robot_name": "panda",
+        "controller_type": "ik",
+        "trial_index": 0,
+        "success": True,
+        "rmse_position_error_mm": 1.5,
+    }
+    valid_summary = {
+        "tasks": {
+            "line": {
+                "panda_ik": {
+                    "trials_count": 1,
+                    "success_count": 1,
+                    "success_rate": 1.0,
+                    "rmse_position_error_mm": {"mean": 1.5, "std": 0.0},
+                }
+            }
+        }
+    }
+    valid_manifest = {
+        "trajectory_definitions": {
+            "line": {"effective_duration_s": 2.0}
+        }
+    }
+
+    # Should pass
+    assert verify_experiment_results_consistency(valid_summary, [valid_trial], valid_manifest) is True
+
+    # Discrepancy in success count should raise AssertionError
+    invalid_summary = {
+        "tasks": {
+            "line": {
+                "panda_ik": {
+                    "trials_count": 1,
+                    "success_count": 0,  # Mismatch!
+                    "success_rate": 0.0,
+                    "rmse_position_error_mm": {"mean": 1.5, "std": 0.0},
+                }
+            }
+        }
+    }
+    with pytest.raises(AssertionError):
+        verify_experiment_results_consistency(invalid_summary, [valid_trial], valid_manifest)
+
+
+# =============================================================================
+# 6. HEADLESS BOUNDED TRIAL & PLANNING EXECUTION TESTS
 # =============================================================================
 
 def test_headless_tracking_trial_execution_panda_ik():

@@ -179,15 +179,27 @@ def generate_circle_trajectory(
     )
 
 
+SETTLE_TOLERANCE_MM: float = 5.0
+SUCCESS_POSITION_TOLERANCE_MM: float = 10.0
+SUCCESS_ORIENTATION_TOLERANCE_DEG: float = 10.0
+PREFLIGHT_POSITION_RESIDUAL_THRESHOLD_MM: float = 25.0
+PREFLIGHT_ORIENTATION_RESIDUAL_THRESHOLD_DEG: float = 10.0
+PLANNING_EXECUTION_POSITION_TOLERANCE_MM: float = 25.0
+
+
 def generate_figure_eight_trajectory(
     center_pos: Sequence[float] = (0.48, 0.0, 0.35),
     amplitude_x_m: float = 0.04,
-    amplitude_y_m: float = 0.06,
+    amplitude_y_m: float = 0.03,
     orientation: Sequence[float] = (1.0, 0.0, 0.0, 0.0),
     duration_s: float = 4.0,
     physics_hz: int = 240,
 ) -> TaskspaceTrajectory:
-    """Generates a smooth Cartesian lemniscate (figure-eight) trajectory in the XY plane."""
+    """Generates a smooth Cartesian lemniscate (figure-eight) trajectory in the XY plane.
+
+    X peak amplitude: amplitude_x_m (default: 0.04 m / 4 cm)
+    Y peak amplitude: amplitude_y_m (default: 0.03 m / 3 cm)
+    """
     num_samples = int(round(duration_s * physics_hz)) + 1
     timestamps = np.linspace(0.0, duration_s, num_samples, dtype=np.float64)
     
@@ -206,20 +218,20 @@ def generate_figure_eight_trajectory(
         phi_dot = 2.0 * np.pi * s_dot
 
         positions[i, 0] = center[0] + amplitude_x_m * np.sin(phi)
-        positions[i, 1] = center[1] + (amplitude_y_m / 2.0) * np.sin(2.0 * phi)
+        positions[i, 1] = center[1] + amplitude_y_m * np.sin(2.0 * phi)
         positions[i, 2] = center[2]
 
         orientations[i] = fixed_orn
 
         lin_vels[i, 0] = amplitude_x_m * np.cos(phi) * phi_dot
-        lin_vels[i, 1] = amplitude_y_m * np.cos(2.0 * phi) * phi_dot
+        lin_vels[i, 1] = amplitude_y_m * 2.0 * np.cos(2.0 * phi) * phi_dot
         lin_vels[i, 2] = 0.0
 
         ang_vels[i] = np.zeros(3)
 
     return TaskspaceTrajectory(
         name="FIGURE_EIGHT",
-        description="Lemniscate figure-eight trajectory with smooth direction reversals.",
+        description="Lemniscate figure-eight trajectory (X peak amplitude: 4 cm, Y peak amplitude: 3 cm).",
         duration_s=duration_s,
         physics_hz=physics_hz,
         timestamps=timestamps,
@@ -281,7 +293,7 @@ def generate_waypoint_box_trajectory(
 
     return TaskspaceTrajectory(
         name="WAYPOINT_BOX",
-        description="Smooth 4-corner rectangular waypoint circuit in XY plane.",
+        description="Smooth 4-corner closed box path (6 cm x 6 cm) in the XY plane.",
         duration_s=duration_s,
         physics_hz=physics_hz,
         timestamps=timestamps,
@@ -300,15 +312,15 @@ def generate_se3_orientation_sweep_trajectory(
     duration_s: float = 3.0,
     physics_hz: int = 240,
 ) -> TaskspaceTrajectory:
-    """Generates an SE(3) trajectory combining modest translation with quaternion SLERP orientation roll sweep."""
+    """Generates an SE(3) trajectory combining 2 cm X harmonic translation with +/-20 deg X-axis roll rotation via quaternion SLERP."""
     num_samples = int(round(duration_s * physics_hz)) + 1
     timestamps = np.linspace(0.0, duration_s, num_samples, dtype=np.float64)
     
     center = np.array(center_pos, dtype=np.float64)
     r_base = R.from_quat(base_orientation)
     q_neutral = r_base.as_quat()
-    q_pos = (r_base * R.from_euler("z", max_roll_deg, degrees=True)).as_quat()
-    q_neg = (r_base * R.from_euler("z", -max_roll_deg, degrees=True)).as_quat()
+    q_pos = (r_base * R.from_euler("x", max_roll_deg, degrees=True)).as_quat()
+    q_neg = (r_base * R.from_euler("x", -max_roll_deg, degrees=True)).as_quat()
 
     positions = np.zeros((num_samples, 3), dtype=np.float64)
     orientations = np.zeros((num_samples, 4), dtype=np.float64)
@@ -321,7 +333,7 @@ def generate_se3_orientation_sweep_trajectory(
 
     for i, t in enumerate(timestamps):
         s, s_dot, _ = _quintic_time_scaling(t, duration_s)
-        # Gentle translation along X
+        # Gentle translation along X (2 cm harmonic amplitude)
         positions[i, 0] = center[0] + 0.02 * np.sin(2.0 * np.pi * s)
         positions[i, 1] = center[1]
         positions[i, 2] = center[2]
@@ -351,7 +363,7 @@ def generate_se3_orientation_sweep_trajectory(
 
     return TaskspaceTrajectory(
         name="SE3_SWEEP",
-        description=f"6-DoF trajectory with +/-{max_roll_deg} deg quaternion SLERP rotation and harmonic translation.",
+        description=f"6-DoF trajectory with +/-{max_roll_deg} deg X-axis roll rotation via quaternion SLERP and 2 cm X harmonic translation.",
         duration_s=duration_s,
         physics_hz=physics_hz,
         timestamps=timestamps,
@@ -403,7 +415,7 @@ EXPERIMENT_DEFINITIONS: Dict[str, ExperimentDefinition] = {
     ),
     "figure_eight": ExperimentDefinition(
         name="FIGURE_EIGHT",
-        description="Lemniscate figure-eight trajectory with smooth direction reversals.",
+        description="Lemniscate figure-eight trajectory (X peak amplitude: 4 cm, Y peak amplitude: 3 cm).",
         generator_func=generate_figure_eight_trajectory,
         default_duration_s=4.0,
         is_se3=False,
@@ -417,12 +429,74 @@ EXPERIMENT_DEFINITIONS: Dict[str, ExperimentDefinition] = {
     ),
     "se3_sweep": ExperimentDefinition(
         name="SE3_SWEEP",
-        description="6-DoF trajectory with +/-20 deg quaternion SLERP rotation and harmonic translation.",
+        description="6-DoF trajectory with +/-20 deg X-axis roll rotation via quaternion SLERP and 2 cm X harmonic translation.",
         generator_func=generate_se3_orientation_sweep_trajectory,
         default_duration_s=3.0,
         is_se3=True,
     ),
 }
+
+
+def get_experiment_metadata(
+    exp_name: str,
+    duration_override_s: Optional[float] = None,
+    physics_hz: int = 240,
+    preflight_sample_stride: int = 1,
+) -> Dict[str, Any]:
+    """Single source of truth for experiment geometry, duration, and sample counts."""
+    name_key = exp_name.lower()
+    if name_key not in EXPERIMENT_DEFINITIONS:
+        raise ValueError(f"Unknown experiment '{exp_name}'")
+    exp_def = EXPERIMENT_DEFINITIONS[name_key]
+    eff_dur = duration_override_s if duration_override_s is not None else exp_def.default_duration_s
+    overridden = (duration_override_s is not None) and (duration_override_s != exp_def.default_duration_s)
+    traj = exp_def.create_trajectory(duration_s=eff_dur, physics_hz=physics_hz)
+    stride = max(1, preflight_sample_stride)
+    sampled_indices = list(range(0, traj.num_samples, stride))
+    if (traj.num_samples - 1) not in sampled_indices:
+        sampled_indices.append(traj.num_samples - 1)
+
+    if name_key == "line":
+        geom_params = {"length_m": 0.10, "axis": "Y", "path_type": "Straight Cartesian Line"}
+        orn_prof = "Fixed downward [1, 0, 0, 0]"
+        rot_axis = "None (Fixed)"
+    elif name_key == "circle":
+        geom_params = {"radius_m": 0.05, "plane": "XY", "path_type": "Continuous Planar Circle"}
+        orn_prof = "Fixed downward [1, 0, 0, 0]"
+        rot_axis = "None (Fixed)"
+    elif name_key == "figure_eight":
+        geom_params = {"amplitude_x_m": 0.04, "amplitude_y_m": 0.03, "plane": "XY", "path_type": "Lemniscate (Figure-Eight)"}
+        orn_prof = "Fixed downward [1, 0, 0, 0]"
+        rot_axis = "None (Fixed)"
+    elif name_key == "waypoint_box":
+        geom_params = {"size_x_m": 0.06, "size_y_m": 0.06, "plane": "XY", "corners": 4, "path_type": "4-Corner Rectangular Route"}
+        orn_prof = "Fixed downward [1, 0, 0, 0]"
+        rot_axis = "None (Fixed)"
+    elif name_key == "se3_sweep":
+        geom_params = {"harmonic_translation_axis": "X", "harmonic_amplitude_m": 0.02, "rotation_axis": "X", "max_roll_deg": 20.0, "path_type": "6-DoF Roll SLERP + Harmonic Translation"}
+        orn_prof = "Quaternion SLERP roll sweep (+/-20 deg around X-axis)"
+        rot_axis = "X (Roll)"
+    else:
+        geom_params = {}
+        orn_prof = "Custom"
+        rot_axis = "N/A"
+
+    return {
+        "name": exp_def.name,
+        "description": exp_def.description,
+        "center_position": [0.48, 0.0, 0.35],
+        "geometry_parameters": geom_params,
+        "default_duration_s": exp_def.default_duration_s,
+        "effective_duration_s": eff_dur,
+        "duration_overridden": overridden,
+        "orientation_profile": orn_prof,
+        "rotation_axis": rot_axis,
+        "physics_hz": physics_hz,
+        "sample_count": traj.num_samples,
+        "preflight_sample_stride": stride,
+        "preflight_checked_samples": len(sampled_indices),
+        "is_se3": exp_def.is_se3,
+    }
 
 
 def get_standard_experiment_trajectories(
@@ -454,6 +528,9 @@ class PreflightFeasibilityResult:
     robot_max_orientation_residuals_deg: Dict[str, float]
     robot_feasibility: Dict[str, bool]
     failure_diagnostics: List[str] = field(default_factory=list)
+    sample_stride: int = 1
+    checked_samples: int = 0
+    trajectory_total_samples: int = 0
 
     @property
     def shared_feasible(self) -> bool:
@@ -476,15 +553,18 @@ class PreflightFeasibilityResult:
         d["max_position_residual_m_kuka"] = self.robot_max_position_residuals_mm.get("kuka_iiwa", 0.0) / 1000.0
         d["max_orientation_residual_deg_panda"] = self.robot_max_orientation_residuals_deg.get("panda", 0.0)
         d["max_orientation_residual_deg_kuka"] = self.robot_max_orientation_residuals_deg.get("kuka_iiwa", 0.0)
+        d["trajectory_total_samples"] = self.trajectory_total_samples if self.trajectory_total_samples > 0 else self.total_samples
+        d["preflight_sample_stride"] = self.sample_stride
+        d["preflight_checked_samples"] = self.checked_samples if self.checked_samples > 0 else self.total_samples
         return d
 
 
 def check_shared_feasibility(
     trajectory: Union[TaskspaceTrajectory, ExperimentDefinition, str],
     robots: Sequence[str] = ("panda", "kuka_iiwa"),
-    position_tolerance_mm: float = 25.0,
-    orientation_tolerance_deg: float = 10.0,
-    sample_stride: int = 4,
+    position_tolerance_mm: float = PREFLIGHT_POSITION_RESIDUAL_THRESHOLD_MM,
+    orientation_tolerance_deg: float = PREFLIGHT_ORIENTATION_RESIDUAL_THRESHOLD_DEG,
+    sample_stride: int = 1,
     physics_hz: int = 240,
 ) -> PreflightFeasibilityResult:
     """Preflight verification ensuring both manipulators can feasibly solve all trajectory waypoints.
@@ -494,7 +574,7 @@ def check_shared_feasibility(
         robots: List of robot model identifiers.
         position_tolerance_mm: Maximum permissible FK IK position residual in mm.
         orientation_tolerance_deg: Maximum permissible FK IK orientation residual in degrees.
-        sample_stride: Step stride for sample evaluation to ensure fast and thorough checks.
+        sample_stride: Step stride for sample evaluation to ensure thorough checks (default: 1 for publication).
         physics_hz: Simulation clock frequency.
 
     Returns:
@@ -516,7 +596,8 @@ def check_shared_feasibility(
     robot_feasible = {}
     failure_notes = []
 
-    sampled_indices = list(range(0, traj.num_samples, max(1, sample_stride)))
+    stride = max(1, sample_stride)
+    sampled_indices = list(range(0, traj.num_samples, stride))
     if (traj.num_samples - 1) not in sampled_indices:
         sampled_indices.append(traj.num_samples - 1)
 
@@ -588,11 +669,14 @@ def check_shared_feasibility(
         feasible=overall_feasible,
         status=status,
         robots_tested=list(robots),
-        total_samples=len(sampled_indices),
+        total_samples=traj.num_samples,
         robot_max_position_residuals_mm=robot_max_pos,
         robot_max_orientation_residuals_deg=robot_max_orn,
         robot_feasibility=robot_feasible,
         failure_diagnostics=failure_notes,
+        sample_stride=stride,
+        checked_samples=len(sampled_indices),
+        trajectory_total_samples=traj.num_samples,
     )
 
 
@@ -666,9 +750,10 @@ def compute_experiment_metrics(
     env_col_arr: np.ndarray,
     limit_viol_arr: np.ndarray,
     vel_sat_arr: np.ndarray,
-    settle_tol_mm: float = 5.0,
+    settle_tol_mm: float = SETTLE_TOLERANCE_MM,
+    success_position_tolerance_mm: float = SUCCESS_POSITION_TOLERANCE_MM,
+    success_orientation_tolerance_deg: float = SUCCESS_ORIENTATION_TOLERANCE_DEG,
     is_se3: bool = False,
-    orn_tol_deg: float = 10.0,
 ) -> ExperimentMetrics:
     """Computes rigorous mathematical metrics from recorded trial timeseries."""
     N = len(time_arr)
@@ -751,19 +836,19 @@ def compute_experiment_metrics(
 
     # Success criteria
     has_collision = (self_col_count > 0) or (env_col_count > 0)
-    pos_success = settled_final_pos_mm <= (settle_tol_mm * 2.0)
+    pos_success = settled_final_pos_mm <= success_position_tolerance_mm
     orn_success = True
     if is_se3:
-        orn_success = final_orn_deg <= orn_tol_deg
+        orn_success = final_orn_deg <= success_orientation_tolerance_deg
 
     success = (not has_collision) and pos_success and orn_success
     failure_reason = ""
     if has_collision:
         failure_reason = f"Collision detected (self: {self_col_count}, env: {env_col_count})"
     elif not pos_success:
-        failure_reason = f"Final position error {settled_final_pos_mm:.2f}mm exceeded bound {settle_tol_mm * 2.0:.2f}mm"
+        failure_reason = f"Final position error {settled_final_pos_mm:.2f}mm exceeded bound {success_position_tolerance_mm:.2f}mm"
     elif not orn_success:
-        failure_reason = f"Final orientation error {final_orn_deg:.2f}deg exceeded bound {orn_tol_deg:.2f}deg"
+        failure_reason = f"Final orientation error {final_orn_deg:.2f}deg exceeded bound {success_orientation_tolerance_deg:.2f}deg"
 
     return ExperimentMetrics(
         mean_position_error_mm=mean_pos_mm,
@@ -819,7 +904,6 @@ class ExperimentTrialResult:
     metrics: ExperimentMetrics
     timeseries: Dict[str, np.ndarray] = field(default_factory=dict)
     metadata: Dict[str, Any] = field(default_factory=dict)
-
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -889,29 +973,14 @@ def execute_experiment_trial(
     trial_index: int = 0,
     trajectory_duration: Optional[float] = None,
     settle_duration_s: float = 0.5,
-    settle_tolerance_mm: float = 5.0,
+    settle_tolerance_mm: float = SETTLE_TOLERANCE_MM,
+    success_position_tolerance_mm: float = SUCCESS_POSITION_TOLERANCE_MM,
+    success_orientation_tolerance_deg: float = SUCCESS_ORIENTATION_TOLERANCE_DEG,
     physics_hz: int = 240,
     gui: bool = False,
     seed: int = 42,
 ) -> Tuple[ExperimentMetrics, List[Dict[str, Any]]]:
-    """Executes a single deterministic experiment trial in PyBullet DIRECT or GUI mode.
-
-    Args:
-        experiment_def: ExperimentDefinition, name string, or TaskspaceTrajectory.
-        robot_name: 'panda' or 'kuka_iiwa'.
-        controller_type: 'ik' or 'resolved-rate'.
-        trajectory: Optional pre-generated TaskspaceTrajectory.
-        trial_index: Trial repeat index (0-indexed).
-        trajectory_duration: Optional duration override.
-        settle_duration_s: Settling stage duration holding final goal pose.
-        settle_tolerance_mm: Tolerance threshold in mm for settling verification.
-        physics_hz: Simulation clock frequency.
-        gui: Whether to render with PyBullet GUI (default: False / DIRECT mode).
-        seed: Random seed for deterministic reproducibility.
-
-    Returns:
-        Tuple of (ExperimentMetrics, timeseries_record_dicts).
-    """
+    """Executes a single deterministic experiment trial in PyBullet DIRECT or GUI mode."""
     if isinstance(experiment_def, TaskspaceTrajectory):
         traj = experiment_def
         exp_name = traj.name.lower()
@@ -1107,7 +1176,9 @@ def execute_experiment_trial(
             limit_viol_arr=limit_viol_rec,
             vel_sat_arr=vel_sat_rec,
             settle_tol_mm=settle_tolerance_mm,
-            is_se3=traj.is_se3_sweep,
+            success_position_tolerance_mm=success_position_tolerance_mm,
+            success_orientation_tolerance_deg=success_orientation_tolerance_deg,
+            is_se3=getattr(traj, "is_se3_sweep", False),
         )
 
         orn_err_deg_arr = np.array([
@@ -1155,8 +1226,10 @@ def execute_experiment_trial(
             metadata={
                 "settle_duration_s": settle_duration_s,
                 "settle_tolerance_mm": settle_tolerance_mm,
+                "success_position_tolerance_mm": success_position_tolerance_mm,
+                "success_orientation_tolerance_deg": success_orientation_tolerance_deg,
                 "total_steps": total_samples,
-                "is_se3_sweep": traj.is_se3_sweep,
+                "is_se3_sweep": getattr(traj, "is_se3_sweep", False),
             },
         )
         return metrics, trial_res.to_timeseries_records()
@@ -1183,106 +1256,11 @@ class PlanningExperimentResult:
     min_collision_clearance_m: float
     execution_success: bool
     execution_final_pos_error_mm: float
+    planning_execution_position_tolerance_mm: float = PLANNING_EXECUTION_POSITION_TOLERANCE_MM
     details: str = ""
 
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
-
-
-# =============================================================================
-# 6. EXPERIMENT MANIFEST GENERATOR
-# =============================================================================
-
-@dataclass
-class ExperimentManifest:
-    """Standardized metadata manifest describing the experiment environment and parameters."""
-    version: str
-    git_commit_sha: str
-    timestamp_utc: str
-    environment: Dict[str, Any]
-    execution: Dict[str, Any]
-    tolerances: Dict[str, Any]
-    trajectory_definitions: Dict[str, Any]
-
-    def to_dict(self) -> Dict[str, Any]:
-        return asdict(self)
-
-
-def generate_experiment_manifest(
-    robot_names: Sequence[str] = ("panda", "kuka_iiwa"),
-    controller_types: Sequence[str] = ("ik", "resolved-rate"),
-    repeats: int = 1,
-    random_seed: int = 42,
-    physics_hz: int = 240,
-    git_commit_sha: Optional[str] = None,
-) -> ExperimentManifest:
-    """Builds a deterministic experiment manifest without machine-specific absolute paths or usernames."""
-    if git_commit_sha:
-        git_sha = str(git_commit_sha).strip()
-    else:
-        git_sha = "unknown"
-        try:
-            git_res = subprocess.run(
-                ["git", "rev-parse", "HEAD"],
-                capture_output=True,
-                text=True,
-                timeout=5,
-            )
-            if git_res.returncode == 0:
-                git_sha = git_res.stdout.strip()
-        except Exception:
-            pass
-
-    pybullet_ver = "unknown"
-    try:
-        pybullet_ver = str(p.getAPIVersion())
-    except Exception:
-        pass
-
-    opencv_ver = "unknown"
-    try:
-        import cv2
-        opencv_ver = str(cv2.__version__)
-    except Exception:
-        pass
-
-    traj_defs = {}
-    for name, exp_def in EXPERIMENT_DEFINITIONS.items():
-        traj_defs[name] = {
-            "name": exp_def.name,
-            "description": exp_def.description,
-            "default_duration_s": exp_def.default_duration_s,
-            "is_se3": exp_def.is_se3,
-        }
-
-    return ExperimentManifest(
-        version="1.2.0-dev",
-        git_commit_sha=git_sha,
-        timestamp_utc=datetime.now(timezone.utc).isoformat(),
-        environment={
-            "python_version": platform.python_version(),
-            "opencv_version": opencv_ver,
-            "numpy_version": np.__version__,
-            "pybullet_version": pybullet_ver,
-            "os": platform.system(),
-            "architecture": platform.machine(),
-        },
-        execution={
-            "robots": list(robot_names),
-            "controllers": list(controller_types),
-            "physics_frequency_hz": physics_hz,
-            "timestep_dt_s": 1.0 / physics_hz,
-            "statistical_repeats": repeats,
-            "random_seed": random_seed,
-        },
-        tolerances={
-            "position_settling_tolerance_mm": 5.0,
-            "orientation_settling_tolerance_deg": 5.0,
-            "preflight_position_residual_threshold_mm": 25.0,
-            "preflight_orientation_residual_threshold_deg": 10.0,
-        },
-        trajectory_definitions=traj_defs,
-    )
 
 
 def execute_obstacle_reach_experiment(
@@ -1290,6 +1268,7 @@ def execute_obstacle_reach_experiment(
     physics_hz: int = 240,
     gui: bool = False,
     seed: int = 42,
+    planning_execution_position_tolerance_mm: float = PLANNING_EXECUTION_POSITION_TOLERANCE_MM,
 ) -> PlanningExperimentResult:
     """Evaluates collision-aware motion planning around a tall scene obstacle.
 
@@ -1297,7 +1276,7 @@ def execute_obstacle_reach_experiment(
     - Direct joint-space path rejection due to collision.
     - Bidirectional RRT-Connect planner invocation and success.
     - Path shortcutting and waypoint reduction.
-    - Execution without collision in PyBullet.
+    - Execution without collision in PyBullet with final endpoint position error <= tolerance.
     """
     np.random.seed(seed)
     cid = p.connect(p.GUI if gui else p.DIRECT)
@@ -1308,7 +1287,6 @@ def execute_obstacle_reach_experiment(
     plane_id = p.loadURDF("plane.urdf", physicsClientId=cid)
     table_id = p.loadURDF("table/table.urdf", basePosition=[0.5, 0.0, -0.62], useFixedBase=True, physicsClientId=cid)
 
-    # 1. Create obstacles and environment
     obs_col = p.createCollisionShape(p.GEOM_BOX, halfExtents=[0.03, 0.03, 0.08], physicsClientId=cid)
     obs_vis = p.createVisualShape(p.GEOM_BOX, halfExtents=[0.03, 0.03, 0.08], rgbaColor=[0.8, 0.2, 0.2, 0.8], physicsClientId=cid)
     obs_id = p.createMultiBody(
@@ -1438,7 +1416,7 @@ def execute_obstacle_reach_experiment(
 
             ee_pos, _ = ctrl.get_end_effector_pose()
             final_err_mm = float(np.linalg.norm(np.array(ee_pos) - np.array(goal_target_pos)) * 1000.0)
-            exec_success = no_col and (final_err_mm < 25.0)
+            exec_success = no_col and (final_err_mm <= planning_execution_position_tolerance_mm)
 
         return PlanningExperimentResult(
             robot_name=robot_name,
@@ -1452,8 +1430,123 @@ def execute_obstacle_reach_experiment(
             min_collision_clearance_m=float(min_clearance if min_clearance != float("inf") else 0.0),
             execution_success=exec_success,
             execution_final_pos_error_mm=final_err_mm,
+            planning_execution_position_tolerance_mm=planning_execution_position_tolerance_mm,
             details=f"Direct: {'FREE' if direct_is_free else 'BLOCKED'}, RRT: {'SUCCESS' if rrt_success else 'FAILED'}, Exec: {'SUCCESS' if exec_success else 'FAILED'}",
         )
 
     finally:
         p.disconnect(cid)
+
+
+# =============================================================================
+# 6. EXPERIMENT MANIFEST GENERATOR
+# =============================================================================
+
+@dataclass
+class ExperimentManifest:
+    """Standardized metadata manifest describing the experiment environment and parameters."""
+    version: str
+    git_commit_sha: str
+    timestamp_utc: str
+    environment: Dict[str, Any]
+    execution: Dict[str, Any]
+    tolerances: Dict[str, Any]
+    trajectory_definitions: Dict[str, Any]
+
+    def to_dict(self) -> Dict[str, Any]:
+        return asdict(self)
+
+
+def generate_experiment_manifest(
+    robot_names: Sequence[str] = ("panda", "kuka_iiwa"),
+    controller_types: Sequence[str] = ("ik", "resolved-rate"),
+    deterministic_repeats: int = 1,
+    random_seed: int = 42,
+    physics_hz: int = 240,
+    trajectory_duration: Optional[float] = None,
+    preflight_sample_stride: int = 1,
+    settle_tolerance_mm: float = SETTLE_TOLERANCE_MM,
+    success_position_tolerance_mm: float = SUCCESS_POSITION_TOLERANCE_MM,
+    success_orientation_tolerance_deg: float = SUCCESS_ORIENTATION_TOLERANCE_DEG,
+    preflight_position_tolerance_mm: float = PREFLIGHT_POSITION_RESIDUAL_THRESHOLD_MM,
+    preflight_orientation_tolerance_deg: float = PREFLIGHT_ORIENTATION_RESIDUAL_THRESHOLD_DEG,
+    planning_execution_position_tolerance_mm: float = PLANNING_EXECUTION_POSITION_TOLERANCE_MM,
+    git_commit_sha: Optional[str] = None,
+) -> ExperimentManifest:
+    """Builds a deterministic experiment manifest without machine-specific absolute paths or usernames."""
+    if git_commit_sha:
+        git_sha = str(git_commit_sha).strip()
+    else:
+        git_sha = "unknown"
+        try:
+            git_res = subprocess.run(
+                ["git", "rev-parse", "HEAD"],
+                capture_output=True,
+                text=True,
+                timeout=5,
+            )
+            if git_res.returncode == 0:
+                git_sha = git_res.stdout.strip()
+        except Exception:
+            pass
+
+    pybullet_pkg_ver = "unknown"
+    try:
+        import importlib.metadata
+        pybullet_pkg_ver = importlib.metadata.version("pybullet")
+    except Exception:
+        pass
+
+    pybullet_api_ver = "unknown"
+    try:
+        pybullet_api_ver = str(p.getAPIVersion())
+    except Exception:
+        pass
+
+    opencv_ver = "unknown"
+    try:
+        import cv2
+        opencv_ver = str(cv2.__version__)
+    except Exception:
+        pass
+
+    traj_defs = {}
+    for name in ALL_EXPERIMENT_NAMES:
+        traj_defs[name] = get_experiment_metadata(
+            name,
+            duration_override_s=trajectory_duration,
+            physics_hz=physics_hz,
+            preflight_sample_stride=preflight_sample_stride,
+        )
+
+    return ExperimentManifest(
+        version="1.2.0-dev",
+        git_commit_sha=git_sha,
+        timestamp_utc=datetime.now(timezone.utc).isoformat(),
+        environment={
+            "python_version": platform.python_version(),
+            "opencv_version": opencv_ver,
+            "numpy_version": np.__version__,
+            "pybullet_package_version": pybullet_pkg_ver,
+            "pybullet_api_version": pybullet_api_ver,
+            "os": platform.system(),
+            "architecture": platform.machine(),
+        },
+        execution={
+            "robots": list(robot_names),
+            "controllers": list(controller_types),
+            "physics_frequency_hz": physics_hz,
+            "timestep_dt_s": 1.0 / physics_hz,
+            "deterministic_repeats": deterministic_repeats,
+            "random_seed": random_seed,
+        },
+        tolerances={
+            "settle_tolerance_mm": settle_tolerance_mm,
+            "success_position_tolerance_mm": success_position_tolerance_mm,
+            "success_orientation_tolerance_deg": success_orientation_tolerance_deg,
+            "preflight_position_residual_threshold_mm": preflight_position_tolerance_mm,
+            "preflight_orientation_residual_threshold_deg": preflight_orientation_tolerance_deg,
+            "planning_execution_position_tolerance_mm": planning_execution_position_tolerance_mm,
+        },
+        trajectory_definitions=traj_defs,
+    )

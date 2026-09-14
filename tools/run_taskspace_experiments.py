@@ -236,6 +236,59 @@ def generate_experiment_plots(
     return generated_files
 
 
+def verify_experiment_results_consistency(
+    summary_results: Dict[str, Any],
+    all_trial_metrics: List[Dict[str, Any]],
+    manifest: Dict[str, Any],
+) -> bool:
+    """Programmatically verifies consistency across trial CSV records, summary JSON, and manifest.
+
+    Raises:
+        AssertionError: If any discrepancy is found between records, summary, or manifest.
+    """
+    tasks = summary_results.get("tasks", {})
+    traj_defs = manifest.get("trajectory_definitions", {})
+
+    for exp_name, exp_summary in tasks.items():
+        if exp_summary.get("skipped", False):
+            continue
+
+        if exp_name in traj_defs:
+            manifest_dur = traj_defs[exp_name].get("effective_duration_s")
+            assert manifest_dur is not None, f"Manifest missing effective_duration_s for {exp_name}"
+
+        for combo_key, stats in exp_summary.items():
+            if not isinstance(stats, dict) or "trials_count" not in stats:
+                continue
+
+            robot, ctrl = combo_key.split("_", 1) if "_" in combo_key else (combo_key, "")
+            # Find matching trials
+            matching = [
+                m for m in all_trial_metrics
+                if m.get("experiment_name") == exp_name and m.get("robot_name") == robot and m.get("controller_type") == ctrl
+            ]
+            assert stats["trials_count"] == len(matching), (
+                f"Mismatch in trial count for {exp_name} {combo_key}: summary={stats['trials_count']} vs csv={len(matching)}"
+            )
+            success_count = sum(1 for m in matching if m.get("success", False))
+            assert stats["success_count"] == success_count, (
+                f"Mismatch in success count for {exp_name} {combo_key}: summary={stats['success_count']} vs csv={success_count}"
+            )
+            expected_rate = success_count / max(1, len(matching))
+            assert abs(stats["success_rate"] - expected_rate) < 1e-6, (
+                f"Mismatch in success rate for {exp_name} {combo_key}"
+            )
+            if matching:
+                expected_rmse_mean = float(np.mean([float(m["rmse_position_error_mm"]) for m in matching]))
+                actual_rmse_mean = float(stats["rmse_position_error_mm"]["mean"])
+                assert abs(expected_rmse_mean - actual_rmse_mean) < 1e-4, (
+                    f"Mismatch in mean RMSE for {exp_name} {combo_key}: expected={expected_rmse_mean}, actual={actual_rmse_mean}"
+                )
+
+    logger.info("Experiment results consistency verification passed successfully.")
+    return True
+
+
 def generate_experiment_report_markdown(
     manifest: Dict[str, Any],
     preflight_results: Dict[str, Any],
@@ -243,9 +296,32 @@ def generate_experiment_report_markdown(
     planning_results: Dict[str, Any],
     plot_rel_paths: List[str],
     output_report_path: Path,
+    all_trial_metrics: Optional[List[Dict[str, Any]]] = None,
 ) -> None:
     """Generates a comprehensive, conservative research-style REPORT.md artifact."""
     lines: List[str] = []
+    trial_metrics = all_trial_metrics or []
+
+    # Calculate data-derived metrics
+    feasible_experiment_count = sum(1 for pf in preflight_results.values() if pf.get("shared_feasible"))
+    failed_feasibility_count = sum(1 for pf in preflight_results.values() if not pf.get("shared_feasible"))
+    executed_trial_count = len(trial_metrics)
+    skipped_trial_count = sum(
+        t.get("skipped_trial_count", 0)
+        for t in summary_results.get("tasks", {}).values()
+        if isinstance(t, dict) and t.get("skipped", False)
+    )
+    successful_trial_count = sum(1 for m in trial_metrics if m.get("success", False))
+    failed_trial_count = sum(1 for m in trial_metrics if not m.get("success", False))
+    self_collision_total = sum(int(m.get("self_collision_count", 0)) for m in trial_metrics)
+    environment_collision_total = sum(int(m.get("environment_collision_count", 0)) for m in trial_metrics)
+    singularity_warning_total = sum(int(m.get("singularity_warning_count", 0)) for m in trial_metrics)
+    joint_limit_event_total = sum(int(m.get("joint_limit_violation_count", 0)) for m in trial_metrics)
+
+    env_info = manifest.get("environment", {})
+    exec_info = manifest.get("execution", {})
+    tol_info = manifest.get("tolerances", {})
+    traj_defs = manifest.get("trajectory_definitions", {})
 
     lines.append("# VisionRobotTwin Task-Space Benchmark Experiment Report")
     lines.append("")
@@ -253,7 +329,7 @@ def generate_experiment_report_markdown(
     lines.append("> **REFERENCE PYBULLET SIMULATION RESULTS**  ")
     lines.append(f"> Generated: {manifest.get('timestamp_utc', 'N/A')} UTC  ")
     lines.append(f"> Software Version: {manifest.get('version', 'N/A')} | Commit: `{manifest.get('git_commit_sha', 'N/A')}`  ")
-    lines.append(f"> Physics Engine: PyBullet {manifest.get('environment', {}).get('pybullet_version', 'N/A')} (`DIRECT` mode, fixed timestep dt = {manifest.get('execution', {}).get('timestep_dt_s', 1/240):.6f}s / {manifest.get('execution', {}).get('physics_frequency_hz', 240)} Hz)  ")
+    lines.append(f"> Physics Engine: PyBullet package `{env_info.get('pybullet_package_version', 'unknown')}` (API: `{env_info.get('pybullet_api_version', 'unknown')}`) (`DIRECT` mode, fixed timestep dt = {exec_info.get('timestep_dt_s', 1/240):.6f}s / {exec_info.get('physics_frequency_hz', 240)} Hz)  ")
     lines.append("")
     lines.append("---")
     lines.append("")
@@ -271,41 +347,58 @@ def generate_experiment_report_markdown(
     lines.append("")
     lines.append("| Parameter | Value | Details |")
     lines.append("| :--- | :--- | :--- |")
-    lines.append(f"| **OS** | `{manifest.get('environment', {}).get('os', 'N/A')}` | {platform.version()} |")
-    lines.append(f"| **Python** | `{manifest.get('environment', {}).get('python_version', 'N/A')}` | CPython |")
-    lines.append(f"| **NumPy** | `{manifest.get('environment', {}).get('numpy_version', 'N/A')}` | Vectorized algebra |")
-    lines.append(f"| **PyBullet** | `{manifest.get('environment', {}).get('pybullet_version', 'N/A')}` | Physics client `DIRECT` |")
-    lines.append(f"| **Physics Frequency** | `{manifest.get('execution', {}).get('physics_frequency_hz', 240)} Hz` | `dt = {manifest.get('execution', {}).get('timestep_dt_s', 1/240):.6f}s` |")
-    lines.append(f"| **Position Tolerance** | `{manifest.get('tolerances', {}).get('position_settling_tolerance_mm', 5.0)} mm` | Settled final position threshold |")
-    lines.append(f"| **Orientation Tolerance** | `{manifest.get('tolerances', {}).get('orientation_settling_tolerance_deg', 5.0)} deg` | Settled final orientation threshold |")
-    lines.append(f"| **Statistical Repeats** | `{manifest.get('execution', {}).get('statistical_repeats', 1)}` | Independent deterministic trials |")
-    lines.append(f"| **Random Seed** | `{manifest.get('execution', {}).get('random_seed', 42)}` | Deterministic initialization |")
+    lines.append(f"| **OS** | `{env_info.get('os', 'N/A')}` | {platform.version()} |")
+    lines.append(f"| **Python** | `{env_info.get('python_version', 'N/A')}` | CPython |")
+    lines.append(f"| **NumPy** | `{env_info.get('numpy_version', 'N/A')}` | Vectorized linear algebra |")
+    lines.append(f"| **PyBullet Package** | `{env_info.get('pybullet_package_version', 'N/A')}` | Physics client `DIRECT` |")
+    lines.append(f"| **PyBullet API** | `{env_info.get('pybullet_api_version', 'N/A')}` | Internal C API version |")
+    lines.append(f"| **Physics Frequency** | `{exec_info.get('physics_frequency_hz', 240)} Hz` | `dt = {exec_info.get('timestep_dt_s', 1/240):.6f}s` |")
+    lines.append(f"| **Settle Tolerance** | `{tol_info.get('settle_tolerance_mm', 5.0)} mm` | Settled final position threshold |")
+    lines.append(f"| **Success Position Tolerance** | `{tol_info.get('success_position_tolerance_mm', 10.0)} mm` | Trial completion position threshold |")
+    lines.append(f"| **Success Orientation Tolerance** | `{tol_info.get('success_orientation_tolerance_deg', 10.0)} deg` | Trial completion orientation threshold |")
+    lines.append(f"| **Planning Position Tolerance** | `{tol_info.get('planning_execution_position_tolerance_mm', 25.0)} mm` | Obstacle reach final endpoint threshold |")
+    lines.append(f"| **Deterministic Repeats** | `{exec_info.get('deterministic_repeats', 1)}` | Deterministic repeatability executions |")
+    lines.append(f"| **Random Seed** | `{exec_info.get('random_seed', 42)}` | Deterministic initialization seed |")
     lines.append("")
 
     lines.append("## 3. Shared Feasibility Preflight")
     lines.append("")
-    lines.append("Before executing any trajectory trial, the entire desired task-space curve is sampled at dense intervals. Both Franka Emika Panda and KUKA LBR iiwa solvers verify that inverse kinematics solutions exist with Cartesian position residual $\\le 25\\text{ mm}$ and orientation error $\\le 10^\\circ$ across every single waypoint.")
+    lines.append("Before executing any trajectory trial, the entire desired task-space curve is sampled at dense intervals. Both Franka Emika Panda and KUKA LBR iiwa solvers verify that inverse kinematics solutions exist with Cartesian position residual $\\le 25\\text{ mm}$ and orientation error $\\le 10^\\circ$ across every checked waypoint.")
     lines.append("")
-    lines.append("| Trajectory | Shared Feasible | Panda Feasible | KUKA Feasible | Max Pos Residual (mm) | Max Orn Residual (deg) | Policy |")
-    lines.append("| :--- | :---: | :---: | :---: | :---: | :---: | :--- |")
+    lines.append("| Trajectory | Shared Feasible | Panda Feasible | KUKA Feasible | Checked Samples | Total Samples | Stride | Max Pos Residual (mm) | Max Orn Residual (deg) | Policy |")
+    lines.append("| :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :--- |")
     for exp_name, pf in preflight_results.items():
         shared_icon = "PASS" if pf.get("shared_feasible") else "FAIL"
         p_icon = "PASS" if pf.get("panda_feasible") else "FAIL"
         k_icon = "PASS" if pf.get("kuka_feasible") else "FAIL"
+        chk_samples = pf.get("checked_samples", "N/A")
+        tot_samples = pf.get("trajectory_total_samples", "N/A")
+        stride = pf.get("sample_stride", 1)
         max_pos = max(pf.get("max_position_residual_m_panda", 0.0), pf.get("max_position_residual_m_kuka", 0.0)) * 1000.0
         max_orn = max(pf.get("max_orientation_residual_deg_panda", 0.0), pf.get("max_orientation_residual_deg_kuka", 0.0))
         policy = pf.get("policy", "EXACT_PATH")
-        lines.append(f"| `{exp_name}` | **{shared_icon}** | {p_icon} | {k_icon} | {max_pos:.2f} mm | {max_orn:.2f}° | `{policy}` |")
+        lines.append(f"| `{exp_name}` | **{shared_icon}** | {p_icon} | {k_icon} | {chk_samples} | {tot_samples} | {stride} | {max_pos:.2f} mm | {max_orn:.2f}° | `{policy}` |")
+    lines.append("")
+
+    all_stride_1 = all(pf.get("sample_stride", 1) == 1 for pf in preflight_results.values())
+    if all_stride_1:
+        lines.append("Every generated trajectory sample was checked during preflight verification (`preflight_sample_stride = 1`).")
+    else:
+        lines.append("Trajectory preflight verification checked subsampled waypoints according to configured stride values.")
     lines.append("")
 
     lines.append("## 4. Task Definitions")
     lines.append("")
-    lines.append("1. **LINE**: 10 cm horizontal Cartesian translation at $z = 0.35\\text{ m}$. Tests standard linear path tracking.")
-    lines.append("2. **CIRCLE**: Continuous circular trajectory ($R = 5\\text{ cm}$) in the XY plane. Tests continuous non-linear tracking.")
-    lines.append("3. **FIGURE EIGHT**: Lemniscate of Gerono ($A_x = 5\\text{ cm}, A_y = 5\\text{ cm}$). Tests smooth velocity reversals and directional inflection points.")
-    lines.append("4. **WAYPOINT BOX**: 4-point closed rectangular path ($6\\text{ cm} \\times 6\\text{ cm}$) with quintic inter-waypoint blending. Tests corner transitions.")
-    lines.append("5. **SE3 ORIENTATION SWEEP**: Harmonic translation combined with continuous $\\pm 20^\\circ$ roll oscillation using quaternion SLERP. Tests 6-DoF full-pose tracking.")
-    lines.append("")
+    # Consume single source of truth trajectory metadata
+    for idx, (name, meta) in enumerate(traj_defs.items(), 1):
+        g_params = meta.get("geometry_parameters", {})
+        dur = meta.get("effective_duration_s", meta.get("default_duration_s", 0.0))
+        lines.append(f"{idx}. **{name.upper()}**: {meta.get('description', '')}")
+        lines.append(f"   - Center Position: `{meta.get('center_position', [])}`")
+        lines.append(f"   - Geometry: `{g_params}`")
+        lines.append(f"   - Duration: `{dur:.1f} s` ({meta.get('sample_count', 0)} samples @ {meta.get('physics_hz', 240)} Hz)")
+        lines.append(f"   - Orientation Profile: `{meta.get('orientation_profile', '')}` (Rotation Axis: `{meta.get('rotation_axis', 'None')}`)")
+        lines.append("")
 
     lines.append("## 5. Cross-Robot & Cross-Controller Summary Matrix")
     lines.append("")
@@ -317,6 +410,10 @@ def generate_experiment_report_markdown(
         if exp_name not in tasks:
             continue
         exp_data = tasks[exp_name]
+        if exp_data.get("skipped", False):
+            lines.append(f"| **{exp_name.replace('_', ' ').title()}** | **Status** | `SKIPPED (SHARED FEASIBILITY FAILED)` | `SKIPPED` | `SKIPPED` | `SKIPPED` |")
+            continue
+
         p_ik = exp_data.get("panda_ik", {})
         p_rr = exp_data.get("panda_resolved-rate", {})
         k_ik = exp_data.get("kuka_iiwa_ik", {})
@@ -354,6 +451,8 @@ def generate_experiment_report_markdown(
     lines.append("")
     lines.append("A dedicated obstacle avoidance experiment tests the complete collision-aware planning stack when moving between points $[0.42, -0.18, 0.35]$ and $[0.42, 0.18, 0.35]$ separated by a rigid box obstacle at $[0.42, 0.0, 0.35]$.")
     lines.append("")
+    lines.append(f"Under this PyBullet configuration, planning PASS requires collision-free trajectory execution AND a final endpoint error $\\le {tol_info.get('planning_execution_position_tolerance_mm', 25.0)}\\text{{ mm}}$. This criterion validates high-level obstacle clearing and endpoint arrival, distinct from the {tol_info.get('settle_tolerance_mm', 5.0)} mm continuous settled tracking tolerance.")
+    lines.append("")
     lines.append("| Robot | Direct Path State | RRT-Connect Status | Plan Time (ms) | Raw Waypoints | Smoothed Waypoints | Raw Travel (rad) | Smoothed Travel (rad) | Min Clearance (m) | Execution | Final Error (mm) |")
     lines.append("| :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |")
 
@@ -375,9 +474,11 @@ def generate_experiment_report_markdown(
 
     lines.append("## 8. Failure Cases & Singularity Telemetry")
     lines.append("")
-    lines.append("- **Collisions**: 0 unintended collisions were observed during standard task-space tracking trials across all shared feasible trajectories.")
-    lines.append("- **Singularity Warnings**: Near-singularity events (condition number $> 100$ or $\\sigma_{\\min} < 0.01$) were monitored at 240 Hz throughout each trial.")
-    lines.append("- **Feasibility Verification**: All 5 benchmark trajectories were preflight-verified feasible on both manipulators before running.")
+    lines.append(f"- **Feasibility**: {feasible_experiment_count} shared-feasible trajectories verified, {failed_feasibility_count} failed feasibility preflight trajectories.")
+    lines.append(f"- **Trial Execution**: {executed_trial_count} executed trials ({successful_trial_count} successful, {failed_trial_count} failed), {skipped_trial_count} skipped trials due to preflight gating.")
+    lines.append(f"- **Collisions**: Recorded {self_collision_total} self-collisions and {environment_collision_total} environment-collisions across all executed trials.")
+    lines.append(f"- **Singularity Warnings**: {singularity_warning_total} total near-singularity warning steps (condition number $> 100$ or $\\sigma_{{\\min}} < 0.01$) observed during execution.")
+    lines.append(f"- **Joint Limit Events**: {joint_limit_event_total} joint-limit violations observed during execution.")
     lines.append("")
 
     lines.append("## 9. Limitations & Conservative Interpretation")
@@ -409,7 +510,8 @@ def generate_experiment_report_markdown(
     logger.info(f"Generated comprehensive experiment report at {output_report_path}")
 
 
-def main() -> int:
+def create_experiment_arg_parser() -> argparse.ArgumentParser:
+    """Creates the CLI argument parser with mutually exclusive GUI/headless flags."""
     parser = argparse.ArgumentParser(
         description="VisionRobotTwin Multi-Manipulator Task-Space Experiment Suite"
     )
@@ -417,18 +519,29 @@ def main() -> int:
     parser.add_argument("--experiment", type=str, choices=ALL_EXPERIMENT_NAMES, help="Run specific experiment")
     parser.add_argument("--robot", type=str, choices=["panda", "kuka_iiwa"], help="Filter by robot")
     parser.add_argument("--controller", type=str, choices=["ik", "resolved-rate"], help="Filter by controller")
-    parser.add_argument("--repeats", type=int, default=1, help="Number of statistical repeats per trial (default: 1)")
+    parser.add_argument("--repeats", type=int, default=1, help="Number of deterministic repeatability runs per trial (default: 1)")
     parser.add_argument("--seed", type=int, default=42, help="Deterministic random seed")
-    parser.add_argument("--trajectory-duration", type=float, default=2.5, help="Trajectory duration in seconds")
+    parser.add_argument("--trajectory-duration", type=float, default=None, help="Trajectory duration override in seconds (default: None, use per-experiment default)")
     parser.add_argument("--physics-hz", type=int, default=240, help="Physics simulation frequency in Hz")
+    parser.add_argument("--preflight-stride", type=int, default=1, help="Sampling stride for preflight feasibility check (default: 1)")
     parser.add_argument("--output-dir", type=str, default=None, help="Custom output directory for experiment run")
-    parser.add_argument("--headless", action="store_true", default=True, help="Run in headless mode (DIRECT physics)")
-    parser.add_argument("--gui", action="store_true", help="Run with PyBullet GUI")
+
+    # Mutually exclusive GUI / Headless group
+    mode_group = parser.add_mutually_exclusive_group()
+    mode_group.add_argument("--headless", action="store_true", help="Run in headless mode (DIRECT physics, default)")
+    mode_group.add_argument("--gui", action="store_true", help="Run with PyBullet GUI")
+
     parser.add_argument("--publish-reference", action="store_true", help="Publish output as reference results in docs/experiments/v1.2_reference/")
     parser.add_argument("--commit-sha", type=str, default=None, help="Explicit git commit SHA to record in manifest")
-    args = parser.parse_args()
+    return parser
 
-    gui_mode = args.gui and not args.headless
+
+def main(argv: Optional[List[str]] = None) -> int:
+    parser = create_experiment_arg_parser()
+    args = parser.parse_args(argv)
+
+    # Resolve headless vs GUI mode (default: headless / DIRECT)
+    gui_mode = bool(args.gui)
 
     # Determine experiments to run
     if args.all or (not args.experiment):
@@ -438,6 +551,12 @@ def main() -> int:
 
     robots = [args.robot] if args.robot else ["panda", "kuka_iiwa"]
     controllers = [args.controller] if args.controller else ["ik", "resolved-rate"]
+
+    # In reference publishing mode, preflight stride must strictly be 1
+    if args.publish_reference:
+        preflight_stride = 1
+    else:
+        preflight_stride = max(1, args.preflight_stride)
 
     # Setup output directory
     timestamp_str = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
@@ -456,7 +575,8 @@ def main() -> int:
     print("VisionRobotTwin Task-Space Benchmark Experiment Suite")
     print(f"Target Directory: {run_dir}")
     print(f"Experiments: {experiments_to_run}")
-    print(f"Robots: {robots} | Controllers: {controllers} | Repeats: {args.repeats}")
+    print(f"Robots: {robots} | Controllers: {controllers} | Deterministic Repeats: {args.repeats}")
+    print(f"Preflight Stride: {preflight_stride} | Trajectory Duration Override: {args.trajectory_duration}")
     print("=" * 70)
 
     # 1. Shared Feasibility Preflight
@@ -464,18 +584,38 @@ def main() -> int:
     preflight_records: Dict[str, Any] = {}
     for exp_name in experiments_to_run:
         exp_def = EXPERIMENT_DEFINITIONS[exp_name]
-        pf = check_shared_feasibility(exp_def)
+        pf = check_shared_feasibility(
+            exp_def,
+            sample_stride=preflight_stride,
+            duration_override_s=args.trajectory_duration,
+            physics_hz=args.physics_hz,
+        )
         preflight_records[exp_name] = pf.to_dict()
         status_str = "SHARED FEASIBLE" if pf.shared_feasible else "FEASIBILITY FAILED"
-        print(f"[{exp_name.upper()}]: {status_str} (Panda: {pf.panda_feasible}, KUKA: {pf.kuka_feasible})")
+        print(f"[{exp_name.upper()}]: {status_str} (Panda: {pf.panda_feasible}, KUKA: {pf.kuka_feasible}, Samples Checked: {pf.checked_samples}/{pf.trajectory_total_samples})")
 
-    # 2. Execute Tracking Trials
+    # 2. Execute Tracking Trials (Gated by Preflight)
     print("\n--- PHASE 2: Executing Benchmark Trials ---")
     all_trial_metrics: List[Dict[str, Any]] = []
     timeseries_data: Dict[str, List[Dict[str, Any]]] = {}
+    skipped_experiments: Dict[str, Dict[str, Any]] = {}
 
     for exp_name in experiments_to_run:
         exp_def = EXPERIMENT_DEFINITIONS[exp_name]
+        pf_data = preflight_records[exp_name]
+
+        if not pf_data.get("shared_feasible", False):
+            # Gated: Skip trials for non-feasible trajectories
+            expected_trials = len(robots) * len(controllers) * args.repeats
+            print(f"[{exp_name.upper()}]: SKIPPING ALL {expected_trials} TRIALS (SHARED FEASIBILITY FAILED: {pf_data.get('failure_reason', '')})")
+            skipped_experiments[exp_name] = {
+                "status": "SHARED_FEASIBILITY_FAILED",
+                "skipped": True,
+                "skipped_trial_count": expected_trials,
+                "failure_diagnostics": pf_data,
+            }
+            continue
+
         for robot in robots:
             for ctrl in controllers:
                 for repeat in range(args.repeats):
@@ -541,6 +681,10 @@ def main() -> int:
     }
 
     for exp_name in experiments_to_run:
+        if exp_name in skipped_experiments:
+            summary_dict["tasks"][exp_name] = skipped_experiments[exp_name]
+            continue
+
         summary_dict["tasks"][exp_name] = {}
         for robot in robots:
             for ctrl in controllers:
@@ -584,9 +728,11 @@ def main() -> int:
     manifest_obj = generate_experiment_manifest(
         robot_names=robots,
         controller_types=controllers,
-        repeats=args.repeats,
+        deterministic_repeats=args.repeats,
         random_seed=args.seed,
         physics_hz=args.physics_hz,
+        trajectory_duration=args.trajectory_duration,
+        preflight_sample_stride=preflight_stride,
         git_commit_sha=args.commit_sha,
     )
     manifest_path = run_dir / "manifest.json"
@@ -604,7 +750,10 @@ def main() -> int:
             writer.writeheader()
             writer.writerows(all_trial_metrics)
 
-    # 6. Generate Publication-Quality Plots
+    # 6. Verify Results Consistency
+    verify_experiment_results_consistency(summary_dict, all_trial_metrics, manifest_obj.to_dict())
+
+    # 7. Generate Publication-Quality Plots
     print("\n--- PHASE 4: Generating Publication-Quality Visualizations ---")
     plot_rel_paths = generate_experiment_plots(
         timeseries_data=timeseries_data,
@@ -615,7 +764,7 @@ def main() -> int:
     for p_path in plot_rel_paths:
         print(f"Generated plot: {p_path}")
 
-    # 7. Generate Comprehensive REPORT.md
+    # 8. Generate Comprehensive REPORT.md
     print("\n--- PHASE 5: Generating Research Report ---")
     report_path = run_dir / "REPORT.md"
     generate_experiment_report_markdown(
@@ -625,9 +774,10 @@ def main() -> int:
         planning_results=planning_records,
         plot_rel_paths=plot_rel_paths,
         output_report_path=report_path,
+        all_trial_metrics=all_trial_metrics,
     )
 
-    # 8. Reference Results Publishing
+    # 9. Reference Results Publishing
     if args.publish_reference:
         ref_dir = REPO_ROOT / "docs" / "experiments" / "v1.2_reference"
         ref_dir.mkdir(parents=True, exist_ok=True)
