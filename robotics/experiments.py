@@ -565,6 +565,7 @@ def check_shared_feasibility(
     position_tolerance_mm: float = PREFLIGHT_POSITION_RESIDUAL_THRESHOLD_MM,
     orientation_tolerance_deg: float = PREFLIGHT_ORIENTATION_RESIDUAL_THRESHOLD_DEG,
     sample_stride: int = 1,
+    duration_override_s: Optional[float] = None,
     physics_hz: int = 240,
 ) -> PreflightFeasibilityResult:
     """Preflight verification ensuring both manipulators can feasibly solve all trajectory waypoints.
@@ -575,6 +576,7 @@ def check_shared_feasibility(
         position_tolerance_mm: Maximum permissible FK IK position residual in mm.
         orientation_tolerance_deg: Maximum permissible FK IK orientation residual in degrees.
         sample_stride: Step stride for sample evaluation to ensure thorough checks (default: 1 for publication).
+        duration_override_s: Optional duration override in seconds.
         physics_hz: Simulation clock frequency.
 
     Returns:
@@ -582,11 +584,11 @@ def check_shared_feasibility(
     """
     if isinstance(trajectory, str):
         if trajectory.lower() in EXPERIMENT_DEFINITIONS:
-            traj = EXPERIMENT_DEFINITIONS[trajectory.lower()].create_trajectory(physics_hz=physics_hz)
+            traj = EXPERIMENT_DEFINITIONS[trajectory.lower()].create_trajectory(duration_s=duration_override_s, physics_hz=physics_hz)
         else:
             raise ValueError(f"Unknown experiment '{trajectory}'")
     elif isinstance(trajectory, ExperimentDefinition):
-        traj = trajectory.create_trajectory(physics_hz=physics_hz)
+        traj = trajectory.create_trajectory(duration_s=duration_override_s, physics_hz=physics_hz)
     else:
         traj = trajectory
 
