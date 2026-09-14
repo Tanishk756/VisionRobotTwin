@@ -1,6 +1,6 @@
 # Systems Validation Matrix & Technical Audit Report
 
-## VisionRobotTwin (v1.2.0-dev Multi-Robot Robotics Stack)
+## VisionRobotTwin (v1.2.0 Multi-Robot Robotics Stack)
 
 This document provides a strict, evidence-grounded validation report for all perception, kinematics, control, trajectory, collision, motion planning, and benchmarking subsystems. In accordance with rigorous robotics engineering standards, **synthetic simulation results are explicitly distinguished from physical hardware validation**.
 
@@ -12,10 +12,10 @@ VisionRobotTwin maintains a strict engineering distinction across validation tie
 
 | Validation Tier | Environment | Status | Scope & Evidence |
 | :--- | :--- | :---: | :--- |
-| **Tier 1: Automated CI** | GitHub Actions (Windows Python 3.11 & 3.12) | **`PASS`** | 126 automated unit and integration tests passing (`pytest -v`). |
-| **Tier 2: PyBullet Task-Space Experiments** | Headless PyBullet 240 Hz Physics Twin | **`PASS`** | Multi-robot, multi-controller task-space benchmark suite (`tools/run_taskspace_experiments.py`) across 5 SE(3) paths & obstacle reach. |
-| **Tier 3: Physical Camera Smoke Test** | Live Operator USB Webcam | **`USER-CONFIRMED / PASS`** | Operator-verified visual teleoperation tracking with Marker 0 (v1.1 baseline). |
-| **Tier 4: Physical Calibrated Camera Benchmark** | Measured Optical Chessboard Setup | **`PENDING`** | Requires physical Brown-Conrady chessboard capture (`calibration/camera_matrix.npz`). |
+| **Tier 1: Automated Software Validation** | GitHub Actions (Windows Python 3.11 & 3.12) | **`PASS`** | 131 automated unit and integration tests passing (`pytest -v`). |
+| **Tier 2: PyBullet Reference Experiments** | Headless PyBullet 240 Hz Physics Twin | **`AVAILABLE`** | Multi-robot, multi-controller task-space benchmark suite (`tools/run_taskspace_experiments.py`) across 5 SE(3) paths & obstacle reach. |
+| **Tier 3: Basic Physical Webcam Smoke** | Live Operator USB Webcam | **`USER-CONFIRMED / PASS`** | Operator-verified visual teleoperation tracking with Marker 0 (v1.1 baseline). |
+| **Tier 4: Physical Calibrated Camera Benchmark** | Measured Optical Chessboard Setup | **`NOT YET MEASURED`** | Optical calibration metrics pending physical lab capture (`calibration/camera_matrix.npz`). |
 | **Tier 5: Physical Manipulator Hardware** | Physical Franka / KUKA Arm | **`NOT TESTED`** | All control executed exclusively in validated PyBullet digital twin environment. |
 
 ---
@@ -54,7 +54,7 @@ VisionRobotTwin maintains a strict engineering distinction across validation tie
 +-------------------------------------------------------------------------------+
 | PARAMETER                            | STATUS / VALUE                         |
 +-------------------------------------------------------------------------------+
-| Automated Unit & Integration Tests   | PASSING (126 / 126 tests passing)      |
+| Automated Unit & Integration Tests   | PASSING (131 / 131 tests passing)      |
 | Continuous Integration (CI)          | Configured (Windows Python 3.11 & 3.12)|
 | Supported Manipulators               | Franka Emika Panda & KUKA LBR iiwa     |
 | Physics Simulation Clock Rate        | 240 Hz Target (Fixed 1/240s timestep)  |

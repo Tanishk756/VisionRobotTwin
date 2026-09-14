@@ -1522,7 +1522,7 @@ def generate_experiment_manifest(
         )
 
     return ExperimentManifest(
-        version="1.2.0-dev",
+        version="1.2.0",
         git_commit_sha=git_sha,
         timestamp_utc=datetime.now(timezone.utc).isoformat(),
         environment={

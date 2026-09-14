@@ -30,7 +30,7 @@ def test_screenshot_metadata_generation(tmp_path: Path):
     with open(json_files[0], "r", encoding="utf-8") as f:
         meta = json.load(f)
 
-    assert meta["version"] == "1.2.0-dev"
+    assert meta["version"] == "1.2.0"
     assert "camera_pose" in meta
     assert "calibration_status" in meta
     assert "extrinsics_status" in meta

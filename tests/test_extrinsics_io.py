@@ -17,7 +17,7 @@ def test_extrinsics_save_load_roundtrip(tmp_path: Path):
     )
 
     calib = ExtrinsicCalibration(
-        version="1.2.0-dev",
+        version="1.2.0",
         camera_index=1,
         anchor_marker_id=10,
         anchor_marker_size_m=0.05,
@@ -39,7 +39,7 @@ def test_extrinsics_save_load_roundtrip(tmp_path: Path):
 
     loaded = ExtrinsicCalibration.load(file_path)
 
-    assert loaded.version == "1.2.0-dev"
+    assert loaded.version == "1.2.0"
     assert loaded.camera_index == 1
     assert loaded.anchor_marker_id == 10
     assert loaded.sample_count == 25
@@ -68,7 +68,7 @@ def test_extrinsics_invalid_json(tmp_path: Path):
 def test_extrinsics_invalid_schema_missing_keys():
     """Asserts ValueError when essential schema fields are missing."""
     with pytest.raises(ValueError, match="Missing 'T_robot_camera'"):
-        ExtrinsicCalibration.from_dict({"version": "1.2.0-dev"})
+        ExtrinsicCalibration.from_dict({"version": "1.2.0"})
 
 
 def test_extrinsics_nan_rejection():

@@ -227,7 +227,7 @@ class VisionRobotTwinApp:
         )
 
         self.logger.info("=" * 70)
-        self.logger.info(" INITIALIZING VISION-ROBOT DIGITAL TWIN (v1.2-dev)")
+        self.logger.info(f" INITIALIZING VISION-ROBOT DIGITAL TWIN (v{__version__})")
         self.logger.info(f" Python Version : {sys.version.split()[0]} | OpenCV Version: {cv2.__version__}")
         self.logger.info(f" Robot          : {config.robot_name.upper()} | Mode: {config.mode.upper()} | Control: {config.control_mode.upper()}")
         self.logger.info(f" Camera         : {'SYNTHETIC' if config.camera.synthetic_mode else f'Index {config.camera.camera_index}'}")

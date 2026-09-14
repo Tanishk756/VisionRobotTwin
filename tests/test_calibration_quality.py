@@ -62,7 +62,7 @@ def test_duplicate_sample_rejection():
 def test_calibration_report_json_serialization(tmp_path: Path):
     """Validates CalibrationReport JSON export and import fidelity."""
     report = CalibrationReport(
-        version="1.2.0-dev",
+        version="1.2.0",
         timestamp="2026-09-13T12:00:00",
         camera_index=0,
         image_size=(1280, 720),

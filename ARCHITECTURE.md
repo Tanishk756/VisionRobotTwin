@@ -1,6 +1,6 @@
 # Systems Architecture & Technical Specification
 
-## VisionRobotTwin (v1.2.0-dev Multi-Manipulator Architecture)
+## VisionRobotTwin (v1.2.0 Multi-Manipulator Architecture)
 
 ---
 

@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.2.0] - 2026-09-14
+
 ### Added
 - **Robot-Agnostic Multi-Manipulator Architecture**: Decoupled robot control layer into generic `RobotModelSpec`, `RobotCapabilities`, and singleton `RobotRegistry` supporting Franka Emika Panda and KUKA LBR iiwa.
 - **KUKA LBR iiwa Support**: Packaged 7-DoF KUKA iiwa manipulator integration in PyBullet with clean capability reporting (no native gripper; pick-and-place safely disabled).
@@ -23,6 +25,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Collision-Aware Motion Planning**: Bidirectional RRT-Connect planner in joint space with direct linear path fast-path optimization and randomized path shortcutting.
 - **Cross-Robot Comparison Benchmark**: `tools/compare_robots.py` benchmarking Panda vs KUKA iiwa across reachable targets, measuring solve latency, residuals, manipulability, and planning success.
 - **Cross-Controller Comparison Benchmark**: `tools/compare_controllers.py` benchmarking IK position control against Resolved-Rate Jacobian control on identical trajectories.
+- **Task-Space Research Experiment Suite**: `tools/run_taskspace_experiments.py` executing 5 SE(3) Cartesian trajectories (Line, Circle, Figure-Eight, Waypoint Box, SE(3) Sweep) and obstacle-blocked planning across Panda and KUKA.
+- **Reference Benchmark Package**: Full provenance-tracked PyBullet simulation benchmark results published in `docs/experiments/v1.2_reference/`.
 - **Expanded CLI**: `--list-robots`, `--robot-info <name>`, `--robot <name>`, `--controller <type>`, `--trajectory-mode`, and `--scene` flags.
 - **Camera Calibration Quality Reports**: JSON report export (`calibration/camera_calibration_report.json`) and visual diagnostic residual plots (`calibration/calibration_diagnostics.png`).
 - **Calibration Sample-Quality Heuristics**: Pre-solve gating based on Laplacian variance sharpness, bounding area ratio, duplicate view rejection, and spatial/scale diversity scoring.
@@ -35,6 +39,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Physical Benchmark Suite V2**: Upgraded `tools/benchmark_live.py` supporting `--benchmark-mode {stationary, tracking, standard}`, session folders (`benchmarks/YYYYMMDD_HHMMSS/`), time-series `frames.csv`, diagnostic plots, and system manifest.
 - **Physical Demo Video Recorder**: Video recording utility (`tools/record_demo.py` and `python main.py --record`) supporting MP4 and AVI fallbacks.
 - **Snapshot Metadata Capture**: Adjacent JSON metadata export (`screenshots/session_YYYYMMDD_HHMMSS.json`) on keyboard snapshot capture (`S`).
+
+### Validation
+- **Automated Test Suite**: 131 / 131 unit and integration tests passing (`pytest -v`).
+- **Continuous Integration (CI)**: GitHub Actions verified PASS on Windows Python 3.11 and Windows Python 3.12.
+- **Multi-Robot Runtime Verification**: Clean execution verified on Panda IK, Panda Resolved-Rate, and KUKA iiwa IK under headless synthetic mode.
+- **Task-Space Research Benchmarks**: Published PyBullet reference results across 60 deterministic trials and collision-aware planning runs (`docs/experiments/v1.2_reference/`).
+- **Basic Physical Webcam Smoke Test**: USER-CONFIRMED / PASS on Marker 0 teleoperation (v1.1 baseline).
+- **Physical Calibrated Camera Benchmark**: NOT YET MEASURED (tooling provided).
+- **Physical Manipulator Hardware**: NOT TESTED (simulation digital-twin implementation).
+
 
 ## [1.1.0] - 2026-09-13
 

@@ -376,7 +376,7 @@ def test_manifest_generation_and_serialization():
     )
 
     m_dict = manifest.to_dict()
-    assert m_dict["version"] == "1.2.0-dev"
+    assert m_dict["version"] == "1.2.0"
     assert "git_commit_sha" in m_dict
     assert "environment" in m_dict
     assert "execution" in m_dict

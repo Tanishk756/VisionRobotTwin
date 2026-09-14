@@ -21,7 +21,7 @@ def test_benchmark_synthetic_stationary_execution(tmp_path: Path):
 
     assert summary["benchmark_mode"] == "stationary"
     assert "manifest" in summary
-    assert summary["manifest"]["visionrobottwin_version"] == "1.2.0-dev"
+    assert summary["manifest"]["visionrobottwin_version"] == "1.2.0"
     assert "optical_jitter" in summary
     assert "session_metrics" in summary
     assert summary["session_metrics"]["frames_captured"] > 0

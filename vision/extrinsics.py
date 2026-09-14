@@ -36,7 +36,7 @@ logger = get_logger("Vision.Extrinsics")
 @dataclass
 class ExtrinsicCalibration:
     """Strongly-typed representation of calibrated Camera-to-Robot extrinsics."""
-    version: str = "1.2.0-dev"
+    version: str = "1.2.0"
     timestamp: str = field(default_factory=lambda: datetime.now().isoformat())
     camera_index: int = 0
     anchor_marker_id: int = 10
@@ -106,7 +106,7 @@ class ExtrinsicCalibration:
         quat = quat / q_norm
 
         return cls(
-            version=str(data.get("version", "1.2.0-dev")),
+            version=str(data.get("version", "1.2.0")),
             timestamp=str(data.get("timestamp", "")),
             camera_index=int(data.get("camera_index", 0)),
             anchor_marker_id=int(data.get("anchor_marker_id", 10)),

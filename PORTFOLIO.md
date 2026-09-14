@@ -61,10 +61,10 @@
 ## 5. Resume Bullet Points
 
 - **Robotics Software Engineer Bullet**:
-  > *Architected a modular multi-manipulator robotics digital twin in Python/PyBullet supporting Franka Emika Panda and KUKA LBR iiwa; developed geometric Jacobian solvers, adaptive DLS resolved-rate control, Yoshikawa manipulability telemetry, null-space redundancy optimization, and collision-aware RRT-Connect motion planning, verified via 126 automated unit/integration tests.*
+  > *Architected a modular multi-manipulator robotics digital twin in Python/PyBullet supporting Franka Emika Panda and KUKA LBR iiwa; developed geometric Jacobian solvers, adaptive DLS resolved-rate control, Yoshikawa manipulability telemetry, null-space redundancy optimization, and collision-aware RRT-Connect motion planning, verified via 131 automated unit/integration tests.*
 
 - **Controls & Research Engineer Bullet**:
-  > *Built a reproducible multi-manipulator task-space benchmarking framework comparing IK and Jacobian resolved-rate control across shared Cartesian trajectories (lines, circles, lemniscates, waypoints, SE(3) sweeps), achieving sub-millimeter settled precision and zero singularity warnings under 240 Hz fixed-step physics.*
+  > *Built a reproducible multi-manipulator task-space benchmarking framework with provenance-tracked simulation results comparing IK and Jacobian resolved-rate control across shared Cartesian trajectories (lines, circles, lemniscates, waypoints, SE(3) sweeps), achieving sub-millimeter settled precision in simulation and zero singularity warnings under 240 Hz fixed-step physics.*
 
 - **Computer Vision / Controls Engineer Bullet**:
   > *Engineered real-time 6-DoF visual teleoperation using monocular OpenCV ArUco pose estimation and camera calibration; implemented closed-loop differential IK, 1 Euro adaptive signal filtering, quaternion SLERP interpolation, and cross-robot benchmarking suites.*
@@ -73,7 +73,7 @@
 
 ## 6. Verification Status
 
-- [x] All 126 automated pytest tests passing (`pytest -v`)
+- [x] All 131 automated pytest tests passing (`pytest -v`)
 - [x] Tested across Franka Emika Panda and KUKA LBR iiwa
 - [x] Geometric Jacobian, SVD manipulability, and condition number verified
 - [x] Resolved-rate differential controller with adaptive DLS and null-space centering verified

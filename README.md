@@ -3,13 +3,13 @@
 > **Real-Time Vision-Guided Robotic Manipulation Digital Twin supporting Franka Emika Panda & KUKA LBR iiwa with Generic Kinematics, Resolved-Rate Control, Singularity Monitoring, Collision Planning, and Cross-Robot Benchmarking**
 
 [![Python 3.10+](https://img.shields.io/badge/Python-3.10%20%7C%203.11%20%7C%203.12-blue.svg)](https://www.python.org/)
-[![Release: v1.1.0](https://img.shields.io/badge/Release-v1.1.0-brightgreen.svg)](https://github.com/Tanishk756/VisionRobotTwin/releases/tag/v1.1.0)
+[![Release: v1.2.0](https://img.shields.io/badge/Release-v1.2.0-brightgreen.svg)](https://github.com/Tanishk756/VisionRobotTwin/releases/tag/v1.2.0)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 [![Physics: PyBullet](https://img.shields.io/badge/Physics-PyBullet-orange.svg)](https://pybullet.org/)
 [![Perception: OpenCV](https://img.shields.io/badge/Perception-OpenCV%204.8+-red.svg)](https://opencv.org/)
 [![CI Validation](https://github.com/Tanishk756/VisionRobotTwin/actions/workflows/tests.yml/badge.svg)](https://github.com/Tanishk756/VisionRobotTwin/actions/workflows/tests.yml)
 
-**Current Stable Release**: `v1.1.0` | **Development Branch**: `v1.2.0-dev` | **Maintainer**: [Tanishk Singhal](https://github.com/Tanishk756) ([tanisksinghal6285@gmail.com](mailto:tanisksinghal6285@gmail.com))
+**Current Stable Release**: `v1.2.0` | **Development Branch**: `release/v1.2.0` | **Maintainer**: [Tanishk Singhal](https://github.com/Tanishk756) ([tanisksinghal6285@gmail.com](mailto:tanisksinghal6285@gmail.com))
 
 [Changelog](CHANGELOG.md) • [Validation Matrix](VALIDATION.md) • [Architecture](ARCHITECTURE.md) • [Portfolio Guide](PORTFOLIO.md) • [Authors](AUTHORS.md) • [Citation](CITATION.cff) • [Contributing](CONTRIBUTING.md) • [Security](SECURITY.md)
 
@@ -17,9 +17,20 @@
 
 ## 📌 Overview
 
-**VisionRobotTwin** is a modular, robot-agnostic digital twin and robotics research platform in Python, OpenCV, and PyBullet. It enables closed-loop 6-DoF visual teleoperation and manipulation, generic forward/inverse kinematics, geometric Jacobian computation, manipulability analysis, resolved-rate differential Cartesian velocity control, collision checking, RRT-Connect motion planning, and reproducible cross-robot benchmarking.
+**VisionRobotTwin** is a robot-agnostic vision-guided manipulation and digital-twin research framework in Python, OpenCV, and PyBullet supporting:
+- **Franka Emika Panda** and **KUKA LBR iiwa** (7-DoF manipulators)
+- **Generic Forward Kinematics (FK)** and **Inverse Kinematics (IK)** with measured FK residuals
+- **Geometric Spatial Jacobian** computation
+- **Resolved-rate Cartesian velocity control** with adaptive Damped Least-Squares (DLS)
+- **Yoshikawa manipulability and SVD singularity analysis**
+- **Null-space joint centering** for kinematic redundancy resolution
+- **Joint quintic polynomial** and **Cartesian SE(3) SLERP trajectories**
+- **Self and environment collision checking** with simulation state preservation
+- **Bidirectional RRT-Connect motion planning** with randomized path shortcutting
+- **Reproducible task-space benchmarking suite** across standardized trajectories
+- **Camera intrinsic and world-anchor extrinsic calibration tooling**
 
-The platform natively supports multiple 7-DoF industrial manipulators (**Franka Emika Panda** and **KUKA LBR iiwa**) with strongly typed capability specifications, preventing non-existent hardware features (e.g. grippers on standard arms) from causing runtime errors.
+The platform natively supports multiple 7-DoF industrial manipulators with strongly typed capability specifications, preventing non-existent hardware features (e.g. grippers on standard arms) from causing runtime errors.
 
 ---
 
@@ -27,19 +38,14 @@ The platform natively supports multiple 7-DoF industrial manipulators (**Franka 
 
 | Capability | Franka Emika Panda | KUKA LBR iiwa |
 | :--- | :---: | :---: |
-| **Arm Degrees of Freedom** | 7-DoF Revolute | 7-DoF Revolute |
+| **7-DoF Arm** | ✅ YES | ✅ YES |
+| **Vision Target Tracking** | ✅ YES | ✅ YES |
+| **Generic IK** | ✅ YES | ✅ YES |
+| **Resolved-Rate Control** | ✅ YES | ✅ YES |
+| **Collision Planning** | ✅ YES | ✅ YES |
+| **Gripper** | ✅ YES (2-Finger Parallel) | ❌ NO (Bare Flange) |
+| **Autonomous Pick / Place** | ✅ YES | ❌ NO (Disabled Cleanly) |
 | **URDF Source** | `pybullet_data/franka_panda/panda.urdf` | `pybullet_data/kuka_iiwa/model.urdf` |
-| **Manual Vision Tracking (3-DoF / 6-DoF)** | ✅ Supported | ✅ Supported |
-| **Generic Forward Kinematics (FK)** | ✅ Supported | ✅ Supported |
-| **Generic Inverse Kinematics (IK)** | ✅ Supported | ✅ Supported |
-| **Geometric Jacobian ($6 \times 7$)** | ✅ Supported | ✅ Supported |
-| **Yoshikawa Manipulability & SVD Condition** | ✅ Supported | ✅ Supported |
-| **Resolved-Rate Velocity Control (DLS)** | ✅ Supported | ✅ Supported |
-| **Null-Space Joint Centering** | ✅ Supported | ✅ Supported |
-| **Collision-Aware RRT-Connect Planning** | ✅ Supported | ✅ Supported |
-| **Quintic & SE(3) Trajectory Generation** | ✅ Supported | ✅ Supported |
-| **End-Effector Gripper** | ✅ Yes (2-Finger Parallel) | ❌ No (Bare Flange) |
-| **Autonomous Pick-and-Place FSM** | ✅ Supported | ❌ Disabled Cleanly |
 
 ---
 
@@ -181,15 +187,32 @@ python tools/run_taskspace_experiments.py --all --repeats 3 --headless
 
 #### Multi-Robot & Multi-Controller Reference Benchmark Matrix (PyBullet Simulation)
 
+> [!NOTE]
+> Under the v1.2 PyBullet reference configuration, 45 of 60 deterministic tracking trials satisfied the configured completion criteria. 15 KUKA IK trials did not satisfy the 10 mm completion threshold under this configuration due to numerical IK offsets, whereas Resolved-Rate velocity control achieved 100% completion success across all paths. Both reference obstacle-reach planning runs produced collision-free plans satisfying the explicit 25 mm endpoint criterion.
+
 | Experiment | Metric | Panda (IK) | Panda (Resolved-Rate) | KUKA iiwa (IK) | KUKA iiwa (Resolved-Rate) |
 | :--- | :--- | :---: | :---: | :---: | :---: |
 | **Line (10 cm)** | **RMSE Pos** / **Joint Travel** | 2.02 mm / 0.36 rad | 10.23 mm / 0.38 rad | 20.45 mm / 0.28 rad | 11.02 mm / 0.28 rad |
-| **Circle ($R=5\text{ cm}$)** | **RMSE Pos** / **Joint Travel** | 30.80 mm / 1.09 rad | 24.73 mm / 1.12 rad | 21.18 mm / 0.90 rad | 25.04 mm / 0.88 rad |
-| **Figure Eight** | **RMSE Pos** / **Joint Travel** | 20.15 mm / 1.35 rad | 18.68 mm / 1.34 rad | 21.30 mm / 1.13 rad | 19.08 mm / 1.12 rad |
-| **Waypoint Box** | **RMSE Pos** / **Joint Travel** | 15.53 mm / 1.02 rad | 19.07 mm / 1.04 rad | 21.06 mm / 0.77 rad | 19.45 mm / 0.76 rad |
-| **SE3 Sweep ($\pm 20^\circ$)** | **RMSE Pos** / **Mean Orn** | 11.10 mm / 8.32° | **6.52 mm** / 7.10° | 20.68 mm / **1.33°** | **7.68 mm** / 7.01° |
+| **Circle ($R=5\text{ cm}$)** | **RMSE Pos** / **Joint Travel** | 30.80 mm / 0.81 rad | 24.73 mm / 0.74 rad | 21.18 mm / 0.60 rad | 25.04 mm / 0.60 rad |
+| **Figure Eight** | **RMSE Pos** / **Joint Travel** | 20.15 mm / 0.84 rad | 18.68 mm / 0.85 rad | 21.30 mm / 0.76 rad | 19.08 mm / 0.77 rad |
+| **Waypoint Box** | **RMSE Pos** / **Joint Travel** | 15.53 mm / 0.58 rad | 19.07 mm / 0.59 rad | 21.06 mm / 0.44 rad | 19.45 mm / 0.44 rad |
+| **SE3 Sweep ($\pm 20^\circ$)** | **RMSE Pos** / **Mean Orn** | 11.10 mm / 0.61 rad | **6.52 mm** / 0.80 rad | 20.68 mm / 0.43 rad | **7.68 mm** / 0.79 rad |
 
 Full research report, plots, and methodology: [EXPERIMENTS.md](EXPERIMENTS.md) • [Reference Report](docs/experiments/v1.2_reference/REPORT.md)
+
+---
+
+## 🛡️ Validation & Tiered Status
+
+VisionRobotTwin strictly distinguishes between automated unit verification, simulation benchmarks, and physical testing:
+
+| Validation Tier | Environment | Status | Description |
+| :--- | :--- | :---: | :--- |
+| **Automated Software Validation** | GitHub Actions / Windows pytest | **`PASS` (131 / 131)** | Full unit, mathematical, and integration test suite across Python 3.11 & 3.12. |
+| **PyBullet Reference Experiments** | 240 Hz Physics Twin | **`AVAILABLE`** | Reproducible multi-robot & multi-controller benchmark suite in PyBullet. |
+| **Basic Physical Webcam Smoke** | Monocular Webcam Teleoperation | **`USER-CONFIRMED / PASS`** | Operator-verified ArUco marker teleoperation smoke test (v1.1 baseline). |
+| **Physical Calibrated Camera Benchmark** | Chessboard Metric Rig | **`NOT YET MEASURED`** | Optical calibration metrics pending physical lab capture. |
+| **Physical Panda / KUKA Hardware** | Physical Manipulator Arm | **`NOT TESTED`** | All robotics execution is validated strictly within simulation. |
 
 ---
 
@@ -217,7 +240,7 @@ pytest -v
 | `test_calibration_quality.py` | Camera Calibration Heuristics & Diagnostics | **PASS** |
 | `test_extrinsics_math.py` | World-Anchor Extrinsic Calibration Math | **PASS** |
 | `test_transforms.py` | SE(3) Lie Group Matrix & Quaternion Conversions | **PASS** |
-| **Total Automated Tests** | **Full Multi-Robot Robotics Suite** | **126 / 126 PASSING** |
+| **Total Automated Tests** | **Full Multi-Robot Robotics Suite** | **131 / 131 PASSING** |
 
 ---
 
@@ -248,11 +271,12 @@ VisionRobotTwin/
 ├── tools/                      # Benchmarking & Calibration CLI Tools
 │   ├── compare_robots.py       # Cross-Robot Kinematics & Planning Benchmark
 │   ├── compare_controllers.py  # IK vs Resolved-Rate Benchmark
+│   ├── run_taskspace_experiments.py # Reproducible Task-Space Experiment Suite
 │   ├── calibrate_camera.py     # Chessboard Intrinsic Calibration
 │   ├── calibrate_extrinsics.py # World-Anchor Extrinsic Calibration
 │   ├── benchmark_live.py       # Standstill & Dynamic Tracking Benchmark
 │   └── generate_aruco_markers.py # Printable Marker Generator
-└── tests/                      # 106 Unit & Integration Tests
+└── tests/                      # 131 Automated Unit & Integration Tests
 ```
 
 ---
