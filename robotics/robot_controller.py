@@ -161,13 +161,20 @@ class GenericRobotController:
         max_vels = [float(self.joints[idx].max_velocity) for idx in active_indices]
 
         if enforce_velocity_limits and dt is not None and dt > 0.0:
-            current_positions = self.get_current_joint_positions()[:num_targets]
-            clamped_targets = []
-            for i, idx in enumerate(active_indices):
-                max_delta = max_vels[i] * dt
-                delta = float(np.clip(raw_targets[i] - current_positions[i], -max_delta, max_delta))
-                clamped_targets.append(current_positions[i] + delta)
-            active_targets = clamped_targets
+            current_positions = np.array(self.get_current_joint_positions()[:num_targets], dtype=np.float64)
+            raw_targets_arr = np.array(raw_targets, dtype=np.float64)
+            delta_q = raw_targets_arr - current_positions
+            max_deltas = np.array(max_vels, dtype=np.float64) * dt
+
+            # Compute proportional coordinated scaling factor:
+            # scale = min(1.0, min(max_delta_i / abs(delta_q_i)))
+            scale = 1.0
+            nonzero_mask = np.abs(delta_q) > 1e-9
+            if np.any(nonzero_mask):
+                ratios = max_deltas[nonzero_mask] / np.abs(delta_q[nonzero_mask])
+                scale = float(min(1.0, np.min(ratios)))
+
+            active_targets = (current_positions + scale * delta_q).tolist()
         else:
             active_targets = raw_targets
 
