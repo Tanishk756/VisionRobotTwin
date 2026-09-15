@@ -5,6 +5,7 @@ import pytest
 import numpy as np
 
 from tools.benchmark_live import run_benchmark
+from visionrobottwin_version import __version__
 
 
 def test_benchmark_synthetic_stationary_execution(tmp_path: Path):
@@ -21,7 +22,7 @@ def test_benchmark_synthetic_stationary_execution(tmp_path: Path):
 
     assert summary["benchmark_mode"] == "stationary"
     assert "manifest" in summary
-    assert summary["manifest"]["visionrobottwin_version"] == "1.2.0"
+    assert summary["manifest"]["visionrobottwin_version"] == __version__
     assert "optical_jitter" in summary
     assert "session_metrics" in summary
     assert summary["session_metrics"]["frames_captured"] > 0

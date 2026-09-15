@@ -7,6 +7,7 @@ import numpy as np
 
 from config.settings import get_default_config
 from main import VisionRobotTwinApp
+from visionrobottwin_version import __version__
 
 
 def test_screenshot_metadata_generation(tmp_path: Path):
@@ -30,7 +31,7 @@ def test_screenshot_metadata_generation(tmp_path: Path):
     with open(json_files[0], "r", encoding="utf-8") as f:
         meta = json.load(f)
 
-    assert meta["version"] == "1.2.0"
+    assert meta["version"] == __version__
     assert "camera_pose" in meta
     assert "calibration_status" in meta
     assert "extrinsics_status" in meta
