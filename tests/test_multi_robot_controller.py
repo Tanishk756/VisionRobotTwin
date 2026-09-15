@@ -411,4 +411,179 @@ def test_generic_controller_import_without_pybullet_subprocess():
     assert "IMPORT_SUCCESS" in result.stdout
 
 
+def test_generic_controller_constructor_no_motion_side_effects():
+    """Verifies that constructing GenericRobotController does NOT command any motion on backend."""
+    from unittest.mock import MagicMock
+    from robotics.backends.mock_backend import MockRobotBackend
+    from robotics.kinematics_provider import KinematicsProvider
+    from robotics.robot_model import (
+        JointRole,
+        JointMotionType,
+        ResolvedJointMetadata,
+        ResolvedRobotModel,
+    )
+
+    arm_j0 = ResolvedJointMetadata(
+        model_index=0,
+        canonical_index=0,
+        name="j1",
+        role=JointRole.ARM,
+        motion_type=JointMotionType.REVOLUTE,
+        lower_limit=-1.0,
+        upper_limit=1.0,
+        max_force=50.0,
+        max_velocity=1.0,
+        link_name="l1",
+    )
+    model = ResolvedRobotModel(
+        robot_id="bot",
+        display_name="Bot",
+        all_joints=(arm_j0,),
+        arm_joints=(arm_j0,),
+        gripper_joints=(),
+        ee_link_name="l1",
+        home_joint_positions=(0.0,),
+    )
+
+    mock_backend = MockRobotBackend(
+        joint_names=["j1"],
+        initial_positions=[0.5],  # Non-zero position
+    )
+    mock_kinematics = MagicMock(spec=KinematicsProvider)
+
+    # Instantiate controller
+    controller = GenericRobotController(
+        resolved_model=model,
+        backend=mock_backend,
+        kinematics_provider=mock_kinematics,
+    )
+
+    # Verify no command was dispatched
+    assert mock_backend.last_commanded_positions is None
+    assert mock_backend.last_commanded_velocities is None
+    assert mock_backend.is_halted is False
+    # Position remains unchanged at 0.5 (was NOT teleported to home 0.0)
+    assert controller.get_current_joint_positions() == [0.5]
+
+
+def test_generic_controller_standalone_reset_to_home_raises():
+    """Verifies that calling reset_to_home on a standalone controller without PyBullet raises RuntimeError."""
+    from unittest.mock import MagicMock
+    from robotics.backends.mock_backend import MockRobotBackend
+    from robotics.kinematics_provider import KinematicsProvider
+    from robotics.robot_model import (
+        JointRole,
+        JointMotionType,
+        ResolvedJointMetadata,
+        ResolvedRobotModel,
+    )
+
+    arm_j0 = ResolvedJointMetadata(
+        model_index=0,
+        canonical_index=0,
+        name="j1",
+        role=JointRole.ARM,
+        motion_type=JointMotionType.REVOLUTE,
+        lower_limit=-1.0,
+        upper_limit=1.0,
+        max_force=50.0,
+        max_velocity=1.0,
+        link_name="l1",
+    )
+    model = ResolvedRobotModel(
+        robot_id="bot",
+        display_name="Bot",
+        all_joints=(arm_j0,),
+        arm_joints=(arm_j0,),
+        gripper_joints=(),
+        ee_link_name="l1",
+        home_joint_positions=(0.0,),
+    )
+    mock_backend = MockRobotBackend(joint_names=["j1"], initial_positions=[0.0])
+    mock_kinematics = MagicMock(spec=KinematicsProvider)
+
+    controller = GenericRobotController(
+        resolved_model=model,
+        backend=mock_backend,
+        kinematics_provider=mock_kinematics,
+    )
+
+    with pytest.raises(RuntimeError, match="legacy simulation teleport"):
+        controller.reset_to_home()
+
+
+def test_generic_controller_backend_mismatch_validation():
+    """Verifies that DoF mismatch and joint name mismatch with backend raise ValueError."""
+    from unittest.mock import MagicMock
+    from robotics.backends.mock_backend import MockRobotBackend
+    from robotics.kinematics_provider import KinematicsProvider
+    from robotics.robot_model import (
+        JointRole,
+        JointMotionType,
+        ResolvedJointMetadata,
+        ResolvedRobotModel,
+    )
+
+    arm_j0 = ResolvedJointMetadata(
+        model_index=0,
+        canonical_index=0,
+        name="joint_a",
+        role=JointRole.ARM,
+        motion_type=JointMotionType.REVOLUTE,
+        lower_limit=-1.0,
+        upper_limit=1.0,
+        max_force=50.0,
+        max_velocity=1.0,
+        link_name="la",
+    )
+    arm_j1 = ResolvedJointMetadata(
+        model_index=1,
+        canonical_index=1,
+        name="joint_b",
+        role=JointRole.ARM,
+        motion_type=JointMotionType.REVOLUTE,
+        lower_limit=-1.0,
+        upper_limit=1.0,
+        max_force=50.0,
+        max_velocity=1.0,
+        link_name="lb",
+    )
+    model = ResolvedRobotModel(
+        robot_id="bot",
+        display_name="Bot",
+        all_joints=(arm_j0, arm_j1),
+        arm_joints=(arm_j0, arm_j1),
+        gripper_joints=(),
+        ee_link_name="lb",
+        home_joint_positions=(0.0, 0.0),
+    )
+
+    mock_kinematics = MagicMock(spec=KinematicsProvider)
+
+    # 1. DoF mismatch: backend has 3 joints, model expects 2
+    mock_backend_dof = MockRobotBackend(
+        joint_names=["joint_a", "joint_b", "joint_c"],
+        initial_positions=[0.0, 0.0, 0.0],
+    )
+    with pytest.raises(ValueError, match="DoF mismatch"):
+        GenericRobotController(
+            resolved_model=model,
+            backend=mock_backend_dof,
+            kinematics_provider=mock_kinematics,
+        )
+
+    # 2. Name ordering mismatch: backend has ["joint_b", "joint_a"]
+    mock_backend_names = MockRobotBackend(
+        joint_names=["joint_b", "joint_a"],
+        initial_positions=[0.0, 0.0],
+    )
+    with pytest.raises(ValueError, match="names mismatch"):
+        GenericRobotController(
+            resolved_model=model,
+            backend=mock_backend_names,
+            kinematics_provider=mock_kinematics,
+        )
+
+
+
 

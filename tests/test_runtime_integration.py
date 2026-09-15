@@ -40,6 +40,7 @@ def sim_env():
     spec = registry.get_robot_spec("panda")
     robot_id = p.loadURDF(spec.urdf_path, useFixedBase=True, physicsClientId=client_id)
     controller = GenericRobotController(client_id, robot_id, spec)
+    controller.reset_to_home()
 
     yield client_id, robot_id, table_id, controller, spec
     p.disconnect(physicsClientId=client_id)
@@ -422,3 +423,23 @@ def test_simulator_shared_lock_identity():
         assert not col.in_collision
     finally:
         sim.close()
+
+
+def test_simulator_resolved_model_identity():
+    """Verifies that PyBulletSimulator resolves a canonical ResolvedRobotModel and wires it across subsystems."""
+    from robotics.simulator import PyBulletSimulator
+    from robotics.robot_model import ResolvedRobotModel
+    from config.settings import get_default_config
+
+    config = get_default_config()
+    sim = PyBulletSimulator(config, headless=True)
+
+    try:
+        assert isinstance(sim.resolved_model, ResolvedRobotModel)
+        assert sim.controller.model is sim.resolved_model
+        assert sim.resolved_model.dof == 7
+        assert sim.resolved_model.robot_id == "panda"
+        assert sim.resolved_model.require_arm_native_indices() == tuple(sim.controller.arm_joint_indices)
+    finally:
+        sim.close()
+

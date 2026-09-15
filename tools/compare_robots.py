@@ -56,6 +56,8 @@ def generate_shared_benchmark_targets(
 
     panda_ctrl = GenericRobotController(client_id, panda_id, panda_spec)
     kuka_ctrl = GenericRobotController(client_id, kuka_id, kuka_spec)
+    panda_ctrl.reset_to_home()
+    kuka_ctrl.reset_to_home()
 
     p_lows, p_highs, p_rng, p_rst = panda_ctrl.get_joint_limits()
     panda_ik = GenericIKSolver(
@@ -195,6 +197,7 @@ def benchmark_robot(
 
     body_id = p.loadURDF(spec.urdf_path, useFixedBase=True, physicsClientId=client_id)
     controller = GenericRobotController(client_id, body_id, spec)
+    controller.reset_to_home()
 
     lows, highs, ranges, rests = controller.get_joint_limits()
     ik_solver = GenericIKSolver(

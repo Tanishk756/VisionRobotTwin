@@ -197,6 +197,14 @@ class PyBulletSimulator:
             physicsClientId=self.client_id,
         )
 
+        from robotics.pybullet_model import PyBulletRobotModelResolver, teleport_robot_to_home
+        self.resolved_model = PyBulletRobotModelResolver.resolve(
+            physics_client_id=self.client_id,
+            robot_body_id=self.robot_id,
+            spec=self.robot_spec,
+        )
+        teleport_robot_to_home(self.client_id, self.robot_id, self.resolved_model)
+
         self._model_query_lock = threading.RLock()
 
         self.controller = GenericRobotController(
@@ -205,15 +213,17 @@ class PyBulletSimulator:
             spec=self.robot_spec,
             config=self.config.robot,
             model_query_lock=self._model_query_lock,
+            resolved_model=self.resolved_model,
         )
 
         self.kinematics_provider = self.controller.kinematics_provider
 
         lows, highs, ranges, rests = self.controller.get_joint_limits()
+        arm_indices = list(self.resolved_model.require_arm_native_indices())
         self.ik_solver = GenericIKSolver(
             physics_client_id=self.client_id,
             robot_id=self.robot_id,
-            arm_joint_indices=self.controller.arm_joint_indices,
+            arm_joint_indices=arm_indices,
             lower_limits=lows,
             upper_limits=highs,
             joint_ranges=ranges,
@@ -236,7 +246,7 @@ class PyBulletSimulator:
         self.collision_provider = PyBulletCollisionProvider(
             physics_client_id=self.client_id,
             robot_body_id=self.robot_id,
-            arm_joint_indices=self.controller.arm_joint_indices,
+            arm_joint_indices=arm_indices,
             table_id=self.table_id,
             obstacle_ids=self.obstacle_ids,
             allowed_link_pairs=allowed_mount_pairs,
