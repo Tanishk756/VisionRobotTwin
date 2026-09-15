@@ -170,3 +170,125 @@ def test_robot_backend_abstract_methods_cannot_be_instantiated():
     """Verify RobotBackend is an abstract base class that cannot be instantiated directly."""
     with pytest.raises(TypeError):
         RobotBackend()  # type: ignore[abstract]
+
+
+def test_mock_backend_connection_lifecycle():
+    """Verify MockRobotBackend connection, disconnection, and health status lifecycle."""
+    from robotics.backends.mock_backend import MockRobotBackend
+
+    backend = MockRobotBackend(joint_names=["j1", "j2"])
+    assert backend.is_connected() is False
+    assert backend.health_status() == BackendHealthStatus.DISCONNECTED
+
+    assert backend.connect() is True
+    assert backend.is_connected() is True
+    assert backend.health_status() == BackendHealthStatus.HEALTHY
+
+    backend.disconnect()
+    assert backend.is_connected() is False
+    assert backend.health_status() == BackendHealthStatus.DISCONNECTED
+
+
+def test_mock_backend_joint_state_ordering_and_defaults():
+    """Verify MockRobotBackend returns expected joint states and respects initial positions."""
+    from robotics.backends.mock_backend import MockRobotBackend
+
+    backend = MockRobotBackend(
+        joint_names=["joint_a", "joint_b"],
+        initial_positions=[0.1, -0.2],
+    )
+    backend.connect()
+
+    state = backend.get_joint_state()
+    assert state.joint_names == ("joint_a", "joint_b")
+    assert state.positions == (0.1, -0.2)
+    assert state.velocities == (0.0, 0.0)
+    assert state.efforts == (0.0, 0.0)
+    assert state.sequence_id >= 1
+
+
+def test_mock_backend_position_command_recording():
+    """Verify MockRobotBackend records commanded positions."""
+    from robotics.backends.mock_backend import MockRobotBackend
+
+    backend = MockRobotBackend(joint_names=["j1", "j2"])
+    backend.connect()
+
+    success = backend.command_joint_positions([0.5, -0.5])
+    assert success is True
+    assert backend.last_commanded_positions == (0.5, -0.5)
+    assert ("position", (0.5, -0.5)) in backend.command_history
+
+    # State positions update to commanded positions
+    state = backend.get_joint_state()
+    assert state.positions == (0.5, -0.5)
+
+
+def test_mock_backend_velocity_command_and_effort_limit_recording():
+    """Verify MockRobotBackend records commanded velocities and optional effort limits."""
+    from robotics.backends.mock_backend import MockRobotBackend
+
+    backend = MockRobotBackend(joint_names=["j1", "j2"])
+    backend.connect()
+
+    success = backend.command_joint_velocities([0.2, -0.3], effort_limit=50.0)
+    assert success is True
+    assert backend.last_commanded_velocities == (0.2, -0.3)
+    assert backend.last_effort_limit == 50.0
+    assert ("velocity", (0.2, -0.3), 50.0) in backend.command_history
+
+    state = backend.get_joint_state()
+    assert state.velocities == (0.2, -0.3)
+
+
+def test_mock_backend_nan_inf_and_dimension_validation():
+    """Verify validation of NaN, Inf, dimension mismatch, and invalid effort limits."""
+    from robotics.backends.mock_backend import MockRobotBackend
+
+    backend = MockRobotBackend(joint_names=["j1", "j2"])
+    backend.connect()
+
+    # Wrong vector length
+    with pytest.raises(ValueError, match="Length mismatch"):
+        backend.command_joint_positions([0.1])
+
+    with pytest.raises(ValueError, match="Length mismatch"):
+        backend.command_joint_velocities([0.1, 0.2, 0.3])
+
+    # NaN / Inf in positions
+    with pytest.raises(ValueError, match="Non-finite"):
+        backend.command_joint_positions([float("nan"), 0.0])
+
+    with pytest.raises(ValueError, match="Non-finite"):
+        backend.command_joint_positions([float("inf"), 0.0])
+
+    # NaN / Inf in velocities
+    with pytest.raises(ValueError, match="Non-finite"):
+        backend.command_joint_velocities([0.0, float("nan")])
+
+    with pytest.raises(ValueError, match="Non-finite"):
+        backend.command_joint_velocities([float("-inf"), 0.0])
+
+    # Invalid effort limits
+    with pytest.raises(ValueError, match="Non-finite"):
+        backend.command_joint_velocities([0.1, 0.1], effort_limit=float("nan"))
+
+    with pytest.raises(ValueError, match="must be non-negative"):
+        backend.command_joint_velocities([0.1, 0.1], effort_limit=-5.0)
+
+
+def test_mock_backend_halt_motion():
+    """Verify MockRobotBackend halt motion zeros velocities and sets is_halted flag."""
+    from robotics.backends.mock_backend import MockRobotBackend
+
+    backend = MockRobotBackend(joint_names=["j1", "j2"])
+    backend.connect()
+    backend.command_joint_velocities([0.5, 0.5])
+    assert backend.is_halted is False
+
+    backend.halt_motion()
+    assert backend.is_halted is True
+    assert backend.last_commanded_velocities == (0.0, 0.0)
+    state = backend.get_joint_state()
+    assert state.velocities == (0.0, 0.0)
+

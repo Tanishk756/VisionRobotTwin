@@ -5,9 +5,11 @@ from robotics.backends.base import (
     RobotBackend,
     TimestampedJointState,
 )
+from robotics.backends.mock_backend import MockRobotBackend
 
 __all__ = [
     "BackendHealthStatus",
+    "MockRobotBackend",
     "RobotBackend",
     "TimestampedJointState",
 ]
