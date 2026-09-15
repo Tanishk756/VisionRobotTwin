@@ -1,23 +1,28 @@
 """Generic Robot Manipulator Controller.
 
-Programmatically discovers URDF joint metadata, manages joint position and velocity control
-with torque and velocity limits, queries forward kinematics link states, and supports
-multi-manipulator platforms (Franka Emika Panda, KUKA LBR iiwa, etc.).
+Manages joint position and velocity control with torque and velocity limits,
+queries forward kinematics link states, and supports multi-manipulator platforms
+(Franka Emika Panda, KUKA LBR iiwa, etc.) via backend-agnostic ResolvedRobotModel metadata.
 """
 
 from dataclasses import dataclass
-from typing import Dict, List, Optional, Sequence, Tuple, Union
+from typing import Dict, List, Optional, Sequence, Tuple, Union, Any
 import threading
-import pybullet as p
 import numpy as np
 
 from config.settings import RobotConfig
-from robotics.backends.base import RobotBackend
-from robotics.backends.pybullet_backend import PyBulletRobotBackend
-from robotics.robot_model import RobotModelSpec, RobotCapabilities
+from robotics.backends.base import RobotBackend, TimestampedJointState
+from robotics.robot_model import (
+    RobotModelSpec,
+    RobotCapabilities,
+    JointRole,
+    JointMotionType,
+    ResolvedJointMetadata,
+    ResolvedRobotModel,
+)
 from robotics.robot_registry import get_robot_registry, create_robot_adapter
 from robotics.adapters.base import RobotAdapter
-from robotics.kinematics_provider import KinematicsProvider, PyBulletKinematicsProvider
+from robotics.kinematics_provider import KinematicsProvider
 from utils.logger import get_logger
 
 logger = get_logger("Robotics.RobotController")
@@ -25,7 +30,7 @@ logger = get_logger("Robotics.RobotController")
 
 @dataclass
 class JointInfo:
-    """Metadata for an individual robot joint extracted from URDF."""
+    """Metadata for an individual robot joint extracted from URDF (backward compatibility model)."""
     index: int
     name: str
     joint_type: int
@@ -41,20 +46,32 @@ class GenericRobotController:
 
     def __init__(
         self,
-        physics_client_id: int,
-        robot_id: int,
+        physics_client_id: Optional[int] = None,
+        robot_id: Optional[int] = None,
         spec: Optional[RobotModelSpec] = None,
         adapter: Optional[RobotAdapter] = None,
         config: Optional[RobotConfig] = None,
         backend: Optional[RobotBackend] = None,
         kinematics_provider: Optional[KinematicsProvider] = None,
         model_query_lock: Optional[threading.RLock] = None,
+        resolved_model: Optional[ResolvedRobotModel] = None,
     ):
         self.client_id = physics_client_id
         self.robot_id = robot_id
 
         if spec is None:
-            if adapter is not None:
+            if resolved_model is not None:
+                try:
+                    self.spec = get_robot_registry().get_robot_spec(resolved_model.robot_id)
+                except KeyError:
+                    self.spec = RobotModelSpec(
+                        robot_id=resolved_model.robot_id,
+                        display_name=resolved_model.display_name,
+                        urdf_path="",
+                        capabilities=resolved_model.capabilities,
+                        home_joint_positions=list(resolved_model.home_joint_positions),
+                    )
+            elif adapter is not None:
                 self.spec = adapter.spec
             else:
                 self.spec = get_robot_registry().get_robot_spec("panda")
@@ -64,110 +81,153 @@ class GenericRobotController:
         self.adapter = adapter or create_robot_adapter(self.spec.robot_id, self.spec)
         self.config = config or RobotConfig()
 
-        self.joints: Dict[int, JointInfo] = {}
-        self.arm_joint_indices: List[int] = []
-        self.finger_joint_indices: List[int] = []
-        self.ee_link_index: int = 0
+        if resolved_model is not None:
+            self.model: ResolvedRobotModel = resolved_model
+        else:
+            if physics_client_id is None or robot_id is None:
+                raise ValueError("Either resolved_model or both physics_client_id and robot_id must be supplied.")
+            from robotics.pybullet_model import PyBulletRobotModelResolver
+            self.model = PyBulletRobotModelResolver.resolve(
+                physics_client_id=physics_client_id,
+                robot_body_id=robot_id,
+                spec=self.spec,
+                adapter=self.adapter,
+            )
 
-        self._inspect_urdf()
+        # Populate backward-compatible self.joints mapping
+        self.joints: Dict[int, JointInfo] = {}
+        for j in self.model.all_joints:
+            native_idx = j.native_index if j.native_index is not None else j.model_index
+            jtype = (
+                j.native_joint_type
+                if j.native_joint_type is not None
+                else (
+                    0
+                    if j.motion_type == JointMotionType.REVOLUTE
+                    else (1 if j.motion_type == JointMotionType.PRISMATIC else 4)
+                )
+            )
+            self.joints[native_idx] = JointInfo(
+                index=native_idx,
+                name=j.name,
+                joint_type=jtype,
+                lower_limit=j.lower_limit,
+                upper_limit=j.upper_limit,
+                max_force=j.max_force,
+                max_velocity=j.max_velocity,
+                link_name=j.link_name,
+            )
 
         if kinematics_provider is None:
-            self.kinematics_provider: KinematicsProvider = PyBulletKinematicsProvider(
-                physics_client_id=self.client_id,
-                robot_body_id=self.robot_id,
-                arm_joint_indices=self.arm_joint_indices,
-                end_effector_link_index=self.ee_link_index,
-                query_lock=model_query_lock,
-            )
+            if self.client_id is not None and self.robot_id is not None:
+                from robotics.kinematics_provider import PyBulletKinematicsProvider
+                self.kinematics_provider: KinematicsProvider = PyBulletKinematicsProvider(
+                    physics_client_id=self.client_id,
+                    robot_body_id=self.robot_id,
+                    arm_joint_indices=self.arm_joint_indices,
+                    end_effector_link_index=self.ee_link_index,
+                    query_lock=model_query_lock,
+                )
+            else:
+                raise ValueError("kinematics_provider must be supplied when constructing without PyBullet client.")
         else:
             self.kinematics_provider = kinematics_provider
 
         if backend is None:
-            arm_names = [self.joints[idx].name for idx in self.arm_joint_indices]
-            self.backend: RobotBackend = PyBulletRobotBackend(
-                physics_client_id=self.client_id,
-                robot_body_id=self.robot_id,
-                arm_joint_indices=self.arm_joint_indices,
-                joint_names=arm_names,
-                default_joint_force=self.spec.max_joint_force,
-            )
+            if self.client_id is not None and self.robot_id is not None:
+                from robotics.backends.pybullet_backend import PyBulletRobotBackend
+                self.backend: RobotBackend = PyBulletRobotBackend(
+                    physics_client_id=self.client_id,
+                    robot_body_id=self.robot_id,
+                    arm_joint_indices=self.arm_joint_indices,
+                    joint_names=list(self.model.arm_joint_names),
+                    default_joint_force=self.spec.max_joint_force,
+                )
+            else:
+                raise ValueError("backend must be supplied when constructing without PyBullet client.")
         else:
             self.backend = backend
 
-        self.backend.connect()
-        self.reset_to_home()
+        if not self.backend.is_connected():
+            self.backend.connect()
+
+        self._validate_initial_backend_state()
 
     @property
     def capabilities(self) -> RobotCapabilities:
         """Returns the hardware capability flags for the active robot."""
-        return self.spec.capabilities
+        return self.model.capabilities
 
-    def _inspect_urdf(self) -> None:
-        """Inspects and parses loaded URDF joint metadata programmatically."""
-        num_joints = p.getNumJoints(self.robot_id, physicsClientId=self.client_id)
-        logger.info(f"Loaded {self.spec.display_name} URDF with {num_joints} total joints/links.")
+    @property
+    def arm_joint_indices(self) -> List[int]:
+        """Controllable arm joint indices. Returns native indices if available, else canonical indices."""
+        if self.model is not None:
+            try:
+                return list(self.model.require_arm_native_indices())
+            except ValueError:
+                return list(range(self.model.dof))
+        return []
 
-        for i in range(num_joints):
-            info = p.getJointInfo(self.robot_id, i, physicsClientId=self.client_id)
-            joint_name = info[1].decode("utf-8")
-            joint_type = info[2]
-            lower = float(info[8])
-            upper = float(info[9])
-            max_force = float(info[10])
-            max_vel = float(info[11])
-            link_name = info[12].decode("utf-8")
+    @property
+    def finger_joint_indices(self) -> List[int]:
+        """Gripper joint indices. Returns native indices if available, else canonical indices."""
+        if self.model is not None:
+            try:
+                return list(self.model.require_gripper_native_indices())
+            except ValueError:
+                return list(range(len(self.model.gripper_joints)))
+        return []
 
-            # Apply adapter-specific limit corrections (for default zero-limit URDF definitions)
-            lower, upper = self.adapter.fix_joint_limits(joint_name, lower, upper)
+    @property
+    def ee_link_index(self) -> int:
+        """End-effector link index."""
+        if self.model is not None and self.model.ee_link_native_index is not None:
+            return self.model.ee_link_native_index
+        return self.model.dof - 1 if self.model and self.model.dof > 0 else 0
 
-            j_info = JointInfo(
-                index=i,
-                name=joint_name,
-                joint_type=joint_type,
-                lower_limit=lower,
-                upper_limit=upper,
-                max_force=max_force if max_force > 0 else self.spec.max_joint_force,
-                max_velocity=max_vel if max_vel > 0 else self.spec.max_joint_velocity_radps,
-                link_name=link_name,
+    def _validate_backend_state(self, state: Optional[TimestampedJointState]) -> None:
+        """Validates that joint state telemetry matches resolved model degrees of freedom and joint names."""
+        if state is None or not isinstance(state, TimestampedJointState):
+            return
+        if len(state.positions) != self.model.dof:
+            raise ValueError(
+                f"Backend joint state DoF mismatch: expected {self.model.dof} joints, got {len(state.positions)}"
             )
-            self.joints[i] = j_info
+        if len(state.velocities) != self.model.dof:
+            raise ValueError(
+                f"Backend joint state velocities mismatch: expected {self.model.dof} velocities, got {len(state.velocities)}"
+            )
+        if state.joint_names and tuple(state.joint_names) != self.model.arm_joint_names:
+            raise ValueError(
+                f"Backend joint names mismatch: expected {self.model.arm_joint_names}, got {state.joint_names}"
+            )
 
-            # Classify joint types
-            if joint_type == p.JOINT_REVOLUTE:
-                self.arm_joint_indices.append(i)
-            elif joint_type == p.JOINT_PRISMATIC:
-                self.finger_joint_indices.append(i)
-
-        # Identify end-effector link index
-        default_ee = self.arm_joint_indices[-1] if self.arm_joint_indices else 0
-        self.ee_link_index = self.adapter.identify_ee_link_index(self.joints, default_ee)
-
-        logger.info(f"Identified {len(self.arm_joint_indices)} controllable arm joints: {self.arm_joint_indices}")
-        if self.finger_joint_indices:
-            logger.info(f"Identified {len(self.finger_joint_indices)} gripper finger joints: {self.finger_joint_indices}")
-        else:
-            logger.info(f"No native gripper joints detected for {self.spec.display_name}")
-        logger.info(f"Using End-Effector Link Index: {self.ee_link_index} ({self.joints.get(self.ee_link_index, JointInfo(0,'',0,0,0,0,0,'')).link_name})")
+    def _validate_initial_backend_state(self) -> None:
+        try:
+            state = self.backend.get_joint_state()
+            self._validate_backend_state(state)
+        except Exception as e:
+            if isinstance(e, ValueError):
+                raise
 
     def get_joint_limits(self) -> Tuple[List[float], List[float], List[float], List[float]]:
         """Returns (lower_limits, upper_limits, joint_ranges, rest_poses) for arm joints."""
-        lows = [self.joints[idx].lower_limit for idx in self.arm_joint_indices]
-        highs = [self.joints[idx].upper_limit for idx in self.arm_joint_indices]
-        ranges = [highs[i] - lows[i] for i in range(len(lows))]
-        rests = list(self.spec.home_joint_positions[: len(self.arm_joint_indices)])
+        lows = list(self.model.arm_lower_limits)
+        highs = list(self.model.arm_upper_limits)
+        ranges = list(self.model.arm_joint_ranges)
+        rests = list(self.model.home_joint_positions[: self.model.dof])
         return lows, highs, ranges, rests
 
     def reset_to_home(self) -> None:
-        """Instantly resets joints to the safe HOME configuration."""
-        for idx, joint_idx in enumerate(self.arm_joint_indices):
-            if idx < len(self.spec.home_joint_positions):
-                target_angle = self.spec.home_joint_positions[idx]
-            else:
-                target_angle = 0.0
-            p.resetJointState(self.robot_id, joint_idx, target_angle, targetVelocity=0.0, physicsClientId=self.client_id)
-
-        for joint_idx in self.finger_joint_indices:
-            p.resetJointState(self.robot_id, joint_idx, 0.04, targetVelocity=0.0, physicsClientId=self.client_id)
+        """Instantly resets joints to safe HOME configuration (Simulation Only / Deprecated)."""
+        if self.client_id is not None and self.robot_id is not None:
+            from robotics.pybullet_model import teleport_robot_to_home
+            teleport_robot_to_home(self.client_id, self.robot_id, self.model)
+        else:
+            raise RuntimeError(
+                "reset_to_home() is a legacy simulation teleport operation and is unavailable "
+                "for backend-agnostic robot controllers without a PyBullet physics client."
+            )
 
     def set_arm_joint_positions(
         self,
@@ -175,7 +235,7 @@ class GenericRobotController:
         dt: Optional[float] = None,
         enforce_velocity_limits: bool = True,
     ) -> List[float]:
-        """Applies position control to arm joints with torque and velocity constraints.
+        """Applies position control to arm joints with velocity constraints.
 
         Args:
             target_joint_positions: Desired target angles per controllable arm joint (rad).
@@ -186,11 +246,9 @@ class GenericRobotController:
         Returns:
             The actual commanded target positions (after rate limiting if applied).
         """
-        num_targets = min(len(target_joint_positions), len(self.arm_joint_indices))
-        active_indices = self.arm_joint_indices[:num_targets]
+        num_targets = min(len(target_joint_positions), self.model.dof)
         raw_targets = [float(target_joint_positions[i]) for i in range(num_targets)]
-
-        max_vels = [float(self.joints[idx].max_velocity) for idx in active_indices]
+        max_vels = [float(self.model.arm_max_velocities[i]) for i in range(num_targets)]
 
         if enforce_velocity_limits and dt is not None and dt > 0.0:
             current_positions = np.array(self.get_current_joint_positions()[:num_targets], dtype=np.float64)
@@ -226,11 +284,10 @@ class GenericRobotController:
         Returns:
             The commanded joint velocities (after joint limit clamping).
         """
-        num_targets = min(len(target_joint_velocities), len(self.arm_joint_indices))
-        active_indices = self.arm_joint_indices[:num_targets]
+        num_targets = min(len(target_joint_velocities), self.model.dof)
         clamped_velocities = []
-        for i, idx in enumerate(active_indices):
-            max_vel = self.joints[idx].max_velocity
+        for i in range(num_targets):
+            max_vel = self.model.arm_max_velocities[i]
             v = float(np.clip(target_joint_velocities[i], -max_vel, max_vel))
             clamped_velocities.append(v)
 
@@ -240,11 +297,13 @@ class GenericRobotController:
     def get_current_joint_positions(self) -> List[float]:
         """Returns current positions of controllable arm joints (rad)."""
         joint_state = self.backend.get_joint_state()
+        self._validate_backend_state(joint_state)
         return list(joint_state.positions)
 
     def get_current_joint_velocities(self) -> List[float]:
         """Returns current velocities of controllable arm joints (rad/s)."""
         joint_state = self.backend.get_joint_state()
+        self._validate_backend_state(joint_state)
         return list(joint_state.velocities)
 
     def get_end_effector_pose(self) -> Tuple[np.ndarray, np.ndarray]:
@@ -264,11 +323,13 @@ class PandaRobotController(GenericRobotController):
 
     def __init__(
         self,
-        physics_client_id: int,
-        robot_id: int,
+        physics_client_id: Optional[int] = None,
+        robot_id: Optional[int] = None,
         config: Optional[RobotConfig] = None,
         robot_config: Optional[RobotConfig] = None,
         kinematics_provider: Optional[KinematicsProvider] = None,
+        backend: Optional[RobotBackend] = None,
+        resolved_model: Optional[ResolvedRobotModel] = None,
     ):
         spec = get_robot_registry().get_robot_spec("panda")
         super().__init__(
@@ -276,6 +337,7 @@ class PandaRobotController(GenericRobotController):
             robot_id=robot_id,
             spec=spec,
             config=config or robot_config,
+            backend=backend,
             kinematics_provider=kinematics_provider,
+            resolved_model=resolved_model,
         )
-

@@ -8,7 +8,10 @@ from abc import ABC, abstractmethod
 import threading
 from typing import List, Optional, Sequence, Tuple
 import numpy as np
-import pybullet as p
+try:
+    import pybullet as p
+except ImportError:
+    p = None  # type: ignore
 
 from utils.logger import get_logger
 
