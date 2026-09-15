@@ -8,6 +8,7 @@ import numpy as np
 from robotics.robot_registry import get_robot_registry
 from robotics.robot_controller import GenericRobotController
 from robotics.differential_ik import ResolvedRateController
+from robotics.kinematics_provider import PyBulletKinematicsProvider
 
 
 @pytest.fixture
@@ -81,3 +82,43 @@ def test_resolved_rate_velocity_clamping_and_nan_rejection(pybullet_direct):
     nan_pos = np.array([np.nan, 0.0, 0.5])
     q_dot_nan, _ = rr_controller.compute_step(nan_pos, dt=1.0 / 240.0)
     assert np.all(q_dot_nan == 0.0)
+
+
+def test_resolved_rate_controller_with_injected_provider(pybullet_direct):
+    """Verifies ResolvedRateController operates when injected with an explicit KinematicsProvider."""
+    client_id = pybullet_direct
+    spec = get_robot_registry().get_robot_spec("panda")
+    body_id = p.loadURDF(spec.urdf_path, useFixedBase=True, physicsClientId=client_id)
+    controller = GenericRobotController(client_id, body_id, spec)
+
+    provider = PyBulletKinematicsProvider(
+        physics_client_id=client_id,
+        robot_body_id=body_id,
+        arm_joint_indices=controller.arm_joint_indices,
+        end_effector_link_index=controller.ee_link_index,
+    )
+
+    rr_controller = ResolvedRateController(
+        physics_client_id=client_id,
+        robot_controller=controller,
+        kinematics_provider=provider,
+    )
+
+    assert rr_controller.kinematics_provider is provider
+    q_dot, metrics = rr_controller.compute_step([0.45, 0.0, 0.35], [1.0, 0.0, 0.0, 0.0])
+    assert len(q_dot) == 7
+    assert np.all(np.isfinite(q_dot))
+    assert metrics.manipulability >= 0.0
+
+
+def test_resolved_rate_controller_has_zero_direct_pybullet_calls():
+    """Verifies that ResolvedRateController module contains zero direct pybullet references or calls."""
+    import inspect
+    import robotics.differential_ik as diff_module
+
+    source = inspect.getsource(diff_module)
+    assert "p.calculateJacobian" not in source
+    assert "p.getLinkState" not in source
+    assert "p.getNumJoints" not in source
+    assert "p.getJointInfo" not in source
+    assert "import pybullet as p" not in source
