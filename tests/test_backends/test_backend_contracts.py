@@ -578,5 +578,33 @@ def test_pybullet_backend_halt_motion(pybullet_sim_fixture):
         )
 
 
+def test_create_mock_backend_factory():
+    """Verify create_mock_backend returns connected MockRobotBackend."""
+    from robotics.backends import create_mock_backend
+
+    backend = create_mock_backend(joint_names=["j1", "j2"], initial_positions=[0.1, 0.2])
+    assert backend.is_connected() is True
+    state = backend.get_joint_state()
+    assert state.positions == (0.1, 0.2)
+
+
+def test_create_pybullet_backend_factory(pybullet_sim_fixture):
+    """Verify create_pybullet_backend returns connected PyBulletRobotBackend."""
+    from robotics.backends import create_pybullet_backend
+
+    client_id, body_id, arm_indices, arm_names, max_force = pybullet_sim_fixture
+
+    backend = create_pybullet_backend(
+        physics_client_id=client_id,
+        robot_body_id=body_id,
+        arm_joint_indices=arm_indices,
+        joint_names=arm_names,
+        default_joint_force=max_force,
+    )
+    assert backend.is_connected() is True
+    assert backend.physics_client_id == client_id
+
+
+
 
 
