@@ -103,7 +103,7 @@ class PyBulletKinematicsProvider(KinematicsProvider):
         self._movable_joint_indices = self._discover_movable_joints()
 
     def _discover_movable_joints(self) -> List[int]:
-        """Discovers all movable (revolute + prismatic) joints for PyBullet calculateJacobian."""
+        """Discovers all movable (revolute + prismatic) joints for PyBullet calculateJacobian / calculateInverseKinematics."""
         movable = []
         try:
             num_total_joints = p.getNumJoints(self.robot_id, physicsClientId=self.client_id)
@@ -238,5 +238,79 @@ class PyBulletKinematicsProvider(KinematicsProvider):
         max_iterations: int = 100,
         residual_threshold: float = 1e-4,
     ) -> Tuple[float, ...]:
-        """Invokes model engine numerical IK solver to calculate candidate joint angles."""
-        raise NotImplementedError("solve_ik_raw will be implemented in Task 6")
+        """Invokes model engine numerical IK solver to calculate candidate joint angles.
+
+        Args:
+            target_position: Desired [x, y, z] target in base frame.
+            target_orientation: Optional unit quaternion [x, y, z, w].
+            lower_limits: Optional per-joint lower limits.
+            upper_limits: Optional per-joint upper limits.
+            joint_ranges: Optional per-joint ranges.
+            rest_poses: Optional per-joint rest poses.
+            joint_damping: Optional per-joint damping factors.
+            max_iterations: Maximum solver iterations.
+            residual_threshold: Convergence threshold.
+
+        Returns:
+            Tuple of candidate joint positions (rad) matching controllable arm joints.
+
+        Raises:
+            ValueError: If target dimensions are invalid or non-finite.
+        """
+        pos_arr = np.asarray(target_position, dtype=np.float64)
+        if pos_arr.shape != (3,):
+            raise ValueError(f"Target position must have shape (3,), got {pos_arr.shape}")
+        if not np.all(np.isfinite(pos_arr)):
+            raise ValueError("Target position contains non-finite values (NaN or Inf)")
+
+        target_orn_tuple = None
+        if target_orientation is not None:
+            orn_arr = np.asarray(target_orientation, dtype=np.float64)
+            if orn_arr.shape != (4,):
+                raise ValueError(f"Target orientation must have shape (4,), got {orn_arr.shape}")
+            if not np.all(np.isfinite(orn_arr)):
+                raise ValueError("Target orientation contains non-finite values (NaN or Inf)")
+            norm = np.linalg.norm(orn_arr)
+            if norm > 1e-9:
+                orn_arr = orn_arr / norm
+            target_orn_tuple = tuple(float(x) for x in orn_arr)
+
+        with self._lock:
+            movable = self._movable_joint_indices or self._discover_movable_joints()
+            num_movable = len(movable)
+
+            kwargs = {
+                "bodyUniqueId": self.robot_id,
+                "endEffectorLinkIndex": self.ee_link_index,
+                "targetPosition": tuple(float(x) for x in pos_arr),
+                "maxNumIterations": int(max_iterations),
+                "residualThreshold": float(residual_threshold),
+                "physicsClientId": self.client_id,
+            }
+
+            if target_orn_tuple is not None:
+                kwargs["targetOrientation"] = target_orn_tuple
+
+            if (
+                lower_limits is not None
+                and upper_limits is not None
+                and joint_ranges is not None
+                and rest_poses is not None
+            ):
+                pad_len = max(0, num_movable - len(lower_limits))
+                full_lower = list(lower_limits) + [0.0] * pad_len
+                full_upper = list(upper_limits) + [0.04] * pad_len
+                full_ranges = list(joint_ranges) + [0.04] * pad_len
+                full_rests = list(rest_poses) + [0.04] * pad_len
+
+                kwargs["lowerLimits"] = full_lower
+                kwargs["upperLimits"] = full_upper
+                kwargs["jointRanges"] = full_ranges
+                kwargs["restPoses"] = full_rests
+
+            if joint_damping is not None:
+                pad_len = max(0, num_movable - len(joint_damping))
+                kwargs["jointDamping"] = list(joint_damping) + [0.01] * pad_len
+
+            ik_raw_full = p.calculateInverseKinematics(**kwargs)
+            return tuple(float(x) for x in ik_raw_full[: self.num_arm_joints])

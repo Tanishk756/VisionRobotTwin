@@ -251,3 +251,82 @@ def test_pybullet_jacobian_input_validation(pybullet_direct_client):
     # NaN
     with pytest.raises(ValueError, match="non-finite"):
         provider.compute_jacobian([0.0, np.nan, 0.0, 0.0, 0.0, 0.0, 0.0])
+
+
+@pytest.mark.parametrize("golden", [PANDA_GOLDEN, KUKA_GOLDEN], ids=["panda", "kuka_iiwa"])
+def test_pybullet_solve_ik_raw_parity(pybullet_direct_client, golden):
+    """Verifies PyBulletKinematicsProvider solve_ik_raw against golden constants."""
+    from robotics.kinematics_provider import PyBulletKinematicsProvider
+
+    client_id = pybullet_direct_client
+    spec = get_robot_registry().get_robot_spec(golden["robot_id"])
+    p.resetSimulation(physicsClientId=client_id)
+    robot_id = p.loadURDF(
+        spec.urdf_path,
+        spec.base_position,
+        spec.base_orientation,
+        useFixedBase=spec.fixed_base,
+        physicsClientId=client_id,
+    )
+
+    # Initialize joint positions to home pose
+    for idx, q_val in zip(golden["arm_joint_indices"], golden["q_home"]):
+        p.resetJointState(robot_id, idx, targetValue=q_val, targetVelocity=0.0, physicsClientId=client_id)
+
+    provider = PyBulletKinematicsProvider(
+        physics_client_id=client_id,
+        robot_body_id=robot_id,
+        arm_joint_indices=golden["arm_joint_indices"],
+        end_effector_link_index=golden["ee_link_index"],
+    )
+
+    raw_ik_q = provider.solve_ik_raw(
+        target_position=golden["ik_target_pos"],
+        target_orientation=golden["ik_target_orn"],
+        lower_limits=golden["lower_limits"],
+        upper_limits=golden["upper_limits"],
+        joint_ranges=golden["joint_ranges"],
+        rest_poses=golden["rest_poses"],
+    )
+
+    assert len(raw_ik_q) == 7
+    np.testing.assert_allclose(raw_ik_q, golden["raw_ik_q"], atol=1e-6)
+
+
+def test_pybullet_solve_ik_raw_input_validation(pybullet_direct_client):
+    """Verifies that solve_ik_raw validates target dimensions and finiteness."""
+    from robotics.kinematics_provider import PyBulletKinematicsProvider
+
+    client_id = pybullet_direct_client
+    spec = get_robot_registry().get_robot_spec("panda")
+    p.resetSimulation(physicsClientId=client_id)
+    robot_id = p.loadURDF(
+        spec.urdf_path,
+        spec.base_position,
+        spec.base_orientation,
+        useFixedBase=spec.fixed_base,
+        physicsClientId=client_id,
+    )
+
+    provider = PyBulletKinematicsProvider(
+        physics_client_id=client_id,
+        robot_body_id=robot_id,
+        arm_joint_indices=PANDA_GOLDEN["arm_joint_indices"],
+        end_effector_link_index=PANDA_GOLDEN["ee_link_index"],
+    )
+
+    # Wrong position length
+    with pytest.raises(ValueError, match="Target position must have shape"):
+        provider.solve_ik_raw(target_position=[0.3, 0.0])
+
+    # NaN position
+    with pytest.raises(ValueError, match="non-finite"):
+        provider.solve_ik_raw(target_position=[0.3, np.nan, 0.5])
+
+    # Wrong orientation length
+    with pytest.raises(ValueError, match="Target orientation must have shape"):
+        provider.solve_ik_raw(target_position=[0.3, 0.0, 0.5], target_orientation=[1.0, 0.0, 0.0])
+
+    # NaN orientation
+    with pytest.raises(ValueError, match="non-finite"):
+        provider.solve_ik_raw(target_position=[0.3, 0.0, 0.5], target_orientation=[1.0, 0.0, np.nan, 0.0])
