@@ -465,4 +465,118 @@ def test_pybullet_backend_position_command_validation(pybullet_sim_fixture):
         backend.command_joint_positions(inf_target)
 
 
+def test_pybullet_backend_velocity_command_dispatch_and_effort_limit(pybullet_sim_fixture):
+    """Verify velocity commands apply default force or explicit effort_limit to PyBullet."""
+    import pybullet as p
+    from unittest.mock import patch
+    from robotics.backends.pybullet_backend import PyBulletRobotBackend
+
+    client_id, body_id, arm_indices, arm_names, max_force = pybullet_sim_fixture
+
+    backend = PyBulletRobotBackend(
+        physics_client_id=client_id,
+        robot_body_id=body_id,
+        arm_joint_indices=arm_indices,
+        joint_names=arm_names,
+        default_joint_force=max_force,
+    )
+    backend.connect()
+
+    target_vels = [0.1] * len(arm_indices)
+
+    # Test with default effort limit (forces == [max_force] * n)
+    with patch("pybullet.setJointMotorControlArray") as mock_motor_ctrl:
+        success = backend.command_joint_velocities(target_vels)
+        assert success is True
+        mock_motor_ctrl.assert_called_once_with(
+            bodyIndex=body_id,
+            jointIndices=arm_indices,
+            controlMode=p.VELOCITY_CONTROL,
+            targetVelocities=target_vels,
+            forces=[max_force] * len(arm_indices),
+            physicsClientId=client_id,
+        )
+
+    # Test with explicit effort limit override (Ruling A)
+    with patch("pybullet.setJointMotorControlArray") as mock_motor_ctrl:
+        success = backend.command_joint_velocities(target_vels, effort_limit=75.0)
+        assert success is True
+        mock_motor_ctrl.assert_called_once_with(
+            bodyIndex=body_id,
+            jointIndices=arm_indices,
+            controlMode=p.VELOCITY_CONTROL,
+            targetVelocities=target_vels,
+            forces=[75.0] * len(arm_indices),
+            physicsClientId=client_id,
+        )
+
+
+def test_pybullet_backend_velocity_validation(pybullet_sim_fixture):
+    """Verify velocity commands validate finiteness, length, and effort bounds."""
+    from robotics.backends.pybullet_backend import PyBulletRobotBackend
+
+    client_id, body_id, arm_indices, arm_names, max_force = pybullet_sim_fixture
+
+    backend = PyBulletRobotBackend(
+        physics_client_id=client_id,
+        robot_body_id=body_id,
+        arm_joint_indices=arm_indices,
+        joint_names=arm_names,
+        default_joint_force=max_force,
+    )
+
+    with pytest.raises(RuntimeError, match="disconnected"):
+        backend.command_joint_velocities([0.0] * len(arm_indices))
+
+    backend.connect()
+
+    # Length mismatch
+    with pytest.raises(ValueError, match="Length mismatch"):
+        backend.command_joint_velocities([0.0] * (len(arm_indices) + 1))
+
+    # NaN / Inf velocity
+    nan_vel = [0.0] * len(arm_indices)
+    nan_vel[0] = float("nan")
+    with pytest.raises(ValueError, match="Non-finite"):
+        backend.command_joint_velocities(nan_vel)
+
+    # Non-finite effort limit
+    with pytest.raises(ValueError, match="Non-finite"):
+        backend.command_joint_velocities([0.0] * len(arm_indices), effort_limit=float("nan"))
+
+    # Negative effort limit
+    with pytest.raises(ValueError, match="non-negative"):
+        backend.command_joint_velocities([0.0] * len(arm_indices), effort_limit=-10.0)
+
+
+def test_pybullet_backend_halt_motion(pybullet_sim_fixture):
+    """Verify halt_motion dispatches zero velocities to PyBullet."""
+    import pybullet as p
+    from unittest.mock import patch
+    from robotics.backends.pybullet_backend import PyBulletRobotBackend
+
+    client_id, body_id, arm_indices, arm_names, max_force = pybullet_sim_fixture
+
+    backend = PyBulletRobotBackend(
+        physics_client_id=client_id,
+        robot_body_id=body_id,
+        arm_joint_indices=arm_indices,
+        joint_names=arm_names,
+        default_joint_force=max_force,
+    )
+    backend.connect()
+
+    with patch("pybullet.setJointMotorControlArray") as mock_motor_ctrl:
+        backend.halt_motion()
+        mock_motor_ctrl.assert_called_once_with(
+            bodyIndex=body_id,
+            jointIndices=arm_indices,
+            controlMode=p.VELOCITY_CONTROL,
+            targetVelocities=[0.0] * len(arm_indices),
+            forces=[max_force] * len(arm_indices),
+            physicsClientId=client_id,
+        )
+
+
+
 
