@@ -292,3 +292,110 @@ def test_mock_backend_halt_motion():
     state = backend.get_joint_state()
     assert state.velocities == (0.0, 0.0)
 
+
+@pytest.fixture
+def pybullet_sim_fixture():
+    """Provides a temporary PyBullet direct physics simulation and Panda robot body."""
+    import pybullet as p
+    import pybullet_data
+    from robotics.robot_registry import get_robot_registry
+
+    client_id = p.connect(p.DIRECT)
+    p.setAdditionalSearchPath(pybullet_data.getDataPath(), physicsClientId=client_id)
+    spec = get_robot_registry().get_robot_spec("panda")
+    body_id = p.loadURDF(spec.urdf_path, useFixedBase=True, physicsClientId=client_id)
+
+    # Discover arm joint indices and names
+    num_joints = p.getNumJoints(body_id, physicsClientId=client_id)
+    arm_indices = []
+    arm_names = []
+    for i in range(num_joints):
+        info = p.getJointInfo(body_id, i, physicsClientId=client_id)
+        joint_type = info[2]
+        if joint_type in (p.JOINT_REVOLUTE, p.JOINT_PRISMATIC):
+            arm_indices.append(i)
+            arm_names.append(info[1].decode("utf-8"))
+
+    yield client_id, body_id, arm_indices, arm_names, spec.max_joint_force
+
+    if p.getConnectionInfo(physicsClientId=client_id)["isConnected"]:
+        p.disconnect(physicsClientId=client_id)
+
+
+def test_pybullet_backend_connection_lifecycle_non_destructive(pybullet_sim_fixture):
+    """Verify Ruling B: PyBulletRobotBackend attach/detach does NOT destroy the physics client."""
+    import pybullet as p
+    from robotics.backends.pybullet_backend import PyBulletRobotBackend
+
+    client_id, body_id, arm_indices, arm_names, max_force = pybullet_sim_fixture
+
+    backend = PyBulletRobotBackend(
+        physics_client_id=client_id,
+        robot_body_id=body_id,
+        arm_joint_indices=arm_indices,
+        joint_names=arm_names,
+        default_joint_force=max_force,
+    )
+
+    assert backend.is_connected() is False
+    assert backend.health_status() == BackendHealthStatus.DISCONNECTED
+
+    # Connect / attach
+    assert backend.connect() is True
+    assert backend.is_connected() is True
+    assert backend.health_status() == BackendHealthStatus.HEALTHY
+
+    # Disconnect must detach backend but NOT close PyBullet simulation client
+    backend.disconnect()
+    assert backend.is_connected() is False
+    assert backend.health_status() == BackendHealthStatus.DISCONNECTED
+
+    # PyBullet client MUST remain live
+    client_info = p.getConnectionInfo(physicsClientId=client_id)
+    assert client_info["isConnected"] == 1
+
+
+def test_pybullet_backend_get_joint_state(pybullet_sim_fixture):
+    """Verify PyBulletRobotBackend reads positions, velocities, and monotonic timestamps."""
+    import pybullet as p
+    from robotics.backends.pybullet_backend import PyBulletRobotBackend
+
+    client_id, body_id, arm_indices, arm_names, max_force = pybullet_sim_fixture
+
+    backend = PyBulletRobotBackend(
+        physics_client_id=client_id,
+        robot_body_id=body_id,
+        arm_joint_indices=arm_indices,
+        joint_names=arm_names,
+        default_joint_force=max_force,
+    )
+    backend.connect()
+
+    state = backend.get_joint_state()
+    assert isinstance(state, TimestampedJointState)
+    assert state.joint_names == tuple(arm_names)
+    assert len(state.positions) == len(arm_indices)
+    assert len(state.velocities) == len(arm_indices)
+    assert state.efforts is not None
+    assert len(state.efforts) == len(arm_indices)
+    assert state.sequence_id >= 1
+    assert state.receive_timestamp_s > 0.0
+    assert state.source_timestamp_s == state.receive_timestamp_s
+
+
+def test_pybullet_backend_init_validation(pybullet_sim_fixture):
+    """Verify initialization checks for index/name length consistency."""
+    from robotics.backends.pybullet_backend import PyBulletRobotBackend
+
+    client_id, body_id, arm_indices, arm_names, max_force = pybullet_sim_fixture
+
+    with pytest.raises(ValueError, match="Length mismatch"):
+        PyBulletRobotBackend(
+            physics_client_id=client_id,
+            robot_body_id=body_id,
+            arm_joint_indices=arm_indices,
+            joint_names=arm_names[:-1],
+            default_joint_force=max_force,
+        )
+
+

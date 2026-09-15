@@ -6,10 +6,12 @@ from robotics.backends.base import (
     TimestampedJointState,
 )
 from robotics.backends.mock_backend import MockRobotBackend
+from robotics.backends.pybullet_backend import PyBulletRobotBackend
 
 __all__ = [
     "BackendHealthStatus",
     "MockRobotBackend",
+    "PyBulletRobotBackend",
     "RobotBackend",
     "TimestampedJointState",
 ]
