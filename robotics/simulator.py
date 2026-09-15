@@ -8,6 +8,7 @@ and screenshot capture.
 
 from collections import deque
 from pathlib import Path
+import threading
 from typing import Deque, List, Optional, Tuple
 import pybullet as p
 import pybullet_data
@@ -192,11 +193,14 @@ class PyBulletSimulator:
             physicsClientId=self.client_id,
         )
 
+        self._model_query_lock = threading.RLock()
+
         self.controller = GenericRobotController(
             physics_client_id=self.client_id,
             robot_id=self.robot_id,
             spec=self.robot_spec,
             config=self.config.robot,
+            model_query_lock=self._model_query_lock,
         )
 
         self.kinematics_provider = self.controller.kinematics_provider
@@ -217,7 +221,7 @@ class PyBulletSimulator:
             kinematics_provider=self.kinematics_provider,
         )
 
-        from robotics.collision import CollisionChecker
+        from robotics.collision_provider import PyBulletCollisionProvider
         allowed_mount_pairs = []
         if self.table_id is not None:
             allowed_mount_pairs.extend([
@@ -225,14 +229,17 @@ class PyBulletSimulator:
                 (self.robot_id, 0, self.table_id, -1),
             ])
 
-        self.collision_checker = CollisionChecker(
+        self.collision_provider = PyBulletCollisionProvider(
             physics_client_id=self.client_id,
-            robot_id=self.robot_id,
+            robot_body_id=self.robot_id,
+            arm_joint_indices=self.controller.arm_joint_indices,
             table_id=self.table_id,
             obstacle_ids=self.obstacle_ids,
             allowed_link_pairs=allowed_mount_pairs,
             allowed_self_link_pairs=self.robot_spec.allowed_self_collision_pairs,
+            query_lock=self._model_query_lock,
         )
+        self.collision_checker = self.collision_provider
 
         from robotics.differential_ik import ResolvedRateController
         self.resolved_rate_controller = ResolvedRateController(
@@ -246,7 +253,7 @@ class PyBulletSimulator:
         self.motion_manager = MotionManager(
             robot_controller=self.controller,
             ik_solver=self.ik_solver,
-            collision_checker=self.collision_checker,
+            collision_checker=self.collision_provider,
             trajectory_mode=getattr(self.config, "trajectory_mode", "quintic"),
             scene_type=getattr(self.config, "scene_type", "default"),
         )

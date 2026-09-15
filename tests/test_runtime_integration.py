@@ -400,3 +400,25 @@ def test_simulator_shared_kinematics_provider_identity():
         assert metrics.manipulability > 0.0
     finally:
         sim.close()
+
+
+def test_simulator_shared_lock_identity():
+    """Verifies that PyBulletSimulator shares a single model-query lock between kinematics and collision providers."""
+    from robotics.simulator import PyBulletSimulator
+    from robotics.collision_provider import PyBulletCollisionProvider
+    from config.settings import get_default_config
+
+    config = get_default_config()
+    sim = PyBulletSimulator(config, headless=True)
+
+    try:
+        assert isinstance(sim.collision_provider, PyBulletCollisionProvider)
+        assert sim.collision_checker is sim.collision_provider
+        assert sim.motion_manager.collision_provider is sim.collision_provider
+        assert sim.kinematics_provider.query_lock is sim.collision_provider.query_lock
+
+        # Verify collision query succeeds
+        col = sim.collision_provider.check_collision()
+        assert not col.in_collision
+    finally:
+        sim.close()

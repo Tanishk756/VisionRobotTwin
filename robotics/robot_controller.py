@@ -7,6 +7,7 @@ multi-manipulator platforms (Franka Emika Panda, KUKA LBR iiwa, etc.).
 
 from dataclasses import dataclass
 from typing import Dict, List, Optional, Sequence, Tuple, Union
+import threading
 import pybullet as p
 import numpy as np
 
@@ -47,6 +48,7 @@ class GenericRobotController:
         config: Optional[RobotConfig] = None,
         backend: Optional[RobotBackend] = None,
         kinematics_provider: Optional[KinematicsProvider] = None,
+        model_query_lock: Optional[threading.RLock] = None,
     ):
         self.client_id = physics_client_id
         self.robot_id = robot_id
@@ -75,6 +77,7 @@ class GenericRobotController:
                 robot_body_id=self.robot_id,
                 arm_joint_indices=self.arm_joint_indices,
                 end_effector_link_index=self.ee_link_index,
+                query_lock=model_query_lock,
             )
         else:
             self.kinematics_provider = kinematics_provider
