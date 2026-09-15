@@ -5,7 +5,7 @@ import time
 from typing import List, Optional, Sequence, Tuple, Union
 import numpy as np
 
-from robotics.collision import CollisionChecker
+from robotics.collision_provider import CollisionProvider
 from utils.logger import get_logger
 
 logger = get_logger("Robotics.Planning")
@@ -35,7 +35,7 @@ def compute_path_length(path: Sequence[np.ndarray]) -> float:
 def is_joint_path_collision_free(
     q_start: Union[np.ndarray, List[float]],
     q_goal: Union[np.ndarray, List[float]],
-    collision_checker: CollisionChecker,
+    collision_checker: CollisionProvider,
     resolution_rad: float = 0.05,
     arm_joint_indices: Optional[List[int]] = None,
 ) -> Tuple[bool, List[np.ndarray]]:
@@ -44,9 +44,9 @@ def is_joint_path_collision_free(
     Args:
         q_start: Starting joint configuration vector.
         q_goal: Goal joint configuration vector.
-        collision_checker: CollisionChecker instance.
+        collision_checker: CollisionProvider instance.
         resolution_rad: Maximum joint distance between intermediate collision checks.
-        arm_joint_indices: Joint indices corresponding to the configuration vector.
+        arm_joint_indices: Optional legacy joint indices parameter (retained for signature compatibility).
 
     Returns:
         (is_collision_free, checked_waypoints)
@@ -56,7 +56,7 @@ def is_joint_path_collision_free(
 
     dist = np.linalg.norm(goal - start)
     if dist < 1e-6:
-        col = collision_checker.check_collision(start, arm_joint_indices=arm_joint_indices)
+        col = collision_checker.check_collision(start)
         return not col.in_collision, [start]
 
     num_steps = max(2, int(np.ceil(dist / resolution_rad)) + 1)
@@ -64,7 +64,7 @@ def is_joint_path_collision_free(
     waypoints = [start + a * (goal - start) for a in alphas]
 
     for wpt in waypoints:
-        col = collision_checker.check_collision(wpt, arm_joint_indices=arm_joint_indices)
+        col = collision_checker.check_collision(wpt)
         if col.in_collision:
             return False, waypoints
 
@@ -86,7 +86,7 @@ class RRTConnectPlanner:
         self,
         lower_limits: Sequence[float],
         upper_limits: Sequence[float],
-        collision_checker: CollisionChecker,
+        collision_checker: CollisionProvider,
         arm_joint_indices: Optional[List[int]] = None,
         step_size_rad: float = 0.10,
         goal_bias: float = 0.05,
@@ -182,7 +182,7 @@ class RRTConnectPlanner:
         goal = np.asarray(q_goal, dtype=np.float64).flatten()
 
         # 1. Validate start and goal limits and collisions
-        col_start = self.checker.check_collision(start, arm_joint_indices=self.arm_joint_indices)
+        col_start = self.checker.check_collision(start)
         if col_start.in_collision:
             return PlanningResult(
                 success=False,
@@ -190,7 +190,7 @@ class RRTConnectPlanner:
                 planning_time_ms=(time.perf_counter() - start_time) * 1000.0,
             )
 
-        col_goal = self.checker.check_collision(goal, arm_joint_indices=self.arm_joint_indices)
+        col_goal = self.checker.check_collision(goal)
         if col_goal.in_collision:
             return PlanningResult(
                 success=False,
@@ -275,7 +275,7 @@ class RRTConnectPlanner:
 
 def shortcut_path(
     path: List[np.ndarray],
-    collision_checker: CollisionChecker,
+    collision_checker: CollisionProvider,
     arm_joint_indices: Optional[List[int]] = None,
     max_attempts: int = 40,
     step_size_rad: float = 0.05,
@@ -285,8 +285,8 @@ def shortcut_path(
 
     Args:
         path: List of joint configuration waypoints.
-        collision_checker: CollisionChecker instance.
-        arm_joint_indices: Controllable joint indices.
+        collision_checker: CollisionProvider instance.
+        arm_joint_indices: Optional legacy joint indices parameter (retained for signature compatibility).
         max_attempts: Number of random shortcut attempts.
         step_size_rad: Collision checking resolution.
         random_seed: Optional random seed for reproducible smoothing.
