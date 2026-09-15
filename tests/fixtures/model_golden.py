@@ -1,0 +1,85 @@
+"""Pre-A4 Golden Baselines for Robot Model Metadata."""
+
+SOURCE_RUNTIME_SHA = "249c03104ae2fff126671ccc321f0c5a52c5eb37"
+ENVIRONMENT_METADATA = {
+    "python_version": "3.12.10",
+    "pybullet_package_version": "3.2.7",
+    "pybullet_api_version": "202010061",
+}
+
+PANDA_GOLDEN_METADATA = {
+    "robot_id": "panda",
+    "display_name": "Franka Emika Panda",
+    "num_total_joints": 12,
+    "arm_joint_indices": [0, 1, 2, 3, 4, 5, 6],
+    "arm_joint_names": [
+        "panda_joint1",
+        "panda_joint2",
+        "panda_joint3",
+        "panda_joint4",
+        "panda_joint5",
+        "panda_joint6",
+        "panda_joint7",
+    ],
+    "gripper_joint_indices": [9, 10],
+    "gripper_joint_names": [
+        "panda_finger_joint1",
+        "panda_finger_joint2",
+    ],
+    "ee_link_index": 11,
+    "ee_link_name": "panda_grasptarget",
+    "home_joint_positions": [0.0, -0.785, 0.0, -2.356, 0.0, 1.571, 0.785],
+    "gripper_initial_target": 0.04,
+    "arm_lower_limits": [-2.9671, -1.8326, -2.9671, -3.1416, -2.9671, -0.0873, -2.9671],
+    "arm_upper_limits": [2.9671, 1.8326, 2.9671, 0.0, 2.9671, 3.8223, 2.9671],
+    "arm_max_forces": [87.0, 87.0, 87.0, 87.0, 12.0, 12.0, 12.0],
+    "arm_max_velocities": [2.175, 2.175, 2.175, 2.175, 2.61, 2.61, 2.61],
+    "all_joints": [
+        {"native_index": 0, "name": "panda_joint1", "native_type": 0, "lower": -2.9671, "upper": 2.9671, "force": 87.0, "vel": 2.175, "link_name": "panda_link1", "role": "ARM"},
+        {"native_index": 1, "name": "panda_joint2", "native_type": 0, "lower": -1.8326, "upper": 1.8326, "force": 87.0, "vel": 2.175, "link_name": "panda_link2", "role": "ARM"},
+        {"native_index": 2, "name": "panda_joint3", "native_type": 0, "lower": -2.9671, "upper": 2.9671, "force": 87.0, "vel": 2.175, "link_name": "panda_link3", "role": "ARM"},
+        {"native_index": 3, "name": "panda_joint4", "native_type": 0, "lower": -3.1416, "upper": 0.0, "force": 87.0, "vel": 2.175, "link_name": "panda_link4", "role": "ARM"},
+        {"native_index": 4, "name": "panda_joint5", "native_type": 0, "lower": -2.9671, "upper": 2.9671, "force": 12.0, "vel": 2.61, "link_name": "panda_link5", "role": "ARM"},
+        {"native_index": 5, "name": "panda_joint6", "native_type": 0, "lower": -0.0873, "upper": 3.8223, "force": 12.0, "vel": 2.61, "link_name": "panda_link6", "role": "ARM"},
+        {"native_index": 6, "name": "panda_joint7", "native_type": 0, "lower": -2.9671, "upper": 2.9671, "force": 12.0, "vel": 2.61, "link_name": "panda_link7", "role": "ARM"},
+        {"native_index": 7, "name": "panda_joint8", "native_type": 4, "lower": 0.0, "upper": -1.0, "force": 200.0, "vel": 2.0, "link_name": "panda_link8", "role": "OTHER"},
+        {"native_index": 8, "name": "panda_hand_joint", "native_type": 4, "lower": 0.0, "upper": -1.0, "force": 200.0, "vel": 2.0, "link_name": "panda_hand", "role": "OTHER"},
+        {"native_index": 9, "name": "panda_finger_joint1", "native_type": 1, "lower": 0.0, "upper": 0.04, "force": 20.0, "vel": 0.2, "link_name": "panda_leftfinger", "role": "GRIPPER"},
+        {"native_index": 10, "name": "panda_finger_joint2", "native_type": 1, "lower": 0.0, "upper": 0.04, "force": 20.0, "vel": 0.2, "link_name": "panda_rightfinger", "role": "GRIPPER"},
+        {"native_index": 11, "name": "panda_grasptarget_hand", "native_type": 4, "lower": 0.0, "upper": -1.0, "force": 200.0, "vel": 2.0, "link_name": "panda_grasptarget", "role": "OTHER"},
+    ],
+}
+
+KUKA_GOLDEN_METADATA = {
+    "robot_id": "kuka_iiwa",
+    "display_name": "KUKA LBR iiwa",
+    "num_total_joints": 7,
+    "arm_joint_indices": [0, 1, 2, 3, 4, 5, 6],
+    "arm_joint_names": [
+        "lbr_iiwa_joint_1",
+        "lbr_iiwa_joint_2",
+        "lbr_iiwa_joint_3",
+        "lbr_iiwa_joint_4",
+        "lbr_iiwa_joint_5",
+        "lbr_iiwa_joint_6",
+        "lbr_iiwa_joint_7",
+    ],
+    "gripper_joint_indices": [],
+    "gripper_joint_names": [],
+    "ee_link_index": 6,
+    "ee_link_name": "lbr_iiwa_link_7",
+    "home_joint_positions": [0.0, 0.0, 0.0, -1.5708, 0.0, 1.5708, 0.0],
+    "arm_lower_limits": [-2.96705972839, -2.09439510239, -2.96705972839, -2.09439510239, -2.96705972839, -2.09439510239, -3.05432619099],
+    "arm_upper_limits": [2.96705972839, 2.09439510239, 2.96705972839, 2.09439510239, 2.96705972839, 2.09439510239, 3.05432619099],
+    "arm_max_forces": [300.0, 300.0, 300.0, 300.0, 300.0, 300.0, 300.0],
+    "arm_max_velocities": [10.0, 10.0, 10.0, 10.0, 10.0, 10.0, 10.0],
+    "all_joints": [
+        {"native_index": 0, "name": "lbr_iiwa_joint_1", "native_type": 0, "lower": -2.96705972839, "upper": 2.96705972839, "force": 300.0, "vel": 10.0, "link_name": "lbr_iiwa_link_1", "role": "ARM"},
+        {"native_index": 1, "name": "lbr_iiwa_joint_2", "native_type": 0, "lower": -2.09439510239, "upper": 2.09439510239, "force": 300.0, "vel": 10.0, "link_name": "lbr_iiwa_link_2", "role": "ARM"},
+        {"native_index": 2, "name": "lbr_iiwa_joint_3", "native_type": 0, "lower": -2.96705972839, "upper": 2.96705972839, "force": 300.0, "vel": 10.0, "link_name": "lbr_iiwa_link_3", "role": "ARM"},
+        {"native_index": 3, "name": "lbr_iiwa_joint_4", "native_type": 0, "lower": -2.09439510239, "upper": 2.09439510239, "force": 300.0, "vel": 10.0, "link_name": "lbr_iiwa_link_4", "role": "ARM"},
+        {"native_index": 4, "name": "lbr_iiwa_joint_5", "native_type": 0, "lower": -2.96705972839, "upper": 2.96705972839, "force": 300.0, "vel": 10.0, "link_name": "lbr_iiwa_link_5", "role": "ARM"},
+        {"native_index": 5, "name": "lbr_iiwa_joint_6", "native_type": 0, "lower": -2.09439510239, "upper": 2.09439510239, "force": 300.0, "vel": 10.0, "link_name": "lbr_iiwa_link_6", "role": "ARM"},
+        {"native_index": 6, "name": "lbr_iiwa_joint_7", "native_type": 0, "lower": -3.05432619099, "upper": 3.05432619099, "force": 300.0, "vel": 10.0, "link_name": "lbr_iiwa_link_7", "role": "ARM"},
+    ],
+}
