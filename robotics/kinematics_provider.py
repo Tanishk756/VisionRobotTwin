@@ -100,6 +100,21 @@ class PyBulletKinematicsProvider(KinematicsProvider):
         self.ee_link_index = int(end_effector_link_index)
         self.num_arm_joints = len(self.arm_joint_indices)
         self._lock = threading.RLock()
+        self._movable_joint_indices = self._discover_movable_joints()
+
+    def _discover_movable_joints(self) -> List[int]:
+        """Discovers all movable (revolute + prismatic) joints for PyBullet calculateJacobian."""
+        movable = []
+        try:
+            num_total_joints = p.getNumJoints(self.robot_id, physicsClientId=self.client_id)
+            for i in range(num_total_joints):
+                info = p.getJointInfo(self.robot_id, i, physicsClientId=self.client_id)
+                if info[2] in (p.JOINT_REVOLUTE, p.JOINT_PRISMATIC):
+                    movable.append(i)
+        except Exception as e:
+            logger.debug(f"Could not inspect joints during init: {e}")
+            movable = list(self.arm_joint_indices)
+        return movable
 
     def compute_fk(
         self, joint_positions: Sequence[float]
@@ -163,8 +178,53 @@ class PyBulletKinematicsProvider(KinematicsProvider):
     def compute_jacobian(
         self, joint_positions: Sequence[float]
     ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
-        """Calculates spatial geometric Jacobian for candidate joint configuration q."""
-        raise NotImplementedError("compute_jacobian will be implemented in Task 4")
+        """Calculates spatial geometric Jacobian for candidate joint configuration q.
+
+        Args:
+            joint_positions: Current joint angles for arm joints (rad).
+
+        Returns:
+            (J_linear, J_angular, J_full) where J_full has shape (6, n).
+
+        Raises:
+            ValueError: If input length does not match num_arm_joints or contains non-finite numbers.
+        """
+        if len(joint_positions) != self.num_arm_joints:
+            raise ValueError(
+                f"Expected {self.num_arm_joints} joint positions, got {len(joint_positions)}"
+            )
+
+        q_arr = np.asarray(joint_positions, dtype=np.float64)
+        if not np.all(np.isfinite(q_arr)):
+            raise ValueError("Joint positions contain non-finite values (NaN or Inf)")
+
+        with self._lock:
+            movable = self._movable_joint_indices or self._discover_movable_joints()
+            num_movable = len(movable)
+
+            if len(joint_positions) < num_movable:
+                pad_len = num_movable - len(joint_positions)
+                q_full = list(joint_positions) + [0.0] * pad_len
+                zeros_full = [0.0] * num_movable
+            else:
+                q_full = list(joint_positions[:num_movable])
+                zeros_full = [0.0] * num_movable
+
+            j_trans, j_rot = p.calculateJacobian(
+                bodyUniqueId=self.robot_id,
+                linkIndex=self.ee_link_index,
+                localPosition=[0.0, 0.0, 0.0],
+                objPositions=q_full,
+                objVelocities=zeros_full,
+                objAccelerations=zeros_full,
+                physicsClientId=self.client_id,
+            )
+
+            j_linear = np.array(j_trans, dtype=np.float64)[:, : self.num_arm_joints]
+            j_angular = np.array(j_rot, dtype=np.float64)[:, : self.num_arm_joints]
+            j_full = np.vstack([j_linear, j_angular])
+
+            return j_linear, j_angular, j_full
 
     def solve_ik_raw(
         self,

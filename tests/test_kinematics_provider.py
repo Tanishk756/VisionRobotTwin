@@ -184,3 +184,70 @@ def test_pybullet_fk_input_validation(pybullet_direct_client):
     # Inf
     with pytest.raises(ValueError, match="non-finite"):
         provider.compute_fk([0.0, 0.0, np.inf, 0.0, 0.0, 0.0, 0.0])
+
+
+@pytest.mark.parametrize("golden", [PANDA_GOLDEN, KUKA_GOLDEN], ids=["panda", "kuka_iiwa"])
+def test_pybullet_jacobian_parity(pybullet_direct_client, golden):
+    """Verifies PyBulletKinematicsProvider compute_jacobian against golden constants."""
+    from robotics.kinematics_provider import PyBulletKinematicsProvider
+
+    client_id = pybullet_direct_client
+    spec = get_robot_registry().get_robot_spec(golden["robot_id"])
+    p.resetSimulation(physicsClientId=client_id)
+    robot_id = p.loadURDF(
+        spec.urdf_path,
+        spec.base_position,
+        spec.base_orientation,
+        useFixedBase=spec.fixed_base,
+        physicsClientId=client_id,
+    )
+
+    provider = PyBulletKinematicsProvider(
+        physics_client_id=client_id,
+        robot_body_id=robot_id,
+        arm_joint_indices=golden["arm_joint_indices"],
+        end_effector_link_index=golden["ee_link_index"],
+    )
+
+    # Home Jacobian
+    j_lin_home, j_ang_home, j_full_home = provider.compute_jacobian(golden["q_home"])
+    np.testing.assert_allclose(j_lin_home, golden["j_lin_home"], atol=1e-7)
+    np.testing.assert_allclose(j_ang_home, golden["j_ang_home"], atol=1e-7)
+    np.testing.assert_allclose(j_full_home, golden["j_full_home"], atol=1e-7)
+
+    # Mid Jacobian
+    j_lin_mid, j_ang_mid, j_full_mid = provider.compute_jacobian(golden["q_mid"])
+    np.testing.assert_allclose(j_lin_mid, golden["j_lin_mid"], atol=1e-7)
+    np.testing.assert_allclose(j_ang_mid, golden["j_ang_mid"], atol=1e-7)
+    np.testing.assert_allclose(j_full_mid, golden["j_full_mid"], atol=1e-7)
+
+
+def test_pybullet_jacobian_input_validation(pybullet_direct_client):
+    """Verifies that compute_jacobian rejects wrong length, NaN, and Inf inputs."""
+    from robotics.kinematics_provider import PyBulletKinematicsProvider
+
+    client_id = pybullet_direct_client
+    spec = get_robot_registry().get_robot_spec("panda")
+    p.resetSimulation(physicsClientId=client_id)
+    robot_id = p.loadURDF(
+        spec.urdf_path,
+        spec.base_position,
+        spec.base_orientation,
+        useFixedBase=spec.fixed_base,
+        physicsClientId=client_id,
+    )
+
+    provider = PyBulletKinematicsProvider(
+        physics_client_id=client_id,
+        robot_body_id=robot_id,
+        arm_joint_indices=PANDA_GOLDEN["arm_joint_indices"],
+        end_effector_link_index=PANDA_GOLDEN["ee_link_index"],
+    )
+
+    # Wrong length
+    with pytest.raises(ValueError, match="Expected 7 joint positions"):
+        provider.compute_jacobian([0.0] * 6)
+
+    # NaN
+    with pytest.raises(ValueError, match="non-finite"):
+        provider.compute_jacobian([0.0, np.nan, 0.0, 0.0, 0.0, 0.0, 0.0])
