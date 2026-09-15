@@ -5,7 +5,10 @@ ResolvedRobotModel metadata structures, and provides simulation-only state initi
 """
 
 from typing import Optional, List, Dict, Any, Tuple
-import pybullet as p
+try:
+    import pybullet as p
+except ImportError:
+    p = None  # type: ignore
 
 from robotics.robot_model import (
     RobotModelSpec,

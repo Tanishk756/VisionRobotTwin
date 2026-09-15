@@ -281,3 +281,134 @@ def test_generic_controller_delegates_ee_pose_to_kinematics_provider(pybullet_di
     mock_provider.compute_fk.assert_called_once()
 
 
+def test_generic_controller_standalone_pure_no_pybullet():
+    """MANDATORY A4 ARCHITECTURE TEST:
+    Instantiates and operates GenericRobotController with ResolvedRobotModel,
+    MockRobotBackend, and MockKinematicsProvider with ZERO PyBullet connection or body.
+    """
+    from unittest.mock import MagicMock
+    from robotics.backends.mock_backend import MockRobotBackend
+    from robotics.kinematics_provider import KinematicsProvider
+    from robotics.robot_model import (
+        JointRole,
+        JointMotionType,
+        ResolvedJointMetadata,
+        ResolvedRobotModel,
+        RobotCapabilities,
+    )
+
+    arm_j0 = ResolvedJointMetadata(
+        model_index=0,
+        canonical_index=0,
+        name="test_joint1",
+        role=JointRole.ARM,
+        motion_type=JointMotionType.REVOLUTE,
+        lower_limit=-2.5,
+        upper_limit=2.5,
+        max_force=100.0,
+        max_velocity=2.0,
+        link_name="test_link1",
+    )
+    arm_j1 = ResolvedJointMetadata(
+        model_index=1,
+        canonical_index=1,
+        name="test_joint2",
+        role=JointRole.ARM,
+        motion_type=JointMotionType.REVOLUTE,
+        lower_limit=-1.5,
+        upper_limit=1.5,
+        max_force=80.0,
+        max_velocity=1.5,
+        link_name="test_link2",
+    )
+
+    resolved_model = ResolvedRobotModel(
+        robot_id="custom_bot",
+        display_name="Custom 2-DoF Robot",
+        all_joints=(arm_j0, arm_j1),
+        arm_joints=(arm_j0, arm_j1),
+        gripper_joints=(),
+        ee_link_name="test_link2",
+        home_joint_positions=(0.0, 0.0),
+        capabilities=RobotCapabilities(has_gripper=False, supports_pick_place=False),
+    )
+
+    mock_backend = MockRobotBackend(
+        joint_names=["test_joint1", "test_joint2"],
+        initial_positions=[0.0, 0.0],
+    )
+
+    mock_kinematics = MagicMock(spec=KinematicsProvider)
+    mock_kinematics.compute_fk.return_value = (np.array([0.4, 0.0, 0.2]), np.array([0.0, 0.0, 0.0, 1.0]))
+
+    # Pure decoupled construction: NO physics_client_id, NO robot_id
+    controller = GenericRobotController(
+        resolved_model=resolved_model,
+        backend=mock_backend,
+        kinematics_provider=mock_kinematics,
+    )
+
+    assert controller.model is resolved_model
+    assert controller.capabilities.has_gripper is False
+    assert controller.capabilities.supports_pick_place is False
+
+    # Check joint limits
+    lows, highs, ranges, rests = controller.get_joint_limits()
+    assert lows == [-2.5, -1.5]
+    assert highs == [2.5, 1.5]
+    assert ranges == [5.0, 3.0]
+    assert rests == [0.0, 0.0]
+
+    # Check state reads
+    q = controller.get_current_joint_positions()
+    assert q == [0.0, 0.0]
+    dq = controller.get_current_joint_velocities()
+    assert dq == [0.0, 0.0]
+
+    # Check position rate limiting
+    # Large target jump with dt=0.01: max deltas are [2.0*0.01, 1.5*0.01] = [0.02, 0.015]
+    commanded_q = controller.set_arm_joint_positions([1.0, 1.0], dt=0.01, enforce_velocity_limits=True)
+    assert max(commanded_q) <= 0.02 + 1e-9
+    assert mock_backend.last_commanded_positions == tuple(commanded_q)
+
+    # Check velocity clamping and effort_limit
+    commanded_v = controller.set_arm_joint_velocities([10.0, -10.0], max_force=55.0)
+    assert commanded_v == [2.0, -1.5]
+    assert mock_backend.last_commanded_velocities == (2.0, -1.5)
+    assert mock_backend.last_effort_limit == 55.0
+
+    # Check FK delegation
+    ee_pos, ee_orn = controller.get_end_effector_pose()
+    np.testing.assert_allclose(ee_pos, [0.4, 0.0, 0.2])
+    np.testing.assert_allclose(ee_orn, [0.0, 0.0, 0.0, 1.0])
+
+    # Check cartesian error
+    err = controller.compute_cartesian_error(np.array([0.4, 0.0, 0.2]))
+    assert abs(err) < 1e-9
+
+
+def test_generic_controller_import_without_pybullet_subprocess():
+    """Verifies that GenericRobotController and ResolvedRobotModel can be imported
+    in an isolated environment where pybullet import is blocked.
+    """
+    import subprocess
+    import sys
+
+    code = (
+        "import sys\n"
+        "sys.modules['pybullet'] = None\n"
+        "from robotics.robot_model import ResolvedRobotModel, JointRole, JointMotionType\n"
+        "from robotics.robot_controller import GenericRobotController\n"
+        "print('IMPORT_SUCCESS')\n"
+    )
+
+    result = subprocess.run(
+        [sys.executable, "-c", code],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    assert "IMPORT_SUCCESS" in result.stdout
+
+
+

@@ -10,7 +10,10 @@ from dataclasses import dataclass, field
 import threading
 from typing import Dict, List, Optional, Sequence, Set, Tuple, Union
 import numpy as np
-import pybullet as p
+try:
+    import pybullet as p
+except ImportError:
+    p = None  # type: ignore
 
 from utils.logger import get_logger
 

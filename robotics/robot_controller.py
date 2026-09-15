@@ -63,7 +63,7 @@ class GenericRobotController:
             if resolved_model is not None:
                 try:
                     self.spec = get_robot_registry().get_robot_spec(resolved_model.robot_id)
-                except KeyError:
+                except (KeyError, ValueError):
                     self.spec = RobotModelSpec(
                         robot_id=resolved_model.robot_id,
                         display_name=resolved_model.display_name,
@@ -78,7 +78,13 @@ class GenericRobotController:
         else:
             self.spec = spec
 
-        self.adapter = adapter or create_robot_adapter(self.spec.robot_id, self.spec)
+        if adapter is not None:
+            self.adapter = adapter
+        else:
+            try:
+                self.adapter = create_robot_adapter(self.spec.robot_id, self.spec)
+            except (KeyError, ValueError):
+                self.adapter = None
         self.config = config or RobotConfig()
 
         if resolved_model is not None:

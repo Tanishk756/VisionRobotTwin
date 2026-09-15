@@ -10,8 +10,12 @@ from collections import deque
 from pathlib import Path
 import threading
 from typing import Deque, List, Optional, Tuple
-import pybullet as p
-import pybullet_data
+try:
+    import pybullet as p
+    import pybullet_data
+except ImportError:
+    p = None  # type: ignore
+    pybullet_data = None  # type: ignore
 import numpy as np
 
 from config.settings import AppConfig, SimulationConfig, WorkspaceConfig

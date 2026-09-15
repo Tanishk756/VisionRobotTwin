@@ -3,7 +3,10 @@
 import math
 import time
 from typing import List, Optional, Sequence, Tuple
-import pybullet as p
+try:
+    import pybullet as p
+except ImportError:
+    p = None  # type: ignore
 
 from robotics.backends.base import (
     BackendHealthStatus,
