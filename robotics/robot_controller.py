@@ -11,6 +11,8 @@ import pybullet as p
 import numpy as np
 
 from config.settings import RobotConfig
+from robotics.backends.base import RobotBackend
+from robotics.backends.pybullet_backend import PyBulletRobotBackend
 from robotics.robot_model import RobotModelSpec, RobotCapabilities
 from robotics.robot_registry import get_robot_registry, create_robot_adapter
 from robotics.adapters.base import RobotAdapter
@@ -33,7 +35,7 @@ class JointInfo:
 
 
 class GenericRobotController:
-    """Robot-agnostic controller for multi-DoF robotic manipulators in PyBullet."""
+    """Robot-agnostic controller for multi-DoF robotic manipulators."""
 
     def __init__(
         self,
@@ -42,6 +44,7 @@ class GenericRobotController:
         spec: Optional[RobotModelSpec] = None,
         adapter: Optional[RobotAdapter] = None,
         config: Optional[RobotConfig] = None,
+        backend: Optional[RobotBackend] = None,
     ):
         self.client_id = physics_client_id
         self.robot_id = robot_id
@@ -63,6 +66,20 @@ class GenericRobotController:
         self.ee_link_index: int = 0
 
         self._inspect_urdf()
+
+        if backend is None:
+            arm_names = [self.joints[idx].name for idx in self.arm_joint_indices]
+            self.backend: RobotBackend = PyBulletRobotBackend(
+                physics_client_id=self.client_id,
+                robot_body_id=self.robot_id,
+                arm_joint_indices=self.arm_joint_indices,
+                joint_names=arm_names,
+                default_joint_force=self.spec.max_joint_force,
+            )
+        else:
+            self.backend = backend
+
+        self.backend.connect()
         self.reset_to_home()
 
     @property
@@ -178,16 +195,7 @@ class GenericRobotController:
         else:
             active_targets = raw_targets
 
-        forces = [self.spec.max_joint_force] * num_targets
-
-        p.setJointMotorControlArray(
-            bodyIndex=self.robot_id,
-            jointIndices=active_indices,
-            controlMode=p.POSITION_CONTROL,
-            targetPositions=active_targets,
-            forces=forces,
-            physicsClientId=self.client_id,
-        )
+        self.backend.command_joint_positions(active_targets)
         return active_targets
 
     def set_arm_joint_velocities(
@@ -212,28 +220,18 @@ class GenericRobotController:
             v = float(np.clip(target_joint_velocities[i], -max_vel, max_vel))
             clamped_velocities.append(v)
 
-        force_val = float(max_force if max_force is not None else self.spec.max_joint_force)
-        forces = [force_val] * num_targets
-
-        p.setJointMotorControlArray(
-            bodyIndex=self.robot_id,
-            jointIndices=active_indices,
-            controlMode=p.VELOCITY_CONTROL,
-            targetVelocities=clamped_velocities,
-            forces=forces,
-            physicsClientId=self.client_id,
-        )
+        self.backend.command_joint_velocities(clamped_velocities, effort_limit=max_force)
         return clamped_velocities
 
     def get_current_joint_positions(self) -> List[float]:
         """Returns current positions of controllable arm joints (rad)."""
-        states = p.getJointStates(self.robot_id, self.arm_joint_indices, physicsClientId=self.client_id)
-        return [float(state[0]) for state in states]
+        joint_state = self.backend.get_joint_state()
+        return list(joint_state.positions)
 
     def get_current_joint_velocities(self) -> List[float]:
         """Returns current velocities of controllable arm joints (rad/s)."""
-        states = p.getJointStates(self.robot_id, self.arm_joint_indices, physicsClientId=self.client_id)
-        return [float(state[1]) for state in states]
+        joint_state = self.backend.get_joint_state()
+        return list(joint_state.velocities)
 
     def get_end_effector_pose(self) -> Tuple[np.ndarray, np.ndarray]:
         """Returns forward kinematics (position [x,y,z], quaternion [x,y,z,w]) of the end effector."""
