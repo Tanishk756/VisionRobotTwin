@@ -254,3 +254,30 @@ def test_generic_controller_with_mock_backend(pybullet_direct):
     assert mock_backend.last_commanded_velocities == tuple(target_v)
     assert mock_backend.last_effort_limit == 45.0
 
+
+def test_generic_controller_delegates_ee_pose_to_kinematics_provider(pybullet_direct):
+    """Verifies that GenericRobotController delegates get_end_effector_pose to its KinematicsProvider."""
+    from unittest.mock import MagicMock
+    from robotics.kinematics_provider import KinematicsProvider
+
+    client_id = pybullet_direct
+    spec = get_robot_registry().get_robot_spec("panda")
+    body_id = p.loadURDF(spec.urdf_path, useFixedBase=True, physicsClientId=client_id)
+
+    mock_provider = MagicMock(spec=KinematicsProvider)
+    mock_provider.compute_fk.return_value = (np.array([0.5, 0.1, 0.4]), np.array([1.0, 0.0, 0.0, 0.0]))
+
+    controller = GenericRobotController(
+        physics_client_id=client_id,
+        robot_id=body_id,
+        spec=spec,
+        kinematics_provider=mock_provider,
+    )
+
+    assert controller.kinematics_provider is mock_provider
+    pos, orn = controller.get_end_effector_pose()
+    np.testing.assert_allclose(pos, [0.5, 0.1, 0.4])
+    np.testing.assert_allclose(orn, [1.0, 0.0, 0.0, 0.0])
+    mock_provider.compute_fk.assert_called_once()
+
+

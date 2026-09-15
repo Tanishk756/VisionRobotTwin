@@ -16,6 +16,7 @@ from robotics.backends.pybullet_backend import PyBulletRobotBackend
 from robotics.robot_model import RobotModelSpec, RobotCapabilities
 from robotics.robot_registry import get_robot_registry, create_robot_adapter
 from robotics.adapters.base import RobotAdapter
+from robotics.kinematics_provider import KinematicsProvider, PyBulletKinematicsProvider
 from utils.logger import get_logger
 
 logger = get_logger("Robotics.RobotController")
@@ -45,6 +46,7 @@ class GenericRobotController:
         adapter: Optional[RobotAdapter] = None,
         config: Optional[RobotConfig] = None,
         backend: Optional[RobotBackend] = None,
+        kinematics_provider: Optional[KinematicsProvider] = None,
     ):
         self.client_id = physics_client_id
         self.robot_id = robot_id
@@ -66,6 +68,16 @@ class GenericRobotController:
         self.ee_link_index: int = 0
 
         self._inspect_urdf()
+
+        if kinematics_provider is None:
+            self.kinematics_provider: KinematicsProvider = PyBulletKinematicsProvider(
+                physics_client_id=self.client_id,
+                robot_body_id=self.robot_id,
+                arm_joint_indices=self.arm_joint_indices,
+                end_effector_link_index=self.ee_link_index,
+            )
+        else:
+            self.kinematics_provider = kinematics_provider
 
         if backend is None:
             arm_names = [self.joints[idx].name for idx in self.arm_joint_indices]
@@ -184,7 +196,6 @@ class GenericRobotController:
             max_deltas = np.array(max_vels, dtype=np.float64) * dt
 
             # Compute proportional coordinated scaling factor:
-            # scale = min(1.0, min(max_delta_i / abs(delta_q_i)))
             scale = 1.0
             nonzero_mask = np.abs(delta_q) > 1e-9
             if np.any(nonzero_mask):
@@ -234,11 +245,9 @@ class GenericRobotController:
         return list(joint_state.velocities)
 
     def get_end_effector_pose(self) -> Tuple[np.ndarray, np.ndarray]:
-        """Returns forward kinematics (position [x,y,z], quaternion [x,y,z,w]) of the end effector."""
-        link_state = p.getLinkState(self.robot_id, self.ee_link_index, physicsClientId=self.client_id)
-        pos = np.array(link_state[0], dtype=np.float64)  # World position [x, y, z]
-        orn = np.array(link_state[1], dtype=np.float64)  # World orientation [x, y, z, w]
-        return pos, orn
+        """Returns forward kinematics (position [x,y,z], quaternion [x,y,z,w]) of the end effector via KinematicsProvider."""
+        current_q = self.get_current_joint_positions()
+        return self.kinematics_provider.compute_fk(current_q)
 
     def compute_cartesian_error(self, target_position: np.ndarray) -> float:
         """Computes Euclidean distance error between current EE and target."""
@@ -255,11 +264,15 @@ class PandaRobotController(GenericRobotController):
         physics_client_id: int,
         robot_id: int,
         config: Optional[RobotConfig] = None,
+        robot_config: Optional[RobotConfig] = None,
+        kinematics_provider: Optional[KinematicsProvider] = None,
     ):
         spec = get_robot_registry().get_robot_spec("panda")
         super().__init__(
             physics_client_id=physics_client_id,
             robot_id=robot_id,
             spec=spec,
-            config=config,
+            config=config or robot_config,
+            kinematics_provider=kinematics_provider,
         )
+
