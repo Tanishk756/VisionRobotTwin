@@ -93,14 +93,20 @@ class PyBulletKinematicsProvider(KinematicsProvider):
         robot_body_id: int,
         arm_joint_indices: Sequence[int],
         end_effector_link_index: int,
+        query_lock: Optional[threading.RLock] = None,
     ):
         self.client_id = int(physics_client_id)
         self.robot_id = int(robot_body_id)
         self.arm_joint_indices = tuple(int(j) for j in arm_joint_indices)
         self.ee_link_index = int(end_effector_link_index)
         self.num_arm_joints = len(self.arm_joint_indices)
-        self._lock = threading.RLock()
+        self._lock = query_lock if query_lock is not None else threading.RLock()
         self._movable_joint_indices = self._discover_movable_joints()
+
+    @property
+    def query_lock(self) -> threading.RLock:
+        """Returns the model-query re-entrant lock used for candidate configuration serialization."""
+        return self._lock
 
     def _discover_movable_joints(self) -> List[int]:
         """Discovers all movable (revolute + prismatic) joints for PyBullet calculateJacobian / calculateInverseKinematics."""

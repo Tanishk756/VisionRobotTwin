@@ -72,6 +72,38 @@ def test_kinematics_provider_subclass_contract():
     assert len(ik_q) == 7
 
 
+def test_pybullet_kinematics_provider_shared_lock(pybullet_direct_client):
+    """Verifies PyBulletKinematicsProvider supports injected query_lock and default private lock."""
+    import threading
+    from robotics.kinematics_provider import PyBulletKinematicsProvider
+    from robotics.robot_registry import get_robot_registry
+
+    client_id = pybullet_direct_client
+    registry = get_robot_registry()
+    spec = registry.get_robot_spec("panda")
+    robot_id = p.loadURDF(spec.urdf_path, useFixedBase=True, physicsClientId=client_id)
+
+    # 1. Default private lock
+    provider_default = PyBulletKinematicsProvider(
+        physics_client_id=client_id,
+        robot_body_id=robot_id,
+        arm_joint_indices=(0, 1, 2, 3, 4, 5, 6),
+        end_effector_link_index=11,
+    )
+    assert isinstance(provider_default.query_lock, type(threading.RLock()))
+
+    # 2. Injected shared lock
+    shared_lock = threading.RLock()
+    provider_shared = PyBulletKinematicsProvider(
+        physics_client_id=client_id,
+        robot_body_id=robot_id,
+        arm_joint_indices=(0, 1, 2, 3, 4, 5, 6),
+        end_effector_link_index=11,
+        query_lock=shared_lock,
+    )
+    assert provider_shared.query_lock is shared_lock
+
+
 @pytest.mark.parametrize("golden", [PANDA_GOLDEN, KUKA_GOLDEN], ids=["panda", "kuka_iiwa"])
 def test_pybullet_fk_parity(pybullet_direct_client, golden):
     """Verifies PyBulletKinematicsProvider compute_fk against golden constants."""
