@@ -199,6 +199,8 @@ class PyBulletSimulator:
             config=self.config.robot,
         )
 
+        self.kinematics_provider = self.controller.kinematics_provider
+
         lows, highs, ranges, rests = self.controller.get_joint_limits()
         self.ik_solver = GenericIKSolver(
             physics_client_id=self.client_id,
@@ -212,6 +214,7 @@ class PyBulletSimulator:
             max_reach_m=self.robot_spec.spherical_reach_m,
             min_reach_m=self.robot_spec.min_reach_m,
             default_ee_orientation=self.robot_spec.default_ee_orientation,
+            kinematics_provider=self.kinematics_provider,
         )
 
         from robotics.collision import CollisionChecker
@@ -236,6 +239,7 @@ class PyBulletSimulator:
             physics_client_id=self.client_id,
             robot_controller=self.controller,
             enable_nullspace=True,
+            kinematics_provider=self.kinematics_provider,
         )
 
         from robotics.motion_manager import MotionManager
@@ -260,15 +264,9 @@ class PyBulletSimulator:
 
     def get_current_manipulability(self):
         """Computes live geometric Jacobian and manipulability metrics for the active robot."""
-        from robotics.kinematics import compute_jacobian, compute_manipulability
+        from robotics.kinematics import compute_manipulability
         curr_q = self.controller.get_current_joint_positions()
-        _, _, J = compute_jacobian(
-            physics_client_id=self.client_id,
-            robot_id=self.robot_id,
-            ee_link_index=self.controller.ee_link_index,
-            arm_joint_indices=self.controller.arm_joint_indices,
-            joint_positions=curr_q,
-        )
+        _, _, J = self.kinematics_provider.compute_jacobian(curr_q)
         metrics = compute_manipulability(J)
         return metrics, J
 

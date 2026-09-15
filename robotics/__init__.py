@@ -11,7 +11,8 @@ from robotics.coordinate_transform import (
     rotation_matrix_to_quaternion,
 )
 from robotics.workspace_mapper import WorkspaceMapper, MappedTarget
-from robotics.inverse_kinematics import PandaIKSolver, IKResult, IKStatus
+from robotics.kinematics_provider import KinematicsProvider, PyBulletKinematicsProvider
+from robotics.inverse_kinematics import GenericIKSolver, PandaIKSolver, IKResult, IKStatus
 from robotics.robot_model import RobotModelSpec, RobotCapabilities
 from robotics.robot_registry import RobotRegistry, get_robot_registry, list_available_robots, create_robot_adapter
 from robotics.robot_controller import GenericRobotController, PandaRobotController, JointInfo
@@ -30,6 +31,9 @@ __all__ = [
     "rotation_matrix_to_quaternion",
     "WorkspaceMapper",
     "MappedTarget",
+    "KinematicsProvider",
+    "PyBulletKinematicsProvider",
+    "GenericIKSolver",
     "PandaIKSolver",
     "IKResult",
     "IKStatus",

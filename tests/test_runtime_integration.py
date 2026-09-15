@@ -377,3 +377,26 @@ def test_compare_controllers_final_goal_settling_and_accounting():
     assert "time_to_final_goal_tolerance_s" in res
     assert "settle_duration_s" in res
     assert res["settle_duration_s"] == 0.2
+
+
+def test_simulator_shared_kinematics_provider_identity():
+    """Verifies that PyBulletSimulator instantiates a single PyBulletKinematicsProvider shared across all components."""
+    from robotics.simulator import PyBulletSimulator
+    from robotics.kinematics_provider import PyBulletKinematicsProvider
+    from config.settings import get_default_config
+
+    config = get_default_config()
+    sim = PyBulletSimulator(config, headless=True)
+
+    try:
+        assert isinstance(sim.kinematics_provider, PyBulletKinematicsProvider)
+        assert sim.controller.kinematics_provider is sim.kinematics_provider
+        assert sim.ik_solver.provider is sim.kinematics_provider
+        assert sim.resolved_rate_controller.kinematics_provider is sim.kinematics_provider
+
+        # Test manipulability query using the shared provider
+        metrics, J = sim.get_current_manipulability()
+        assert J.shape == (6, len(sim.controller.arm_joint_indices))
+        assert metrics.manipulability > 0.0
+    finally:
+        sim.close()
