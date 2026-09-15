@@ -36,6 +36,7 @@ def test_generic_ik_solver_panda(pybullet_direct):
     )
     
     controller = GenericRobotController(client_id, body_id, spec)
+    controller.reset_to_home()
     lows, highs, ranges, rests = controller.get_joint_limits()
     
     ik_solver = GenericIKSolver(
@@ -87,6 +88,7 @@ def test_generic_ik_solver_kuka(pybullet_direct):
     )
     
     controller = GenericRobotController(client_id, body_id, spec)
+    controller.reset_to_home()
     lows, highs, ranges, rests = controller.get_joint_limits()
     
     ik_solver = GenericIKSolver(
@@ -161,6 +163,7 @@ def test_generic_ik_solver_with_injected_kinematics_provider(pybullet_direct):
     spec = get_robot_registry().get_robot_spec("panda")
     body_id = p.loadURDF(spec.urdf_path, useFixedBase=True, physicsClientId=client_id)
     controller = GenericRobotController(client_id, body_id, spec)
+    controller.reset_to_home()
     lows, highs, ranges, rests = controller.get_joint_limits()
 
     provider = PyBulletKinematicsProvider(

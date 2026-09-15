@@ -104,6 +104,7 @@ def test_pybullet_collision_provider_parity_panda(pybullet_scene):
 
     body_id = p.loadURDF(spec.urdf_path, useFixedBase=True, physicsClientId=client_id)
     controller = GenericRobotController(client_id, body_id, spec)
+    controller.reset_to_home()
 
     provider = PyBulletCollisionProvider(
         physics_client_id=client_id,
@@ -150,6 +151,7 @@ def test_pybullet_collision_provider_parity_kuka(pybullet_scene):
 
     body_id = p.loadURDF(spec.urdf_path, useFixedBase=True, physicsClientId=client_id)
     controller = GenericRobotController(client_id, body_id, spec)
+    controller.reset_to_home()
 
     provider = PyBulletCollisionProvider(
         physics_client_id=client_id,

@@ -29,6 +29,7 @@ def test_resolved_rate_cartesian_tracking_convergence(pybullet_direct):
     
     body_id = p.loadURDF(spec.urdf_path, useFixedBase=True, physicsClientId=client_id)
     controller = GenericRobotController(client_id, body_id, spec)
+    controller.reset_to_home()
     
     rr_controller = ResolvedRateController(
         physics_client_id=client_id,
@@ -90,6 +91,7 @@ def test_resolved_rate_controller_with_injected_provider(pybullet_direct):
     spec = get_robot_registry().get_robot_spec("panda")
     body_id = p.loadURDF(spec.urdf_path, useFixedBase=True, physicsClientId=client_id)
     controller = GenericRobotController(client_id, body_id, spec)
+    controller.reset_to_home()
 
     provider = PyBulletKinematicsProvider(
         physics_client_id=client_id,

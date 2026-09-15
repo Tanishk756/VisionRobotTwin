@@ -48,6 +48,7 @@ def test_direct_path_validator_free_and_blocked(pybullet_scene):
 
     body_id = p.loadURDF(spec.urdf_path, useFixedBase=True, physicsClientId=client_id)
     controller = GenericRobotController(client_id, body_id, spec)
+    controller.reset_to_home()
 
     checker = CollisionChecker(
         physics_client_id=client_id,
@@ -82,6 +83,7 @@ def test_rrt_connect_planner_deterministic_success(pybullet_scene):
 
     body_id = p.loadURDF(spec.urdf_path, useFixedBase=True, physicsClientId=client_id)
     controller = GenericRobotController(client_id, body_id, spec)
+    controller.reset_to_home()
 
     checker = CollisionChecker(
         physics_client_id=client_id,
@@ -136,6 +138,7 @@ def test_path_shortcutting_preserves_validity(pybullet_scene):
 
     body_id = p.loadURDF(spec.urdf_path, useFixedBase=True, physicsClientId=client_id)
     controller = GenericRobotController(client_id, body_id, spec)
+    controller.reset_to_home()
 
     checker = CollisionChecker(
         physics_client_id=client_id,
@@ -188,6 +191,7 @@ def test_impossible_scene_failure_and_state_restoration(pybullet_scene):
 
     body_id = p.loadURDF(spec.urdf_path, useFixedBase=True, physicsClientId=client_id)
     controller = GenericRobotController(client_id, body_id, spec)
+    controller.reset_to_home()
 
     # Encase goal position inside an impenetrable obstacle
     giant_col = p.createCollisionShape(p.GEOM_BOX, halfExtents=[0.5, 0.5, 0.5], physicsClientId=client_id)

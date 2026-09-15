@@ -620,6 +620,7 @@ def check_shared_feasibility(
                 physicsClientId=cid,
             )
             ctrl = GenericRobotController(cid, rid, spec)
+            ctrl.reset_to_home()
             lows, highs, ranges, rests = ctrl.get_joint_limits()
             solver = GenericIKSolver(
                 physics_client_id=cid,
@@ -1032,6 +1033,7 @@ def execute_experiment_trial(
     )
 
     ctrl = GenericRobotController(cid, rid, spec)
+    ctrl.reset_to_home()
     lows, highs, ranges, rests = ctrl.get_joint_limits()
     ik_solver = GenericIKSolver(
         physics_client_id=cid,
@@ -1314,6 +1316,7 @@ def execute_obstacle_reach_experiment(
     )
 
     ctrl = GenericRobotController(cid, rid, spec)
+    ctrl.reset_to_home()
     lows, highs, ranges, rests = ctrl.get_joint_limits()
     ik_solver = GenericIKSolver(
         physics_client_id=cid,

@@ -150,6 +150,7 @@ def test_raw_ik_and_residual_parity(pybullet_direct_client, golden):
         physicsClientId=client_id,
     )
     ctrl = GenericRobotController(physics_client_id=client_id, robot_id=robot_id, spec=spec)
+    ctrl.reset_to_home()
     
     lower_limits = [ctrl.joints[i].lower_limit for i in ctrl.arm_joint_indices]
     upper_limits = [ctrl.joints[i].upper_limit for i in ctrl.arm_joint_indices]

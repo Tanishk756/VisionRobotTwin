@@ -43,6 +43,7 @@ def test_collision_free_home_configuration(pybullet_scene):
 
     body_id = p.loadURDF(spec.urdf_path, useFixedBase=True, physicsClientId=client_id)
     controller = GenericRobotController(client_id, body_id, spec)
+    controller.reset_to_home()
 
     checker = CollisionChecker(
         physics_client_id=client_id,
@@ -89,6 +90,7 @@ def test_self_collision_detection_panda(pybullet_scene):
 
     body_id = p.loadURDF(spec.urdf_path, useFixedBase=True, physicsClientId=client_id)
     controller = GenericRobotController(client_id, body_id, spec)
+    controller.reset_to_home()
 
     checker = CollisionChecker(
         physics_client_id=client_id,
@@ -119,6 +121,7 @@ def test_self_collision_detection_kuka(pybullet_scene):
 
     body_id = p.loadURDF(spec.urdf_path, useFixedBase=True, physicsClientId=client_id)
     controller = GenericRobotController(client_id, body_id, spec)
+    controller.reset_to_home()
 
     checker = CollisionChecker(
         physics_client_id=client_id,
