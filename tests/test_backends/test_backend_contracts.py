@@ -305,14 +305,14 @@ def pybullet_sim_fixture():
     spec = get_robot_registry().get_robot_spec("panda")
     body_id = p.loadURDF(spec.urdf_path, useFixedBase=True, physicsClientId=client_id)
 
-    # Discover arm joint indices and names
+    # Discover arm joint indices and names (revolute joints)
     num_joints = p.getNumJoints(body_id, physicsClientId=client_id)
     arm_indices = []
     arm_names = []
     for i in range(num_joints):
         info = p.getJointInfo(body_id, i, physicsClientId=client_id)
         joint_type = info[2]
-        if joint_type in (p.JOINT_REVOLUTE, p.JOINT_PRISMATIC):
+        if joint_type == p.JOINT_REVOLUTE:
             arm_indices.append(i)
             arm_names.append(info[1].decode("utf-8"))
 
@@ -397,5 +397,72 @@ def test_pybullet_backend_init_validation(pybullet_sim_fixture):
             joint_names=arm_names[:-1],
             default_joint_force=max_force,
         )
+
+
+def test_pybullet_backend_position_command_dispatch(pybullet_sim_fixture):
+    """Verify PyBulletRobotBackend dispatches position control commands."""
+    import pybullet as p
+    from robotics.backends.pybullet_backend import PyBulletRobotBackend
+
+    client_id, body_id, arm_indices, arm_names, max_force = pybullet_sim_fixture
+
+    backend = PyBulletRobotBackend(
+        physics_client_id=client_id,
+        robot_body_id=body_id,
+        arm_joint_indices=arm_indices,
+        joint_names=arm_names,
+        default_joint_force=max_force,
+    )
+    backend.connect()
+
+    target_positions = [0.0, -0.3, 0.0, -1.0, 0.0, 1.0, 0.5][: len(arm_indices)]
+    success = backend.command_joint_positions(target_positions)
+    assert success is True
+
+    # Step simulation to allow motors to move toward target
+    for _ in range(240):
+        p.stepSimulation(physicsClientId=client_id)
+
+    state = backend.get_joint_state()
+    # Check that joints moved in the direction of commanded positions
+    for cur_pos, target_pos in zip(state.positions, target_positions):
+        assert abs(cur_pos - target_pos) < 0.15
+
+
+def test_pybullet_backend_position_command_validation(pybullet_sim_fixture):
+    """Verify position command validates finiteness, vector length, and connection status."""
+    from robotics.backends.pybullet_backend import PyBulletRobotBackend
+
+    client_id, body_id, arm_indices, arm_names, max_force = pybullet_sim_fixture
+
+    backend = PyBulletRobotBackend(
+        physics_client_id=client_id,
+        robot_body_id=body_id,
+        arm_joint_indices=arm_indices,
+        joint_names=arm_names,
+        default_joint_force=max_force,
+    )
+
+    # Disconnected check
+    with pytest.raises(RuntimeError, match="disconnected"):
+        backend.command_joint_positions([0.0] * len(arm_indices))
+
+    backend.connect()
+
+    # Length mismatch
+    with pytest.raises(ValueError, match="Length mismatch"):
+        backend.command_joint_positions([0.0] * (len(arm_indices) - 1))
+
+    # NaN / Inf
+    nan_target = [0.0] * len(arm_indices)
+    nan_target[0] = float("nan")
+    with pytest.raises(ValueError, match="Non-finite"):
+        backend.command_joint_positions(nan_target)
+
+    inf_target = [0.0] * len(arm_indices)
+    inf_target[1] = float("inf")
+    with pytest.raises(ValueError, match="Non-finite"):
+        backend.command_joint_positions(inf_target)
+
 
 

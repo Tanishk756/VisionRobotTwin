@@ -118,8 +118,29 @@ class PyBulletRobotBackend(RobotBackend):
 
     def command_joint_positions(self, target_positions: Sequence[float]) -> bool:
         """Dispatches target joint positions (rad) to PyBullet position control."""
-        # Implemented in Task 4
-        raise NotImplementedError("command_joint_positions not implemented yet")
+        if not self.is_connected():
+            raise RuntimeError("Cannot command positions to disconnected PyBullet backend")
+
+        if len(target_positions) != len(self.arm_joint_indices):
+            raise ValueError(
+                f"Length mismatch: expected {len(self.arm_joint_indices)} positions, got {len(target_positions)}"
+            )
+
+        validated_positions = []
+        for val in target_positions:
+            if not math.isfinite(val):
+                raise ValueError(f"Non-finite position command: {val}")
+            validated_positions.append(float(val))
+
+        p.setJointMotorControlArray(
+            bodyIndex=self.robot_body_id,
+            jointIndices=self.arm_joint_indices,
+            controlMode=p.POSITION_CONTROL,
+            targetPositions=validated_positions,
+            forces=[self.default_joint_force] * len(self.arm_joint_indices),
+            physicsClientId=self.physics_client_id,
+        )
+        return True
 
     def command_joint_velocities(
         self,
