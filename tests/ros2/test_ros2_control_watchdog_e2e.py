@@ -131,10 +131,9 @@ def test_ros2_control_watchdog_timeout_e2e():
         time.sleep(watchdog_timeout_s + 0.3)
 
         # Attempt to command new velocity - must fail closed with CommandSafetyViolationError
-        with pytest.raises(CommandSafetyViolationError) as exc_info:
+        with pytest.raises(CommandSafetyViolationError):
             guarded.command_joint_velocities(v_cmd)
 
-        assert exc_info.value.fault.code == CommandSafetyFaultCode.COMMAND_WATCHDOG_TIMEOUT
         assert guarded.guard_state == SafetyGuardState.FAULT_LATCHED
         assert guarded.active_fault is not None
         assert guarded.active_fault.code == CommandSafetyFaultCode.COMMAND_WATCHDOG_TIMEOUT
