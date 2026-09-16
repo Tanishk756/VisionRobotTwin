@@ -171,3 +171,92 @@ def test_arm_fails_when_telemetry_stale():
         guard.arm()
 
     assert guard.guard_state == SafetyGuardState.DISARMED
+
+
+def test_position_limit_violation_rejection_and_fault_latching():
+    """Verify out-of-bounds position command is rejected, latches fault, and doesn't dispatch."""
+    model, mock_backend = _make_model_and_backend()  # Limits: [-2.0, 2.0]
+    guard = GuardedRobotBackend(underlying_backend=mock_backend, resolved_model=model)
+    guard.arm()
+
+    # Target exceeding upper limit (2.5 > 2.0)
+    with pytest.raises(CommandSafetyViolationError, match="(?i)position limit"):
+        guard.command_joint_positions([2.5, 0.0])
+
+    assert guard.guard_state == SafetyGuardState.FAULT_LATCHED
+    assert guard.active_fault is not None
+    assert guard.active_fault.code == CommandSafetyFaultCode.POSITION_LIMIT_VIOLATION
+    assert mock_backend.command_joint_positions.call_count == 0
+
+
+def test_position_step_jump_violation_rejection():
+    """Verify large position jump from current state is rejected and latches POSITION_STEP_VIOLATION."""
+    model, mock_backend = _make_model_and_backend()
+    guard = GuardedRobotBackend(
+        underlying_backend=mock_backend,
+        resolved_model=model,
+        safety_config=CommandSafetyConfig(max_position_step_by_joint=(0.2, 0.2)),
+    )
+    guard.arm()
+
+    # Current position is (0.0, 0.0). Jump to (0.5, 0.0) exceeds 0.2 step limit
+    with pytest.raises(CommandSafetyViolationError, match="(?i)position step"):
+        guard.command_joint_positions([0.5, 0.0])
+
+    assert guard.guard_state == SafetyGuardState.FAULT_LATCHED
+    assert guard.active_fault.code == CommandSafetyFaultCode.POSITION_STEP_VIOLATION
+    assert mock_backend.command_joint_positions.call_count == 0
+
+
+def test_velocity_limit_violation_rejection():
+    """Verify velocity command exceeding velocity_limit_scale * max_velocity is rejected."""
+    model, mock_backend = _make_model_and_backend()  # Max vel: 1.5
+    guard = GuardedRobotBackend(
+        underlying_backend=mock_backend,
+        resolved_model=model,
+        safety_config=CommandSafetyConfig(velocity_limit_scale=0.8),  # Allowed: 1.2
+    )
+    guard.arm()
+
+    with pytest.raises(CommandSafetyViolationError, match="(?i)velocity limit"):
+        guard.command_joint_velocities([1.4, 0.0])
+
+    assert guard.guard_state == SafetyGuardState.FAULT_LATCHED
+    assert guard.active_fault.code == CommandSafetyFaultCode.VELOCITY_LIMIT_VIOLATION
+    assert mock_backend.command_joint_velocities.call_count == 0
+
+
+def test_require_velocity_feedback_enforcement():
+    """Verify velocity command requires velocities in state when configured."""
+    model, mock_backend = _make_model_and_backend()
+    # State with None velocities
+    no_vel_state = TimestampedJointState(
+        source_timestamp_s=1.0,
+        receive_timestamp_s=time.monotonic(),
+        joint_names=("j1", "j2"),
+        positions=(0.0, 0.0),
+        velocities=None,
+    )
+    mock_backend.get_joint_state.return_value = no_vel_state
+
+    # When False: allowed
+    guard_ok = GuardedRobotBackend(
+        underlying_backend=mock_backend,
+        resolved_model=model,
+        safety_config=CommandSafetyConfig(require_velocity_feedback_for_velocity_commands=False),
+    )
+    guard_ok.arm()
+    assert guard_ok.command_joint_velocities([0.5, 0.0]) is True
+
+    # When True: rejected
+    guard_req = GuardedRobotBackend(
+        underlying_backend=mock_backend,
+        resolved_model=model,
+        safety_config=CommandSafetyConfig(require_velocity_feedback_for_velocity_commands=True),
+    )
+    guard_req.arm()
+    with pytest.raises(CommandSafetyViolationError, match="(?i)velocity feedback"):
+        guard_req.command_joint_velocities([0.5, 0.0])
+
+    assert guard_req.guard_state == SafetyGuardState.FAULT_LATCHED
+    assert guard_req.active_fault.code == CommandSafetyFaultCode.STATE_INVALID

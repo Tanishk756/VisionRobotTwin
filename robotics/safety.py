@@ -310,7 +310,56 @@ class GuardedRobotBackend(RobotBackend):
                 fault_detail = self._active_fault.detail if self._active_fault else "Unknown fault"
                 raise CommandSafetyViolationError(f"Safety guard is FAULT_LATCHED ({fault_detail}). Call reset_fault() then arm().")
 
-            return self._backend.command_joint_positions(target_positions)
+            # 1. Finite and DoF validation
+            expected_dof = len(self._model.arm_joints)
+            if len(target_positions) != expected_dof:
+                self._latch_fault(
+                    CommandSafetyFaultCode.POSITION_LIMIT_VIOLATION,
+                    f"Target positions length {len(target_positions)} != model DoF {expected_dof}",
+                )
+                raise CommandSafetyViolationError(f"Target positions length {len(target_positions)} != model DoF {expected_dof}")
+
+            for i, val in enumerate(target_positions):
+                if not math.isfinite(val):
+                    self._latch_fault(
+                        CommandSafetyFaultCode.POSITION_LIMIT_VIOLATION,
+                        f"Non-finite target position at index {i}: {val}",
+                    )
+                    raise CommandSafetyViolationError(f"Non-finite target position at index {i}: {val}")
+
+            # 2. Joint limits validation
+            tol = 1e-9
+            for i, (val, joint) in enumerate(zip(target_positions, self._model.arm_joints)):
+                if val < joint.lower_limit - tol or val > joint.upper_limit + tol:
+                    msg = f"Position limit violation: Target position {val:.4f} at joint {joint.name} violates limits [{joint.lower_limit:.4f}, {joint.upper_limit:.4f}]"
+                    self._latch_fault(
+                        CommandSafetyFaultCode.POSITION_LIMIT_VIOLATION,
+                        msg,
+                    )
+                    raise CommandSafetyViolationError(msg)
+
+            # 3. Position step jump validation
+            state = self._backend.get_joint_state()
+            if self._config.max_position_step_by_joint is not None:
+                step_limits = self._config.max_position_step_by_joint
+                for i, (target_q, meas_q, max_step) in enumerate(zip(target_positions, state.positions, step_limits)):
+                    diff = abs(target_q - meas_q)
+                    if diff > max_step:
+                        msg = f"Position step jump violation: Position step jump {diff:.4f} at joint {self._model.arm_joints[i].name} exceeds limit {max_step:.4f}"
+                        self._latch_fault(
+                            CommandSafetyFaultCode.POSITION_STEP_VIOLATION,
+                            msg,
+                        )
+                        raise CommandSafetyViolationError(msg)
+
+            # 4. Dispatch to underlying backend
+            res = self._backend.command_joint_positions(target_positions)
+            if res:
+                self._accepted_command_sequence += 1
+                self._last_accepted_command_s = time.monotonic()
+                self._motion_session_active = True
+                return True
+            return False
 
     def command_joint_velocities(
         self,
@@ -327,7 +376,52 @@ class GuardedRobotBackend(RobotBackend):
                 fault_detail = self._active_fault.detail if self._active_fault else "Unknown fault"
                 raise CommandSafetyViolationError(f"Safety guard is FAULT_LATCHED ({fault_detail}). Call reset_fault() then arm().")
 
-            return self._backend.command_joint_velocities(target_velocities, effort_limit=effort_limit)
+            expected_dof = len(self._model.arm_joints)
+            if len(target_velocities) != expected_dof:
+                self._latch_fault(
+                    CommandSafetyFaultCode.VELOCITY_LIMIT_VIOLATION,
+                    f"Target velocities length {len(target_velocities)} != model DoF {expected_dof}",
+                )
+                raise CommandSafetyViolationError(f"Target velocities length {len(target_velocities)} != model DoF {expected_dof}")
+
+            for i, val in enumerate(target_velocities):
+                if not math.isfinite(val):
+                    self._latch_fault(
+                        CommandSafetyFaultCode.VELOCITY_LIMIT_VIOLATION,
+                        f"Non-finite target velocity at index {i}: {val}",
+                    )
+                    raise CommandSafetyViolationError(f"Non-finite target velocity at index {i}: {val}")
+
+            # Velocity limit validation
+            scale = self._config.velocity_limit_scale
+            tol = 1e-9
+            for i, (val, joint) in enumerate(zip(target_velocities, self._model.arm_joints)):
+                max_allowed = scale * joint.max_velocity
+                if abs(val) > max_allowed + tol:
+                    msg = f"Velocity limit violation: Target velocity {val:.4f} at joint {joint.name} exceeds scaled envelope {max_allowed:.4f}"
+                    self._latch_fault(
+                        CommandSafetyFaultCode.VELOCITY_LIMIT_VIOLATION,
+                        msg,
+                    )
+                    raise CommandSafetyViolationError(msg)
+
+            # State check
+            state = self._backend.get_joint_state()
+            if self._config.require_velocity_feedback_for_velocity_commands:
+                if state.velocities is None or len(state.velocities) != expected_dof or not all(math.isfinite(v) for v in state.velocities):
+                    self._latch_fault(
+                        CommandSafetyFaultCode.STATE_INVALID,
+                        "State telemetry is missing valid velocity feedback required by configuration.",
+                    )
+                    raise CommandSafetyViolationError("State telemetry is missing valid velocity feedback required by configuration.")
+
+            res = self._backend.command_joint_velocities(target_velocities, effort_limit=effort_limit)
+            if res:
+                self._accepted_command_sequence += 1
+                self._last_accepted_command_s = time.monotonic()
+                self._motion_session_active = True
+                return True
+            return False
 
     def halt_motion(self) -> None:
         """Privileged software stop mapping to underlying halt_motion()."""
@@ -336,3 +430,19 @@ class GuardedRobotBackend(RobotBackend):
             self._motion_session_active = False
             if self._guard_state == SafetyGuardState.ARMED:
                 self._guard_state = SafetyGuardState.DISARMED
+
+    def _latch_fault(self, code: CommandSafetyFaultCode, detail: str) -> None:
+        """Internal helper transitioning state to FAULT_LATCHED and recording fault detail."""
+        self._guard_state = SafetyGuardState.FAULT_LATCHED
+        self._active_fault = CommandSafetyFault(
+            code=code,
+            monotonic_timestamp_s=time.monotonic(),
+            detail=detail,
+        )
+        self._rejected_command_count += 1
+        if self._motion_session_active:
+            try:
+                self._backend.halt_motion()
+            except Exception:
+                pass
+            self._motion_session_active = False
