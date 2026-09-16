@@ -585,5 +585,72 @@ def test_generic_controller_backend_mismatch_validation():
         )
 
 
+def test_controller_deferred_backend_validation_and_subsequent_read():
+    """Verifies that GenericRobotController tolerates initial BackendStateUnavailableError and validates upon first read."""
+    from unittest.mock import MagicMock
+    from robotics.backends.base import (
+        BackendStateUnavailableError,
+        RobotBackend,
+        TimestampedJointState,
+    )
+    from robotics.kinematics_provider import KinematicsProvider
+    from robotics.robot_model import (
+        JointRole,
+        JointMotionType,
+        ResolvedJointMetadata,
+        ResolvedRobotModel,
+    )
+
+    arm_j0 = ResolvedJointMetadata(
+        model_index=0,
+        canonical_index=0,
+        name="joint_1",
+        role=JointRole.ARM,
+        motion_type=JointMotionType.REVOLUTE,
+        lower_limit=-1.0,
+        upper_limit=1.0,
+        max_force=50.0,
+        max_velocity=1.0,
+        link_name="l1",
+    )
+    model = ResolvedRobotModel(
+        robot_id="bot1",
+        display_name="Bot1",
+        all_joints=(arm_j0,),
+        arm_joints=(arm_j0,),
+        gripper_joints=(),
+        ee_link_name="l1",
+        home_joint_positions=(0.0,),
+    )
+
+    mock_backend = MagicMock(spec=RobotBackend)
+    mock_backend.is_connected.return_value = True
+    # Initially state unavailable (e.g. ROS2 waiting for first message)
+    mock_backend.get_joint_state.side_effect = BackendStateUnavailableError("Waiting for /joint_states")
+    mock_kinematics = MagicMock(spec=KinematicsProvider)
+
+    # Controller construction must succeed without error
+    controller = GenericRobotController(
+        resolved_model=model,
+        backend=mock_backend,
+        kinematics_provider=mock_kinematics,
+    )
+    assert controller.backend is mock_backend
+
+    # When state becomes available with wrong DoF, subsequent get_current_joint_positions must raise ValueError
+    invalid_state = TimestampedJointState(
+        source_timestamp_s=1.0,
+        receive_timestamp_s=1.0,
+        joint_names=("wrong_name",),
+        positions=(0.5,),
+        velocities=(0.0,),
+    )
+    mock_backend.get_joint_state.side_effect = None
+    mock_backend.get_joint_state.return_value = invalid_state
+
+    with pytest.raises(ValueError, match="names mismatch"):
+        controller.get_current_joint_positions()
+
+
 
 
