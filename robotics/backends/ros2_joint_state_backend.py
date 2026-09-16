@@ -307,12 +307,28 @@ class ROS2JointStateBackend(RobotBackend):
             nanosec = int(msg.header.stamp.nanosec)
             source_stamp_s = extract_ros_timestamp(sec, nanosec)
 
+            raw_vel = list(msg.velocity) if len(msg.velocity) > 0 else None
+            raw_eff = list(msg.effort) if len(msg.effort) > 0 else None
+
+            # In ROS 2 / ros2_control, joint_state_broadcaster publishes NaN for unmeasured interfaces.
+            # If velocity or effort contains non-finite/NaN values, treat as unmeasured (None).
+            velocities = (
+                raw_vel
+                if (raw_vel is not None and all(math.isfinite(v) for v in raw_vel))
+                else None
+            )
+            efforts = (
+                raw_eff
+                if (raw_eff is not None and all(math.isfinite(e) for e in raw_eff))
+                else None
+            )
+
             state = map_joint_state_payload(
                 expected_joint_names=self._config.expected_joint_names,
                 incoming_names=list(msg.name),
                 positions=list(msg.position),
-                velocities=list(msg.velocity) if len(msg.velocity) > 0 else None,
-                efforts=list(msg.effort) if len(msg.effort) > 0 else None,
+                velocities=velocities,
+                efforts=efforts,
                 source_timestamp_s=source_stamp_s,
                 receive_timestamp_s=receive_monotonic,
                 sequence_id=self._sequence_id + 1,
