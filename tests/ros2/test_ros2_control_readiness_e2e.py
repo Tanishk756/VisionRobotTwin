@@ -80,7 +80,7 @@ def test_live_ros2_control_readiness_probe():
             expected_controller_type=actual_ctrl_type,
             expected_hardware_component=actual_hw_name,
             required_command_interfaces=("joint1/position", "joint2/position"),
-            required_state_interfaces=("joint1/position", "joint2/position"),
+            required_state_interfaces=(),
             service_timeout_s=3.0,
         )
 

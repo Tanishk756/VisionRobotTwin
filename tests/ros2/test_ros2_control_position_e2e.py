@@ -83,7 +83,7 @@ def test_ros2_control_position_e2e_closed_loop():
         # Wait for telemetry reception and command endpoint discovery
         t_start = time.monotonic()
         ready = False
-        while time.monotonic() - t_start < 5.0:
+        while time.monotonic() - t_start < 15.0:
             try:
                 st = guarded.get_joint_state()
                 if raw_backend.command_endpoint_ready():

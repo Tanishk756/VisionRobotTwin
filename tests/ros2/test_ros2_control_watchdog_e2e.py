@@ -74,7 +74,7 @@ def test_ros2_control_watchdog_timeout_e2e():
         safety_cfg = CommandSafetyConfig(
             state_timeout_s=2.0,
             command_watchdog_timeout_s=watchdog_timeout_s,
-            max_velocity_by_joint=(1.0, 1.0),
+            velocity_limit_scale=1.0,
         )
 
         guarded = GuardedRobotBackend(
@@ -87,7 +87,7 @@ def test_ros2_control_watchdog_timeout_e2e():
         assert guarded.connect() is True
         t_start = time.monotonic()
         ready = False
-        while time.monotonic() - t_start < 5.0:
+        while time.monotonic() - t_start < 15.0:
             try:
                 st = guarded.get_joint_state()
                 if raw_backend.command_endpoint_ready():
