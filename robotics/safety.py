@@ -11,9 +11,18 @@ hardware safety, STO, or physical emergency stop functionality.
 from dataclasses import dataclass
 from enum import Enum
 import math
+import threading
 from typing import Optional, Sequence, Tuple
 
-from robotics.backends.base import BackendError
+from robotics.backends.base import (
+    BackendCommandDisabledError,
+    BackendError,
+    BackendHealthStatus,
+    RobotBackend,
+    RobotBackendCapabilities,
+    TimestampedJointState,
+)
+from robotics.robot_model import ResolvedRobotModel
 
 
 class SafetyGuardState(Enum):
@@ -97,3 +106,119 @@ class SoftwareCommandReadinessReport:
     fault_clear: bool
     ready_to_arm: bool
     reasons: Tuple[str, ...] = ()
+
+
+class GuardedRobotBackend(RobotBackend):
+    """Defensive software safety decorator for command-capable robot backends.
+
+    This decorator enforces fail-closed command authorization, static joint and velocity safety
+    envelopes, maximum position step guards, non-auto-clearing fault latching, and software watchdog monitoring.
+    """
+
+    def __init__(
+        self,
+        underlying_backend: RobotBackend,
+        resolved_model: ResolvedRobotModel,
+        safety_config: Optional[CommandSafetyConfig] = None,
+    ) -> None:
+        if not isinstance(underlying_backend, RobotBackend):
+            raise TypeError(f"underlying_backend must be an instance of RobotBackend, got {type(underlying_backend)}")
+        if not isinstance(resolved_model, ResolvedRobotModel):
+            raise TypeError(f"resolved_model must be an instance of ResolvedRobotModel, got {type(resolved_model)}")
+
+        self._backend = underlying_backend
+        self._model = resolved_model
+        self._config = safety_config if safety_config is not None else CommandSafetyConfig()
+
+        self._command_lock = threading.RLock()
+        self._guard_state = SafetyGuardState.DISARMED
+        self._active_fault: Optional[CommandSafetyFault] = None
+        self._motion_session_active: bool = False
+        self._last_accepted_command_s: Optional[float] = None
+        self._accepted_command_sequence: int = 0
+        self._rejected_command_count: int = 0
+
+    @property
+    def guard_state(self) -> SafetyGuardState:
+        """Returns the current authorization state of the safety guard."""
+        with self._command_lock:
+            return self._guard_state
+
+    @property
+    def is_armed(self) -> bool:
+        """Returns True if the safety guard is currently ARMED."""
+        with self._command_lock:
+            return self._guard_state == SafetyGuardState.ARMED
+
+    @property
+    def active_fault(self) -> Optional[CommandSafetyFault]:
+        """Returns the active latched fault if currently in FAULT_LATCHED state."""
+        with self._command_lock:
+            return self._active_fault
+
+    @property
+    def transport_capabilities(self) -> RobotBackendCapabilities:
+        """Delegates capability introspection to the underlying execution backend."""
+        return self._backend.transport_capabilities
+
+    def is_connected(self) -> bool:
+        """Delegates connection status query to the underlying execution backend."""
+        return self._backend.is_connected()
+
+    def health_status(self) -> BackendHealthStatus:
+        """Delegates communication health query to the underlying execution backend."""
+        return self._backend.health_status()
+
+    def get_joint_state(self) -> TimestampedJointState:
+        """Delegates joint state acquisition to the underlying execution backend."""
+        return self._backend.get_joint_state()
+
+    def connect(self) -> bool:
+        """Connects underlying backend while leaving safety guard in DISARMED state."""
+        with self._command_lock:
+            return self._backend.connect()
+
+    def disconnect(self) -> None:
+        """Cleans up safety guard and disconnects underlying execution backend."""
+        with self._command_lock:
+            self._guard_state = SafetyGuardState.DISARMED
+            self._motion_session_active = False
+            self._backend.disconnect()
+
+    def command_joint_positions(self, target_positions: Sequence[float]) -> bool:
+        """Dispatches target joint positions following safety envelope and authorization validation."""
+        with self._command_lock:
+            if self._guard_state == SafetyGuardState.DISARMED:
+                self._rejected_command_count += 1
+                raise BackendCommandDisabledError("Safety guard is DISARMED. Call arm() first.")
+            if self._guard_state == SafetyGuardState.FAULT_LATCHED:
+                self._rejected_command_count += 1
+                fault_detail = self._active_fault.detail if self._active_fault else "Unknown fault"
+                raise CommandSafetyViolationError(f"Safety guard is FAULT_LATCHED ({fault_detail}). Call reset_fault() then arm().")
+
+            return self._backend.command_joint_positions(target_positions)
+
+    def command_joint_velocities(
+        self,
+        target_velocities: Sequence[float],
+        effort_limit: Optional[float] = None,
+    ) -> bool:
+        """Dispatches target joint velocities following safety envelope and authorization validation."""
+        with self._command_lock:
+            if self._guard_state == SafetyGuardState.DISARMED:
+                self._rejected_command_count += 1
+                raise BackendCommandDisabledError("Safety guard is DISARMED. Call arm() first.")
+            if self._guard_state == SafetyGuardState.FAULT_LATCHED:
+                self._rejected_command_count += 1
+                fault_detail = self._active_fault.detail if self._active_fault else "Unknown fault"
+                raise CommandSafetyViolationError(f"Safety guard is FAULT_LATCHED ({fault_detail}). Call reset_fault() then arm().")
+
+            return self._backend.command_joint_velocities(target_velocities, effort_limit=effort_limit)
+
+    def halt_motion(self) -> None:
+        """Privileged software stop mapping to underlying halt_motion()."""
+        with self._command_lock:
+            self._backend.halt_motion()
+            self._motion_session_active = False
+            if self._guard_state == SafetyGuardState.ARMED:
+                self._guard_state = SafetyGuardState.DISARMED
