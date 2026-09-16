@@ -4,9 +4,11 @@ import math
 import pytest
 from robotics.backends.base import TimestampedJointState
 from robotics.backends.ros2_state_mapping import (
-    map_joint_state_payload,
-    extract_ros_timestamp,
     JointStateMappingError,
+    ROS2JointStateBackendConfig,
+    ROS2JointStateDiagnostics,
+    extract_ros_timestamp,
+    map_joint_state_payload,
 )
 
 
@@ -274,3 +276,72 @@ def test_extract_ros_timestamp():
         extract_ros_timestamp(10, -1)
     with pytest.raises(JointStateMappingError):
         extract_ros_timestamp(-1, 0)
+
+
+def test_ros2_config_defaults_and_validation():
+    """Verify ROS2JointStateBackendConfig defaults and field validation."""
+    cfg = ROS2JointStateBackendConfig(expected_joint_names=("j1", "j2"))
+    assert cfg.expected_joint_names == ("j1", "j2")
+    assert cfg.joint_state_topic == "/joint_states"
+    assert cfg.node_name == "visionrobottwin_joint_state"
+    assert cfg.node_namespace == ""
+    assert cfg.state_timeout_s == 1.0
+    assert cfg.qos_reliability == "best_effort"
+    assert cfg.qos_depth == 5
+    assert cfg.domain_id is None
+
+    # Empty expected joints
+    with pytest.raises(ValueError, match="expected_joint_names"):
+        ROS2JointStateBackendConfig(expected_joint_names=())
+
+    # Duplicate expected joints
+    with pytest.raises(ValueError, match="Duplicate"):
+        ROS2JointStateBackendConfig(expected_joint_names=("j1", "j1"))
+
+    # Empty topic
+    with pytest.raises(ValueError, match="joint_state_topic"):
+        ROS2JointStateBackendConfig(expected_joint_names=("j1",), joint_state_topic="")
+
+    # Empty node_name
+    with pytest.raises(ValueError, match="node_name"):
+        ROS2JointStateBackendConfig(expected_joint_names=("j1",), node_name="")
+
+    # Invalid timeout
+    with pytest.raises(ValueError, match="state_timeout_s"):
+        ROS2JointStateBackendConfig(expected_joint_names=("j1",), state_timeout_s=0.0)
+
+    # Invalid qos depth
+    with pytest.raises(ValueError, match="qos_depth"):
+        ROS2JointStateBackendConfig(expected_joint_names=("j1",), qos_depth=0)
+
+    # Invalid qos reliability
+    with pytest.raises(ValueError, match="qos_reliability"):
+        ROS2JointStateBackendConfig(expected_joint_names=("j1",), qos_reliability="invalid_qos")
+
+    # Negative domain_id
+    with pytest.raises(ValueError, match="domain_id"):
+        ROS2JointStateBackendConfig(expected_joint_names=("j1",), domain_id=-1)
+
+
+def test_ros2_diagnostics_dataclass():
+    """Verify ROS2JointStateDiagnostics immutability and fields."""
+    diag = ROS2JointStateDiagnostics(
+        messages_received=100,
+        valid_messages=98,
+        invalid_messages=2,
+        last_receive_monotonic_s=100.5,
+        last_source_timestamp_s=50.0,
+        last_validation_error="Missing joint j2",
+        topic="/joint_states",
+        is_stale=False,
+        executor_error=None,
+    )
+    assert diag.messages_received == 100
+    assert diag.valid_messages == 98
+    assert diag.invalid_messages == 2
+    assert diag.last_receive_monotonic_s == 100.5
+    assert diag.last_source_timestamp_s == 50.0
+    assert diag.last_validation_error == "Missing joint j2"
+    assert diag.topic == "/joint_states"
+    assert diag.is_stale is False
+    assert diag.executor_error is None

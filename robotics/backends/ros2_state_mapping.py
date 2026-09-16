@@ -5,6 +5,7 @@ and telemetry validation for ROS2 sensor_msgs/msg/JointState payloads without
 requiring rclpy, sensor_msgs, or any ROS2 system packages.
 """
 
+from dataclasses import dataclass
 import math
 from typing import List, Optional, Sequence, Tuple
 
@@ -14,6 +15,66 @@ from robotics.backends.base import BackendError, TimestampedJointState
 class JointStateMappingError(BackendError):
     """Raised when incoming joint telemetry cannot be mapped into canonical format."""
     pass
+
+
+@dataclass(frozen=True)
+class ROS2JointStateBackendConfig:
+    """Configuration for ROS2 read-only joint state subscriber backend.
+
+    Attributes:
+        expected_joint_names: Ordered tuple of active arm joint names to extract.
+        joint_state_topic: ROS topic to subscribe to for sensor_msgs/msg/JointState.
+        node_name: ROS node name for the subscriber.
+        node_namespace: Optional ROS namespace for the node.
+        state_timeout_s: Staleness timeout in seconds (default 1.0s).
+        qos_reliability: QoS reliability setting ('best_effort' | 'reliable').
+        qos_depth: QoS history depth (default 5 for standard SensorDataQoS).
+        domain_id: Optional integer ROS domain ID (0-101, or None for env default).
+    """
+
+    expected_joint_names: Tuple[str, ...]
+    joint_state_topic: str = "/joint_states"
+    node_name: str = "visionrobottwin_joint_state"
+    node_namespace: str = ""
+    state_timeout_s: float = 1.0
+    qos_reliability: str = "best_effort"
+    qos_depth: int = 5
+    domain_id: Optional[int] = None
+
+    def __post_init__(self) -> None:
+        if not self.expected_joint_names:
+            raise ValueError("expected_joint_names must be a non-empty sequence of joint names.")
+        if len(set(self.expected_joint_names)) != len(self.expected_joint_names):
+            raise ValueError(f"Duplicate names in expected_joint_names: {self.expected_joint_names}")
+        if not self.joint_state_topic or not self.joint_state_topic.strip():
+            raise ValueError("joint_state_topic must not be empty.")
+        if not self.node_name or not self.node_name.strip():
+            raise ValueError("node_name must not be empty.")
+        if self.state_timeout_s <= 0.0 or not math.isfinite(self.state_timeout_s):
+            raise ValueError(f"state_timeout_s must be a positive finite float, got {self.state_timeout_s}")
+        if self.qos_depth < 1:
+            raise ValueError(f"qos_depth must be at least 1, got {self.qos_depth}")
+        if self.qos_reliability not in ("best_effort", "reliable"):
+            raise ValueError(
+                f"qos_reliability must be 'best_effort' or 'reliable', got '{self.qos_reliability}'"
+            )
+        if self.domain_id is not None and self.domain_id < 0:
+            raise ValueError(f"domain_id must be non-negative if specified, got {self.domain_id}")
+
+
+@dataclass(frozen=True)
+class ROS2JointStateDiagnostics:
+    """Immutable snapshot of ROS2 joint state telemetry diagnostics."""
+
+    messages_received: int
+    valid_messages: int
+    invalid_messages: int
+    last_receive_monotonic_s: Optional[float]
+    last_source_timestamp_s: Optional[float]
+    last_validation_error: Optional[str]
+    topic: str
+    is_stale: bool
+    executor_error: Optional[str] = None
 
 
 def extract_ros_timestamp(sec: int, nanosec: int) -> float:
