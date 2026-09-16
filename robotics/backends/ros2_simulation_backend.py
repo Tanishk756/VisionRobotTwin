@@ -143,23 +143,32 @@ class ROS2SimulationBackend(RobotBackend):
             if not self._state_backend.connect():
                 return False
 
-            # 2. Construct dedicated private context for command publishing
-            cmd_ctx = Context() if Context is not None else (rclpy.context.Context() if rclpy is not None else None)
-            if cmd_ctx is None:
-                self._state_backend.disconnect()
-                raise OptionalDependencyError("Cannot construct command ROS2 Context.")
-
-            self._cmd_context = cmd_ctx
-            if self._config.state_config.domain_id is not None:
-                rclpy.init(context=self._cmd_context, domain_id=self._config.state_config.domain_id)
-            else:
-                rclpy.init(context=self._cmd_context)
+            # 2. Attach command node to the shared context of the state backend
+            ctx = getattr(self._state_backend, "_context", None)
+            self._cmd_context = ctx
+            if ctx is None:
+                cmd_ctx = Context() if Context is not None else (rclpy.context.Context() if rclpy is not None else None)
+                if cmd_ctx is None:
+                    self._state_backend.disconnect()
+                    raise OptionalDependencyError("Cannot construct command ROS2 Context.")
+                self._cmd_context = cmd_ctx
+                if self._config.state_config.domain_id is not None:
+                    rclpy.init(context=self._cmd_context, domain_id=self._config.state_config.domain_id)
+                else:
+                    rclpy.init(context=self._cmd_context)
 
             self._cmd_node = rclpy.create_node(
                 self._config.command_node_name,
                 namespace=self._config.command_node_namespace,
                 context=self._cmd_context,
             )
+
+            executor = getattr(self._state_backend, "_executor", None)
+            if executor is not None:
+                try:
+                    executor.add_node(self._cmd_node)
+                except Exception:
+                    pass
 
             # 3. Resolve QoS profile
             if self._config.command_qos == "reliable":
@@ -200,6 +209,14 @@ class ROS2SimulationBackend(RobotBackend):
             pub = self._cmd_publisher
             ctx = self._cmd_context
 
+        # Remove command node from state executor if attached
+        executor = getattr(self._state_backend, "_executor", None)
+        if executor is not None and node is not None:
+            try:
+                executor.remove_node(node)
+            except Exception:
+                pass
+
         # Disconnect composed state backend
         self._state_backend.disconnect()
 
@@ -212,7 +229,8 @@ class ROS2SimulationBackend(RobotBackend):
                 except Exception:
                     pass
 
-            if ctx is not None:
+            state_ctx = getattr(self._state_backend, "_context", None)
+            if ctx is not None and ctx is not state_ctx:
                 try:
                     if ctx.ok():
                         ctx.shutdown()
