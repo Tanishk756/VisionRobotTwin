@@ -87,17 +87,26 @@ def test_ros2_control_watchdog_timeout_e2e():
         assert guarded.connect() is True
         t_start = time.monotonic()
         ready = False
+        last_err = None
         while time.monotonic() - t_start < 15.0:
             try:
                 st = guarded.get_joint_state()
-                if raw_backend.command_endpoint_ready():
+                sub_count = raw_backend._cmd_publisher.get_subscription_count() if raw_backend._cmd_publisher else -1
+                if sub_count >= 1:
                     ready = True
                     break
-            except Exception:
-                pass
+                else:
+                    last_err = f"State received (positions={st.positions}), but command sub_count={sub_count}"
+            except Exception as e:
+                last_err = f"get_joint_state() exception: {type(e).__name__}: {e}"
             time.sleep(0.05)
 
-        assert ready is True, "Failed to establish telemetry and command endpoint readiness"
+        if not ready:
+            logs = harness.get_logs()
+            raise AssertionError(
+                f"Backend failed to establish telemetry and command endpoint readiness: {last_err}\n"
+                f"Controller manager logs:\n{logs}"
+            )
 
         raw_backend.enable_simulation_commands()
         guarded.arm()
