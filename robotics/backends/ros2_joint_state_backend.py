@@ -285,8 +285,12 @@ class ROS2JointStateBackend(RobotBackend):
     def _executor_spin_worker(self) -> None:
         """Internal worker function spinning the single-threaded ROS2 executor."""
         try:
-            if self._executor is not None:
-                self._executor.spin()
+            while self._is_connected:
+                ctx = self._context
+                executor = self._executor
+                if ctx is None or not ctx.ok() or executor is None:
+                    break
+                executor.spin_once(timeout_sec=0.05)
         except Exception as e:
             with self._lock:
                 self._executor_error = str(e)
