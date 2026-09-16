@@ -1,0 +1,51 @@
+name: ROS2 Humble Integration CI
+
+on:
+  push:
+    branches:
+      - main
+      - "develop/**"
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  ros2-humble:
+    name: Test on Ubuntu 22.04 (ROS2 Humble)
+    runs-on: ubuntu-22.04
+    container:
+      image: ros:humble-ros-base
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Install System and Python Dependencies
+        run: |
+          apt-get update && apt-get install -y --no-install-recommends \
+            python3-pip \
+            python3-pytest \
+            python3-pytest-cov \
+            libgl1 \
+            libglib2.0-0
+          python3 -m pip install --upgrade pip
+          python3 -m pip install -r requirements-dev.txt
+
+      - name: Bytecode Compilation Check
+        run: |
+          python3 -m compileall .
+
+      - name: Generate ArUco Marker Assets
+        run: |
+          python3 tools/generate_aruco_markers.py
+
+      - name: Run Full Test Suite including Real ROS2 Integration
+        shell: bash
+        run: |
+          source /opt/ros/humble/setup.bash
+          python3 -m pytest -v
+
+      - name: Run ROS2 JointState Diagnostic Probe Smoke
+        shell: bash
+        run: |
+          source /opt/ros/humble/setup.bash
+          python3 tools/ros2_joint_state_probe.py --help
