@@ -1,88 +1,44 @@
-"""Headless test launch script for ros2_control_demo_example_3 RRBot.
+"""Headless test launch script for ros2_control RRBot multi-interface simulation.
 
-Uses exclusively official installed ros2_control_demo_example_3 resources
-(Xacro, controller YAML) to launch ros2_control_node, robot_state_publisher,
-joint_state_broadcaster, and the selected forward command controller in CI
-without GUI/RViz dependencies.
+Uses ros2_control_node, robot_state_publisher, joint_state_broadcaster,
+and forward command controllers with the official mock_components/GenericSystem
+plugin from ros2_control.
 """
 
 import os
 from typing import List
 
+
 def generate_launch_description():
     """Generates ROS2 LaunchDescription for headless RRBot multi-interface."""
     import xacro
-    from ament_index_python.packages import get_package_share_directory
     from launch import LaunchDescription
     from launch.actions import DeclareLaunchArgument
     from launch.substitutions import LaunchConfiguration
     from launch_ros.actions import Node
 
-    # Locate installed example_3 package
-    pkg_candidates = [
-        "ros2_control_demo_example_3",
-        "ros2_control_demo_bringup",
-        "ros2_control_demo_description",
-    ]
-    pkg_share = None
-    for pkg in pkg_candidates:
-        try:
-            pkg_share = get_package_share_directory(pkg)
-            break
-        except Exception:
-            continue
+    current_dir = os.path.dirname(os.path.abspath(__file__))
 
-    if pkg_share is None:
-        raise FileNotFoundError(f"Could not locate any ros2_control demo packages: {pkg_candidates}")
+    # 1. Locate URDF
+    urdf_file = os.path.join(current_dir, "rrbot_system_multi_interface.urdf")
+    if not os.path.exists(urdf_file):
+        raise FileNotFoundError(f"RRBot URDF file not found at {urdf_file}")
 
-    # Locate URDF / Xacro
-    xacro_candidates = [
-        os.path.join(pkg_share, "urdf", "rrbot_system_multi_interface.urdf.xacro"),
-        os.path.join(pkg_share, "urdf", "rrbot.urdf.xacro"),
-    ]
-    xacro_file = None
-    for candidate in xacro_candidates:
-        if os.path.exists(candidate):
-            xacro_file = candidate
-            break
+    with open(urdf_file, "r", encoding="utf-8") as f:
+        robot_desc_str = f.read()
+    robot_description = {"robot_description": robot_desc_str}
 
-    if xacro_file is None:
-        # Fallback search if named differently in specific package version
-        urdf_dir = os.path.join(pkg_share, "urdf")
-        if os.path.exists(urdf_dir):
-            candidates = [os.path.join(urdf_dir, f) for f in os.listdir(urdf_dir) if f.endswith(".xacro")]
-            if candidates:
-                xacro_file = candidates[0]
-        if xacro_file is None:
-            raise FileNotFoundError(f"No xacro file found in {pkg_share}")
-
-    doc = xacro.process_file(xacro_file)
-    robot_description = {"robot_description": doc.toxml()}
-
-    # Locate Controller Config YAML
-    config_dir = os.path.join(pkg_share, "config")
-    yaml_candidates = [
-        os.path.join(config_dir, "rrbot_multi_interface_forward_controllers.yaml"),
-        os.path.join(config_dir, "rrbot_controllers.yaml"),
-    ]
-    robot_controllers = None
-    for candidate in yaml_candidates:
-        if os.path.exists(candidate):
-            robot_controllers = candidate
-            break
-    if robot_controllers is None:
-        yaml_files = [os.path.join(config_dir, f) for f in os.listdir(config_dir) if f.endswith(".yaml")]
-        if yaml_files:
-            robot_controllers = yaml_files[0]
-        else:
-            raise FileNotFoundError(f"No controller YAML found in {config_dir}")
+    # 2. Locate Controller Config YAML
+    robot_controllers = os.path.join(current_dir, "rrbot_controllers.yaml")
+    if not os.path.exists(robot_controllers):
+        raise FileNotFoundError(f"RRBot controllers YAML not found at {robot_controllers}")
 
     # Launch arguments
     declared_arguments: List[DeclareLaunchArgument] = [
         DeclareLaunchArgument(
             "robot_controller",
             default_value="forward_position_controller",
-            description="Robot controller to spawn and activate (e.g. forward_position_controller or forward_velocity_controller)",
+            description="Robot controller to spawn and activate (forward_position_controller or forward_velocity_controller)",
         ),
     ]
 

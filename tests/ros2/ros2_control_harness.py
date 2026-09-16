@@ -6,7 +6,7 @@ Used for Phase B3.5 real controller-level validation on ROS2 Humble.
 import os
 import signal
 import subprocess
-import sys
+import tempfile
 import time
 from typing import List, Optional, Tuple
 
@@ -34,8 +34,9 @@ class ROS2ControlHarness:
         self.domain_id = domain_id
         self.launch_timeout_s = launch_timeout_s
         self.process: Optional[subprocess.Popen] = None
-        self._stdout_lines: List[str] = []
-        self._stderr_lines: List[str] = []
+        self._stdout_file = None
+        self._stderr_file = None
+        self._prev_domain_id: Optional[str] = None
         self._observed_controller_type: Optional[str] = None
 
     @property
@@ -48,7 +49,6 @@ class ROS2ControlHarness:
         if not _HAS_ROS2:
             raise RuntimeError("ROS2 Humble (rclpy) is required to run ROS2ControlHarness.")
 
-        # Find headless launch script path
         current_dir = os.path.dirname(os.path.abspath(__file__))
         launch_file = os.path.join(current_dir, "launch_rrbot_headless.py")
 
@@ -59,17 +59,24 @@ class ROS2ControlHarness:
             f"robot_controller:={self.robot_controller}",
         ]
 
+        # Configure environment and align DOMAIN_ID
+        if self.domain_id is not None:
+            self._prev_domain_id = os.environ.get("ROS_DOMAIN_ID")
+            os.environ["ROS_DOMAIN_ID"] = str(self.domain_id)
+
         env = os.environ.copy()
         env["PYTHONUNBUFFERED"] = "1"
         env["QT_QPA_PLATFORM"] = "offscreen"
         if self.domain_id is not None:
             env["ROS_DOMAIN_ID"] = str(self.domain_id)
 
-        # Launch process in isolated process group on POSIX
+        # Temporary files for process stdout/stderr to avoid 64KB pipe buffer deadlocks
+        self._stdout_file = tempfile.NamedTemporaryFile(mode="w+", delete=False, prefix="ros2_ctrl_stdout_")
+        self._stderr_file = tempfile.NamedTemporaryFile(mode="w+", delete=False, prefix="ros2_ctrl_stderr_")
+
         kwargs = {
-            "stdout": subprocess.PIPE,
-            "stderr": subprocess.PIPE,
-            "text": True,
+            "stdout": self._stdout_file,
+            "stderr": self._stderr_file,
             "env": env,
         }
         if os.name != "nt":
@@ -80,13 +87,16 @@ class ROS2ControlHarness:
         self.process = subprocess.Popen(cmd, **kwargs)
 
         # Wait for full deterministic readiness
-        self._wait_for_readiness()
+        try:
+            self._wait_for_readiness()
+        except Exception:
+            self.stop()
+            raise
 
     def _wait_for_readiness(self) -> None:
         """Polls controller manager services and joint_states until all readiness conditions pass."""
         t_start = time.monotonic()
-        
-        # Initialize an ephemeral rclpy node on this domain for probing
+
         context = rclpy.Context()
         rclpy.init(context=context)
         node = Node("harness_readiness_probe", context=context)
@@ -100,14 +110,13 @@ class ROS2ControlHarness:
         client = node.create_client(ListControllers, "/controller_manager/list_controllers")
 
         try:
-            # 1. Wait for list_controllers service to be available
+            # 1. Wait for list_controllers service
             service_ready = False
             while time.monotonic() - t_start < self.launch_timeout_s:
                 if self.process.poll() is not None:
-                    stdout, stderr = self.process.communicate(timeout=1.0)
+                    logs = self.get_logs()
                     raise RuntimeError(
-                        f"ros2_control process exited prematurely with code {self.process.returncode}.\n"
-                        f"STDOUT:\n{stdout}\nSTDERR:\n{stderr}"
+                        f"ros2_control process exited prematurely with code {self.process.returncode}.\n{logs}"
                     )
                 if client.wait_for_service(timeout_sec=0.2):
                     service_ready = True
@@ -115,11 +124,12 @@ class ROS2ControlHarness:
                 time.sleep(0.1)
 
             if not service_ready:
+                logs = self.get_logs()
                 raise TimeoutError(
-                    f"controller_manager/list_controllers service not available within {self.launch_timeout_s}s."
+                    f"controller_manager/list_controllers service not available within {self.launch_timeout_s}s.\n{logs}"
                 )
 
-            # 2. Wait for joint_state_broadcaster and robot_controller to reach 'active' state
+            # 2. Wait for joint_state_broadcaster and robot_controller to be active
             controllers_active = False
             while time.monotonic() - t_start < self.launch_timeout_s:
                 req = ListControllers.Request()
@@ -144,12 +154,13 @@ class ROS2ControlHarness:
                 time.sleep(0.2)
 
             if not controllers_active:
+                logs = self.get_logs()
                 raise TimeoutError(
                     f"Controllers joint_state_broadcaster and '{self.robot_controller}' did not become 'active' "
-                    f"within {self.launch_timeout_s}s."
+                    f"within {self.launch_timeout_s}s.\n{logs}"
                 )
 
-            # 3. Wait for initial valid /joint_states message with joint1 and joint2
+            # 3. Wait for initial valid /joint_states message
             state_received = False
             while time.monotonic() - t_start < self.launch_timeout_s:
                 rclpy.spin_once(node, timeout_sec=0.1)
@@ -161,8 +172,9 @@ class ROS2ControlHarness:
                 time.sleep(0.05)
 
             if not state_received:
+                logs = self.get_logs()
                 raise TimeoutError(
-                    f"Initial valid /joint_states not received within {self.launch_timeout_s}s."
+                    f"Initial valid /joint_states not received within {self.launch_timeout_s}s.\n{logs}"
                 )
 
         finally:
@@ -172,9 +184,27 @@ class ROS2ControlHarness:
             if context.ok():
                 rclpy.shutdown(context=context)
 
+    def get_logs(self) -> str:
+        """Reads captured stdout and stderr log files."""
+        stdout_txt, stderr_txt = "", ""
+        if self._stdout_file:
+            try:
+                self._stdout_file.flush()
+                with open(self._stdout_file.name, "r", errors="replace") as f:
+                    stdout_txt = f.read()
+            except Exception:
+                pass
+        if self._stderr_file:
+            try:
+                self._stderr_file.flush()
+                with open(self._stderr_file.name, "r", errors="replace") as f:
+                    stderr_txt = f.read()
+            except Exception:
+                pass
+        return f"=== STDOUT ===\n{stdout_txt}\n=== STDERR ===\n{stderr_txt}"
+
     def stop(self, timeout_s: float = 5.0) -> Tuple[str, str]:
         """Gracefully terminates the ros2_control process group with SIGTERM, falling back to SIGKILL."""
-        stdout, stderr = "", ""
         if self.process is not None and self.process.poll() is None:
             try:
                 if os.name != "nt":
@@ -184,21 +214,41 @@ class ROS2ControlHarness:
             except Exception:
                 pass
 
-            try:
-                stdout, stderr = self.process.communicate(timeout=timeout_s)
-            except subprocess.TimeoutExpired:
+            t_term = time.monotonic()
+            while time.monotonic() - t_term < timeout_s:
+                if self.process.poll() is not None:
+                    break
+                time.sleep(0.1)
+
+            if self.process.poll() is None:
                 try:
                     if os.name != "nt":
                         os.killpg(os.getpgid(self.process.pid), signal.SIGKILL)
                     else:
                         self.process.kill()
-                    stdout, stderr = self.process.communicate(timeout=2.0)
                 except Exception:
                     pass
 
-        self._stdout_lines.extend((stdout or "").splitlines())
-        self._stderr_lines.extend((stderr or "").splitlines())
-        return stdout or "", stderr or ""
+        # Restore previous DOMAIN_ID
+        if self.domain_id is not None:
+            if self._prev_domain_id is not None:
+                os.environ["ROS_DOMAIN_ID"] = self._prev_domain_id
+            else:
+                os.environ.pop("ROS_DOMAIN_ID", None)
+
+        logs = self.get_logs()
+        # Clean up temporary log files
+        for tmp_file in [self._stdout_file, self._stderr_file]:
+            if tmp_file:
+                try:
+                    tmp_file.close()
+                    os.remove(tmp_file.name)
+                except Exception:
+                    pass
+        self._stdout_file = None
+        self._stderr_file = None
+
+        return logs, ""
 
     def __enter__(self) -> "ROS2ControlHarness":
         self.start()
