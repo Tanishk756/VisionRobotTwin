@@ -48,6 +48,8 @@ jobs:
 
       - name: Run ROS2 JointState Diagnostic Probe Smoke
         shell: bash
+        env:
+          PYTHONPATH: "."
         run: |
           source /opt/ros/humble/setup.bash
           python3 tools/ros2_joint_state_probe.py --help
