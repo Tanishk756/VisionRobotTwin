@@ -12,6 +12,7 @@ from dataclasses import dataclass
 from enum import Enum
 import math
 import threading
+import time
 from typing import Optional, Sequence, Tuple
 
 from robotics.backends.base import (
@@ -160,6 +161,119 @@ class GuardedRobotBackend(RobotBackend):
     def transport_capabilities(self) -> RobotBackendCapabilities:
         """Delegates capability introspection to the underlying execution backend."""
         return self._backend.transport_capabilities
+
+    def evaluate_readiness(self) -> SoftwareCommandReadinessReport:
+        """Evaluates software command preflight readiness conditions without mutating guard state."""
+        reasons = []
+        is_conn = self._backend.is_connected()
+        if not is_conn:
+            reasons.append("Underlying execution backend is disconnected.")
+
+        health = self._backend.health_status()
+        health_ok = health in (BackendHealthStatus.HEALTHY, BackendHealthStatus.DEGRADED)
+        if not health_ok:
+            reasons.append(f"Underlying backend health is not acceptable: {health.value}")
+
+        state_avail = True
+        state_fresh = True
+        model_match = True
+        try:
+            state = self._backend.get_joint_state()
+            # Freshness check
+            now_mono = time.monotonic()
+            age_s = now_mono - state.receive_timestamp_s
+            if age_s > self._config.state_timeout_s:
+                state_fresh = False
+                reasons.append(f"Joint telemetry is stale (age {age_s:.3f}s > timeout {self._config.state_timeout_s:.3f}s).")
+
+            # Model alignment check
+            if state.joint_names != self._model.arm_joint_names:
+                model_match = False
+                reasons.append(f"Telemetry joint names {state.joint_names} do not match model arm joint names {self._model.arm_joint_names}.")
+
+            if len(state.positions) != len(self._model.arm_joints):
+                model_match = False
+                reasons.append(f"Telemetry positions length {len(state.positions)} != model DoF {len(self._model.arm_joints)}.")
+
+        except Exception as err:
+            state_avail = False
+            state_fresh = False
+            model_match = False
+            reasons.append(f"Failed to acquire joint state from underlying backend: {err}")
+
+        caps = self._backend.transport_capabilities
+        cmd_mode_supp = caps.position_commands or caps.velocity_commands
+        if not cmd_mode_supp:
+            reasons.append("Underlying backend does not support position or velocity commanding.")
+
+        halt_supp = caps.halt_motion
+        if not halt_supp:
+            reasons.append("Underlying backend does not declare halt_motion capability.")
+
+        transport_ready = is_conn and health_ok
+        external_readiness_ok = True
+        fault_clear = self._active_fault is None
+
+        ready_to_arm = (
+            is_conn
+            and health_ok
+            and state_avail
+            and state_fresh
+            and model_match
+            and cmd_mode_supp
+            and halt_supp
+            and transport_ready
+            and external_readiness_ok
+            and fault_clear
+        )
+
+        return SoftwareCommandReadinessReport(
+            backend_connected=is_conn,
+            backend_health_ok=health_ok,
+            state_available=state_avail,
+            state_fresh=state_fresh,
+            model_match=model_match,
+            command_mode_supported=cmd_mode_supp,
+            halt_supported=halt_supp,
+            transport_ready=transport_ready,
+            external_readiness_ok=external_readiness_ok,
+            fault_clear=fault_clear,
+            ready_to_arm=ready_to_arm,
+            reasons=tuple(reasons),
+        )
+
+    def arm(self) -> None:
+        """Executes preflight verification and transitions guard to ARMED upon success."""
+        with self._command_lock:
+            if self._guard_state == SafetyGuardState.ARMED:
+                return
+            if self._guard_state == SafetyGuardState.FAULT_LATCHED:
+                raise CommandSafetyViolationError("Cannot arm while FAULT_LATCHED. Call reset_fault() first.")
+
+            report = self.evaluate_readiness()
+            if not report.ready_to_arm:
+                reasons_str = "; ".join(report.reasons)
+                raise BackendError(f"Command preflight verification failed: {reasons_str}")
+
+            self._guard_state = SafetyGuardState.ARMED
+
+    def disarm(self) -> None:
+        """Revokes command authorization, performing software halt first if motion occurred."""
+        with self._command_lock:
+            if self._motion_session_active:
+                try:
+                    self._backend.halt_motion()
+                except Exception as err:
+                    self._guard_state = SafetyGuardState.FAULT_LATCHED
+                    self._active_fault = CommandSafetyFault(
+                        code=CommandSafetyFaultCode.SOFTWARE_STOP_FAILED,
+                        monotonic_timestamp_s=time.monotonic(),
+                        detail=f"Software stop failed during disarm: {err}",
+                    )
+                    raise BackendError(f"Disarm software stop failed: {err}") from err
+
+            self._motion_session_active = False
+            self._guard_state = SafetyGuardState.DISARMED
 
     def is_connected(self) -> bool:
         """Delegates connection status query to the underlying execution backend."""

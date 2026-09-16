@@ -6,6 +6,7 @@ import pytest
 
 from robotics.backends.base import (
     BackendCommandDisabledError,
+    BackendError,
     BackendHealthStatus,
     RobotBackend,
     RobotBackendCapabilities,
@@ -100,3 +101,73 @@ def test_delegation_of_backend_contracts():
 
     state = guard.get_joint_state()
     assert state.joint_names == ("j1", "j2")
+
+
+def test_evaluate_readiness_and_arm_success():
+    """Verify preflight check passes on healthy backend and arm() transitions to ARMED."""
+    model, mock_backend = _make_model_and_backend()
+    guard = GuardedRobotBackend(underlying_backend=mock_backend, resolved_model=model)
+
+    report = guard.evaluate_readiness()
+    assert report.ready_to_arm is True
+    assert report.backend_connected is True
+    assert report.backend_health_ok is True
+    assert report.state_fresh is True
+    assert report.model_match is True
+
+    guard.arm()
+    assert guard.is_armed is True
+    assert guard.guard_state == SafetyGuardState.ARMED
+
+
+def test_arm_fails_when_backend_disconnected():
+    """Verify arm() fails and remains DISARMED when underlying backend is disconnected."""
+    model, mock_backend = _make_model_and_backend()
+    mock_backend.is_connected.return_value = False
+    guard = GuardedRobotBackend(underlying_backend=mock_backend, resolved_model=model)
+
+    with pytest.raises(BackendError, match="(?i)disconnected"):
+        guard.arm()
+
+    assert guard.guard_state == SafetyGuardState.DISARMED
+    assert guard.is_armed is False
+
+
+def test_arm_fails_when_joint_names_mismatch():
+    """Verify arm() fails when telemetry joint names do not match ResolvedRobotModel."""
+    model, mock_backend = _make_model_and_backend()
+    bad_state = TimestampedJointState(
+        source_timestamp_s=1.0,
+        receive_timestamp_s=time.monotonic(),
+        joint_names=("wrong_1", "wrong_2"),
+        positions=(0.0, 0.0),
+    )
+    mock_backend.get_joint_state.return_value = bad_state
+    guard = GuardedRobotBackend(underlying_backend=mock_backend, resolved_model=model)
+
+    with pytest.raises(BackendError, match="(?i)do not match"):
+        guard.arm()
+
+    assert guard.guard_state == SafetyGuardState.DISARMED
+
+
+def test_arm_fails_when_telemetry_stale():
+    """Verify arm() fails when telemetry state receive timestamp is older than state_timeout_s."""
+    model, mock_backend = _make_model_and_backend()
+    stale_state = TimestampedJointState(
+        source_timestamp_s=1.0,
+        receive_timestamp_s=time.monotonic() - 5.0,  # 5 seconds old vs 0.5s timeout
+        joint_names=("j1", "j2"),
+        positions=(0.0, 0.0),
+    )
+    mock_backend.get_joint_state.return_value = stale_state
+    guard = GuardedRobotBackend(
+        underlying_backend=mock_backend,
+        resolved_model=model,
+        safety_config=CommandSafetyConfig(state_timeout_s=0.5),
+    )
+
+    with pytest.raises(BackendError, match="(?i)stale"):
+        guard.arm()
+
+    assert guard.guard_state == SafetyGuardState.DISARMED
