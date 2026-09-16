@@ -40,9 +40,11 @@ jobs:
 
       - name: Run Full Test Suite including Real ROS2 Integration
         shell: bash
+        env:
+          PYTEST_DISABLE_PLUGIN_AUTOLOAD: "1"
         run: |
           source /opt/ros/humble/setup.bash
-          python3 -m pytest -p no:launch_testing -p no:launch_testing_ros -v
+          python3 -m pytest -v
 
       - name: Run ROS2 JointState Diagnostic Probe Smoke
         shell: bash
