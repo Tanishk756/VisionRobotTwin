@@ -105,6 +105,19 @@ class PhysicalSafetyStatus:
         if self.source_timestamp_s is not None and not math.isfinite(self.source_timestamp_s):
             raise ValueError(f"source_timestamp_s must be finite, got {self.source_timestamp_s}")
 
+    def signals_equal(self, other: "PhysicalSafetyStatus") -> bool:
+        """Returns True if all 8 safety signal states match regardless of timestamps."""
+        return (
+            self.communication_healthy == other.communication_healthy
+            and self.vendor_fault_clear == other.vendor_fault_clear
+            and self.protective_stop_clear == other.protective_stop_clear
+            and self.emergency_stop_clear == other.emergency_stop_clear
+            and self.external_control_ready == other.external_control_ready
+            and self.drives_state_safe_or_known == other.drives_state_safe_or_known
+            and self.operational_mode_safe == other.operational_mode_safe
+            and self.brakes_state_safe_or_known == other.brakes_state_safe_or_known
+        )
+
     def all_signals_safe(self) -> bool:
         """Returns True if all 8 normalized safety condition fields are verified SAFE."""
         signals = (
