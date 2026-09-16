@@ -19,6 +19,7 @@ from sensor_msgs.msg import JointState as ROSJointState
 from builtin_interfaces.msg import Time as ROSTime
 
 from robotics.backends.base import (
+    BackendHealthStatus,
     BackendStateUnavailableError,
     BackendStateStaleError,
     BackendStateFieldUnavailableError,
@@ -76,7 +77,7 @@ def test_ros2_joint_state_reordering_and_mapping():
         while time.monotonic() - start < 3.0:
             pub.publish(msg)
             pub_exec.spin_once(timeout_sec=0.05)
-            if backend.health_status().is_healthy:
+            if backend.health_status() == BackendHealthStatus.HEALTHY:
                 received_state = backend.get_joint_state()
                 break
             time.sleep(0.05)
@@ -132,7 +133,7 @@ def test_ros2_joint_state_position_only():
         while time.monotonic() - start < 3.0:
             pub.publish(msg)
             pub_exec.spin_once(timeout_sec=0.05)
-            if backend.health_status().is_healthy:
+            if backend.health_status() == BackendHealthStatus.HEALTHY:
                 received_state = backend.get_joint_state()
                 break
             time.sleep(0.05)
@@ -185,18 +186,17 @@ def test_ros2_stale_state_timeout():
         while time.monotonic() - start < 3.0:
             pub.publish(msg)
             pub_exec.spin_once(timeout_sec=0.05)
-            if backend.health_status().is_healthy:
+            if backend.health_status() == BackendHealthStatus.HEALTHY:
                 break
             time.sleep(0.05)
 
-        assert backend.health_status().is_healthy is True
+        assert backend.health_status() == BackendHealthStatus.HEALTHY
         assert backend.get_joint_state().positions == (0.0,)
 
         # Stop publishing and wait for stale timeout (timeout is 0.2s)
         time.sleep(0.3)
 
-        assert backend.health_status().is_healthy is False
-        assert backend.health_status().status == "DEGRADED"
+        assert backend.health_status() == BackendHealthStatus.DEGRADED
         with pytest.raises(BackendStateStaleError):
             backend.get_joint_state()
 
