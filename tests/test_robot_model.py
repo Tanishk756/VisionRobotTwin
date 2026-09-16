@@ -132,3 +132,18 @@ def test_resolved_robot_model_validation_invariants():
     )
     with pytest.raises(ValueError, match="lacks a native_index"):
         model_no_native.require_arm_native_indices()
+
+
+def test_rrbot_fixture_model():
+    """Verifies that the test-only RRBot model fixture adheres to all schema contracts."""
+    from tests.fixtures.rrbot_fixture import create_rrbot_model, RRBOT_CANONICAL_JOINTS
+
+    rrbot = create_rrbot_model()
+    assert rrbot.robot_id == "rrbot"
+    assert rrbot.display_name == "RRBot 2-DoF"
+    assert len(rrbot.arm_joints) == 2
+    assert tuple(j.name for j in rrbot.arm_joints) == RRBOT_CANONICAL_JOINTS
+    assert tuple(j.name for j in rrbot.arm_joints) == ("joint1", "joint2")
+    assert rrbot.arm_joints[0].lower_limit < rrbot.arm_joints[0].upper_limit
+    assert rrbot.arm_joints[1].lower_limit < rrbot.arm_joints[1].upper_limit
+    assert rrbot.capabilities.supports_velocity_control is True
