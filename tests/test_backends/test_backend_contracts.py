@@ -5,7 +5,13 @@ import numpy as np
 import pytest
 
 from robotics.backends.base import (
+    BackendError,
     BackendHealthStatus,
+    BackendStateFieldUnavailableError,
+    BackendStateStaleError,
+    BackendStateUnavailableError,
+    OptionalDependencyError,
+    ReadOnlyBackendError,
     RobotBackend,
     TimestampedJointState,
 )
@@ -138,6 +144,34 @@ def test_timestamped_joint_state_array_copies():
         velocities=(0.0,),
     )
     assert state_no_efforts.get_efforts_array() is None
+
+
+def test_timestamped_joint_state_optional_velocities():
+    """Verify that TimestampedJointState supports optional velocities (None) and raises on array conversion."""
+    state = TimestampedJointState(
+        source_timestamp_s=1.0,
+        receive_timestamp_s=1.001,
+        joint_names=("j1", "j2"),
+        positions=(0.1, 0.2),
+        velocities=None,
+        efforts=None,
+    )
+    assert state.velocities is None
+    assert state.efforts is None
+    assert state.positions == (0.1, 0.2)
+
+    with pytest.raises(BackendStateFieldUnavailableError, match="not available"):
+        state.get_velocities_array()
+
+
+def test_backend_exception_hierarchy():
+    """Verify backend exception inheritance hierarchy."""
+    assert issubclass(BackendError, RuntimeError)
+    assert issubclass(BackendStateUnavailableError, BackendError)
+    assert issubclass(BackendStateStaleError, BackendError)
+    assert issubclass(BackendStateFieldUnavailableError, BackendError)
+    assert issubclass(ReadOnlyBackendError, BackendError)
+    assert issubclass(OptionalDependencyError, BackendError)
 
 
 def test_timestamped_joint_state_age_and_freshness():

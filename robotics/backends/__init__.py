@@ -2,7 +2,13 @@
 
 from typing import Optional, Sequence
 from robotics.backends.base import (
+    BackendError,
     BackendHealthStatus,
+    BackendStateFieldUnavailableError,
+    BackendStateStaleError,
+    BackendStateUnavailableError,
+    OptionalDependencyError,
+    ReadOnlyBackendError,
     RobotBackend,
     TimestampedJointState,
 )
@@ -43,9 +49,15 @@ def create_mock_backend(
 
 
 __all__ = [
+    "BackendError",
     "BackendHealthStatus",
+    "BackendStateFieldUnavailableError",
+    "BackendStateStaleError",
+    "BackendStateUnavailableError",
     "MockRobotBackend",
+    "OptionalDependencyError",
     "PyBulletRobotBackend",
+    "ReadOnlyBackendError",
     "RobotBackend",
     "TimestampedJointState",
     "create_mock_backend",

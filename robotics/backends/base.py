@@ -8,6 +8,36 @@ from typing import Optional, Sequence, Tuple
 import numpy as np
 
 
+class BackendError(RuntimeError):
+    """Base exception for all execution backend operations."""
+    pass
+
+
+class BackendStateUnavailableError(BackendError):
+    """Raised when joint state telemetry has not yet been received on the backend."""
+    pass
+
+
+class BackendStateStaleError(BackendError):
+    """Raised when joint state telemetry is older than the configured staleness timeout."""
+    pass
+
+
+class BackendStateFieldUnavailableError(BackendError):
+    """Raised when an optional joint state field (e.g. velocities or efforts) is requested but absent."""
+    pass
+
+
+class ReadOnlyBackendError(BackendError):
+    """Raised when a commanding operation is attempted on a read-only execution backend."""
+    pass
+
+
+class OptionalDependencyError(BackendError):
+    """Raised when an optional dependency required by a specific backend is missing."""
+    pass
+
+
 class BackendHealthStatus(Enum):
     """Health and communication status of an execution backend."""
 
@@ -22,11 +52,11 @@ class TimestampedJointState:
     """Immutable, timestamped joint telemetry snapshot from an execution backend.
 
     Attributes:
-        source_timestamp_s: Monotonic timestamp (s) recorded at origin/driver.
-        receive_timestamp_s: Monotonic timestamp (s) recorded upon receipt.
+        source_timestamp_s: Timestamp (s) recorded at origin/driver (e.g. ROS header stamp).
+        receive_timestamp_s: Monotonic timestamp (s) recorded upon local receipt.
         joint_names: Ordered tuple of active joint names.
-        positions: Ordered tuple of joint positions in radians.
-        velocities: Ordered tuple of joint velocities in rad/s.
+        positions: Ordered tuple of joint positions in radians (mandatory).
+        velocities: Optional ordered tuple of joint velocities in rad/s.
         efforts: Optional ordered tuple of joint efforts/torques in N or Nm.
         sequence_id: Monotonically increasing frame identifier.
     """
@@ -35,7 +65,7 @@ class TimestampedJointState:
     receive_timestamp_s: float
     joint_names: Tuple[str, ...]
     positions: Tuple[float, ...]
-    velocities: Tuple[float, ...]
+    velocities: Optional[Tuple[float, ...]] = None
     efforts: Optional[Tuple[float, ...]] = None
     sequence_id: int = 0
 
@@ -45,7 +75,7 @@ class TimestampedJointState:
             raise ValueError(
                 f"Length mismatch: {num_joints} joint_names vs {len(self.positions)} positions"
             )
-        if len(self.velocities) != num_joints:
+        if self.velocities is not None and len(self.velocities) != num_joints:
             raise ValueError(
                 f"Length mismatch: {num_joints} joint_names vs {len(self.velocities)} velocities"
             )
@@ -60,9 +90,10 @@ class TimestampedJointState:
         for i, val in enumerate(self.positions):
             if not math.isfinite(val):
                 raise ValueError(f"Non-finite position value at index {i}: {val}")
-        for i, val in enumerate(self.velocities):
-            if not math.isfinite(val):
-                raise ValueError(f"Non-finite velocity value at index {i}: {val}")
+        if self.velocities is not None:
+            for i, val in enumerate(self.velocities):
+                if not math.isfinite(val):
+                    raise ValueError(f"Non-finite velocity value at index {i}: {val}")
         if self.efforts is not None:
             for i, val in enumerate(self.efforts):
                 if not math.isfinite(val):
@@ -73,7 +104,9 @@ class TimestampedJointState:
         return np.array(self.positions, dtype=np.float64)
 
     def get_velocities_array(self) -> np.ndarray:
-        """Returns a new, copy-safe NumPy array of joint velocities."""
+        """Returns a new, copy-safe NumPy array of joint velocities, or raises BackendStateFieldUnavailableError if None."""
+        if self.velocities is None:
+            raise BackendStateFieldUnavailableError("Joint velocities are not available in this joint state.")
         return np.array(self.velocities, dtype=np.float64)
 
     def get_efforts_array(self) -> Optional[np.ndarray]:
@@ -83,7 +116,7 @@ class TimestampedJointState:
         return np.array(self.efforts, dtype=np.float64)
 
     def age_s(self, current_time_s: float) -> float:
-        """Returns the data age in seconds relative to current_time_s."""
+        """Returns the data age in seconds relative to current_time_s using local receive timestamp."""
         return max(0.0, current_time_s - self.receive_timestamp_s)
 
     def is_fresh(self, current_time_s: float, timeout_s: float) -> bool:

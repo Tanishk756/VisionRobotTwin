@@ -199,7 +199,7 @@ class GenericRobotController:
             raise ValueError(
                 f"Backend joint state DoF mismatch: expected {self.model.dof} joints, got {len(state.positions)}"
             )
-        if len(state.velocities) != self.model.dof:
+        if state.velocities is not None and len(state.velocities) != self.model.dof:
             raise ValueError(
                 f"Backend joint state velocities mismatch: expected {self.model.dof} velocities, got {len(state.velocities)}"
             )
@@ -310,6 +310,9 @@ class GenericRobotController:
         """Returns current velocities of controllable arm joints (rad/s)."""
         joint_state = self.backend.get_joint_state()
         self._validate_backend_state(joint_state)
+        if joint_state.velocities is None:
+            from robotics.backends.base import BackendStateFieldUnavailableError
+            raise BackendStateFieldUnavailableError("Joint velocities are not available from backend telemetry.")
         return list(joint_state.velocities)
 
     def get_end_effector_pose(self) -> Tuple[np.ndarray, np.ndarray]:
