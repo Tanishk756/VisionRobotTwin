@@ -192,6 +192,7 @@ def test_mock_ros2_connect_disconnect_lifecycle():
     mock_rclpy.create_node.return_value = mock_node
 
     with patch.object(ros2_module, "_HAS_RCLPY", True), \
+         patch.object(ros2_module, "Context", return_value=mock_context), \
          patch.object(ros2_module, "rclpy", mock_rclpy), \
          patch.object(ros2_module, "SingleThreadedExecutor", return_value=mock_executor), \
          patch("threading.Thread") as mock_thread_cls:

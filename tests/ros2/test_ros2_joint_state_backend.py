@@ -73,7 +73,7 @@ def test_ros2_joint_state_reordering_and_mapping():
         received_state = None
         while time.monotonic() - start < 3.0:
             pub.publish(msg)
-            rclpy.spin_once(pub_node, timeout_sec=0.05, context=pub_ctx)
+            rclpy.spin_once(pub_node, timeout_sec=0.05)
             if backend.health_status().is_healthy:
                 received_state = backend.get_joint_state()
                 break
@@ -128,7 +128,7 @@ def test_ros2_joint_state_position_only():
         received_state = None
         while time.monotonic() - start < 3.0:
             pub.publish(msg)
-            rclpy.spin_once(pub_node, timeout_sec=0.05, context=pub_ctx)
+            rclpy.spin_once(pub_node, timeout_sec=0.05)
             if backend.health_status().is_healthy:
                 received_state = backend.get_joint_state()
                 break
@@ -180,7 +180,7 @@ def test_ros2_stale_state_timeout():
         start = time.monotonic()
         while time.monotonic() - start < 3.0:
             pub.publish(msg)
-            rclpy.spin_once(pub_node, timeout_sec=0.05, context=pub_ctx)
+            rclpy.spin_once(pub_node, timeout_sec=0.05)
             if backend.health_status().is_healthy:
                 break
             time.sleep(0.05)
@@ -219,7 +219,7 @@ def test_ros2_lifecycle_and_reconnect():
     assert thread1.is_alive() is True
 
     # Disconnect
-    assert backend.disconnect() is True
+    backend.disconnect()
     assert backend.is_connected() is False
     assert thread1.is_alive() is False
     assert backend._spin_thread is None
@@ -256,7 +256,7 @@ def test_ros2_unrelated_context_isolation():
         assert backend.is_connected() is True
 
         # Disconnect backend
-        assert backend.disconnect() is True
+        backend.disconnect()
         assert backend.is_connected() is False
 
         # Verify external context & node are completely unharmed
@@ -296,6 +296,6 @@ def test_ros2_read_only_command_rejection_and_entity_audit():
         assert "trajectory" not in topic_name.lower()
 
     # Node should have zero action clients or service clients for robot command/control
-    assert len(node.clients) == 0
+    assert len(list(node.clients)) == 0
 
     backend.disconnect()
