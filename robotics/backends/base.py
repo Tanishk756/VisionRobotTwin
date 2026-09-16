@@ -38,6 +38,40 @@ class OptionalDependencyError(BackendError):
     pass
 
 
+class BackendCommandDisabledError(BackendError):
+    """Raised when a commanding operation is attempted while commands are disabled."""
+    pass
+
+
+class BackendCommandUnavailableError(BackendError):
+    """Raised when a command endpoint is unavailable (e.g. no subscribers or transport offline)."""
+    pass
+
+
+class UnsupportedBackendOperationError(BackendError):
+    """Raised when an unsupported operation or parameter (e.g. effort limit override) is requested."""
+    pass
+
+
+@dataclass(frozen=True)
+class RobotBackendCapabilities:
+    """Declared capabilities supported by a RobotBackend implementation.
+
+    Attributes:
+        read_only: If True, backend only ingests telemetry and rejects commands.
+        position_commands: If True, backend accepts position setpoint commands.
+        velocity_commands: If True, backend accepts velocity setpoint commands.
+        effort_limit_override: If True, backend supports per-command effort/torque overrides.
+        halt_motion: If True, backend supports active software halt/stop commands.
+    """
+
+    read_only: bool = True
+    position_commands: bool = False
+    velocity_commands: bool = False
+    effort_limit_override: bool = False
+    halt_motion: bool = False
+
+
 class BackendHealthStatus(Enum):
     """Health and communication status of an execution backend."""
 
@@ -170,3 +204,9 @@ class RobotBackend(ABC):
     def health_status(self) -> BackendHealthStatus:
         """Returns the transport health and communication state."""
         pass
+
+    @property
+    def transport_capabilities(self) -> RobotBackendCapabilities:
+        """Returns the declared command/telemetry capabilities of this backend instance."""
+        return RobotBackendCapabilities()
+

@@ -219,6 +219,42 @@ def test_generic_controller_delegates_velocities_and_max_force_to_backend(pybull
     mock_backend.command_joint_velocities.assert_called_once_with(clamped, effort_limit=88.0)
 
 
+def test_generic_controller_effort_limit_override_gate(pybullet_direct):
+    """Verify set_arm_joint_velocities fails if max_force requested on backend without effort_limit_override."""
+    from unittest.mock import MagicMock
+    from robotics.backends.base import RobotBackend, RobotBackendCapabilities, UnsupportedBackendOperationError
+
+    client_id = pybullet_direct
+    registry = get_robot_registry()
+    spec = registry.get_robot_spec("panda")
+    body_id = p.loadURDF(spec.urdf_path, spec.base_position, spec.base_orientation, useFixedBase=True, physicsClientId=client_id)
+
+    mock_backend = MagicMock(spec=RobotBackend)
+    mock_backend.is_connected.return_value = True
+    mock_backend.transport_capabilities = RobotBackendCapabilities(
+        read_only=False,
+        position_commands=False,
+        velocity_commands=True,
+        effort_limit_override=False,
+        halt_motion=True,
+    )
+
+    controller = GenericRobotController(
+        physics_client_id=client_id,
+        robot_id=body_id,
+        spec=spec,
+        backend=mock_backend,
+    )
+
+    with pytest.raises(UnsupportedBackendOperationError, match="effort limit"):
+        controller.set_arm_joint_velocities([0.1]*7, max_force=50.0)
+
+    # Calling without max_force succeeds
+    controller.set_arm_joint_velocities([0.1]*7, max_force=None)
+    mock_backend.command_joint_velocities.assert_called_once()
+
+
+
 def test_generic_controller_with_mock_backend(pybullet_direct):
     """Verify GenericRobotController operates seamlessly with concrete MockRobotBackend."""
     from robotics.backends.mock_backend import MockRobotBackend

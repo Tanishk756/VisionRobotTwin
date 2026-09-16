@@ -99,6 +99,18 @@ class ROS2JointStateBackend(RobotBackend):
         self._executor_error: Optional[str] = None
         self._is_connected: bool = False
 
+    @property
+    def transport_capabilities(self):
+        """Returns the declared command/telemetry capabilities of ROS2JointStateBackend."""
+        from robotics.backends.base import RobotBackendCapabilities
+        return RobotBackendCapabilities(
+            read_only=True,
+            position_commands=False,
+            velocity_commands=False,
+            effort_limit_override=False,
+            halt_motion=False,
+        )
+
     def connect(self) -> bool:
         """Establishes private ROS2 context, creates node and subscriber, and starts background executor."""
         with self._lock:

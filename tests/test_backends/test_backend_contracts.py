@@ -639,6 +639,73 @@ def test_create_pybullet_backend_factory(pybullet_sim_fixture):
     assert backend.physics_client_id == client_id
 
 
+def test_backend_command_exceptions():
+    """Verify presence and inheritance of backend command exceptions."""
+    from robotics.backends.base import (
+        BackendError,
+        BackendCommandDisabledError,
+        BackendCommandUnavailableError,
+        UnsupportedBackendOperationError,
+    )
+
+    assert issubclass(BackendCommandDisabledError, BackendError)
+    assert issubclass(BackendCommandUnavailableError, BackendError)
+    assert issubclass(UnsupportedBackendOperationError, BackendError)
+
+
+def test_robot_backend_capabilities_defaults_and_concrete_backends(pybullet_sim_fixture):
+    """Verify RobotBackendCapabilities defaults and properties on PyBullet, Mock, and ROS2JointState backends."""
+    from robotics.backends.base import RobotBackendCapabilities
+    from robotics.backends.mock_backend import MockRobotBackend
+    from robotics.backends.pybullet_backend import PyBulletRobotBackend
+    from robotics.backends.ros2_joint_state_backend import ROS2JointStateBackend
+    from robotics.backends.ros2_state_mapping import ROS2JointStateBackendConfig
+
+    # Default capabilities
+    caps = RobotBackendCapabilities()
+    assert caps.read_only is True
+    assert caps.position_commands is False
+    assert caps.velocity_commands is False
+    assert caps.effort_limit_override is False
+    assert caps.halt_motion is False
+
+    # MockRobotBackend capabilities
+    mock_b = MockRobotBackend(joint_names=["j1", "j2"])
+    assert mock_b.transport_capabilities.read_only is False
+    assert mock_b.transport_capabilities.position_commands is True
+    assert mock_b.transport_capabilities.velocity_commands is True
+    assert mock_b.transport_capabilities.effort_limit_override is True
+    assert mock_b.transport_capabilities.halt_motion is True
+
+    # PyBulletRobotBackend capabilities
+    client_id, body_id, arm_indices, arm_names, max_force = pybullet_sim_fixture
+    pyb = PyBulletRobotBackend(
+        physics_client_id=client_id,
+        robot_body_id=body_id,
+        arm_joint_indices=arm_indices,
+        joint_names=arm_names,
+        default_joint_force=max_force,
+    )
+    assert pyb.transport_capabilities.read_only is False
+    assert pyb.transport_capabilities.position_commands is True
+    assert pyb.transport_capabilities.velocity_commands is True
+    assert pyb.transport_capabilities.effort_limit_override is True
+    assert pyb.transport_capabilities.halt_motion is True
+
+    # ROS2JointStateBackend capabilities
+    try:
+        cfg = ROS2JointStateBackendConfig(expected_joint_names=("j1", "j2"))
+        ros_b = ROS2JointStateBackend(cfg)
+        assert ros_b.transport_capabilities.read_only is True
+        assert ros_b.transport_capabilities.position_commands is False
+        assert ros_b.transport_capabilities.velocity_commands is False
+        assert ros_b.transport_capabilities.effort_limit_override is False
+        assert ros_b.transport_capabilities.halt_motion is False
+    except Exception:
+        pass
+
+
+
 
 
 

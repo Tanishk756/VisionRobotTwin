@@ -58,6 +58,19 @@ class MockRobotBackend(RobotBackend):
         """Indicates whether motion has been halted."""
         return self._is_halted
 
+    @property
+    def transport_capabilities(self):
+        """Returns the declared command/telemetry capabilities of MockRobotBackend."""
+        from robotics.backends.base import RobotBackendCapabilities
+        return RobotBackendCapabilities(
+            read_only=False,
+            position_commands=True,
+            velocity_commands=True,
+            effort_limit_override=True,
+            halt_motion=True,
+        )
+
+
     def connect(self) -> bool:
         """Logically connects/activates the mock backend."""
         self._connected = True

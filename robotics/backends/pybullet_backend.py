@@ -48,6 +48,18 @@ class PyBulletRobotBackend(RobotBackend):
         self._attached: bool = False
         self._sequence_id: int = 0
 
+    @property
+    def transport_capabilities(self):
+        """Returns the declared command/telemetry capabilities of PyBulletRobotBackend."""
+        from robotics.backends.base import RobotBackendCapabilities
+        return RobotBackendCapabilities(
+            read_only=False,
+            position_commands=True,
+            velocity_commands=True,
+            effort_limit_override=True,
+            halt_motion=True,
+        )
+
     def connect(self) -> bool:
         """Attaches to the active PyBullet client and marks backend active."""
         try:

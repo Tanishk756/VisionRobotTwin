@@ -290,6 +290,12 @@ class GenericRobotController:
         Returns:
             The commanded joint velocities (after joint limit clamping).
         """
+        if max_force is not None and not self.backend.transport_capabilities.effort_limit_override:
+            from robotics.backends.base import UnsupportedBackendOperationError
+            raise UnsupportedBackendOperationError(
+                f"The connected backend '{self.backend.__class__.__name__}' does not support torque/effort limit overrides."
+            )
+
         num_targets = min(len(target_joint_velocities), self.model.dof)
         clamped_velocities = []
         for i in range(num_targets):
@@ -299,6 +305,7 @@ class GenericRobotController:
 
         self.backend.command_joint_velocities(clamped_velocities, effort_limit=max_force)
         return clamped_velocities
+
 
     def get_current_joint_positions(self) -> List[float]:
         """Returns current positions of controllable arm joints (rad)."""
