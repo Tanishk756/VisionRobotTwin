@@ -117,6 +117,7 @@ def test_ros2_control_watchdog_timeout_e2e():
         raw_backend.enable_simulation_commands()
         guarded.arm()
         assert guarded.guard_state == SafetyGuardState.ARMED
+        guarded.start_watchdog_monitor(poll_interval_s=0.02)
 
         # Stream valid velocities for 0.4s to establish motion
         v_cmd = [0.25, -0.25]

@@ -457,6 +457,9 @@ class GuardedRobotBackend(RobotBackend):
     def command_joint_positions(self, target_positions: Sequence[float]) -> bool:
         """Dispatches target joint positions following safety envelope and authorization validation."""
         with self._command_lock:
+            if self._motion_session_active and self._config.watchdog_enabled:
+                self.check_watchdog()
+
             if self._guard_state == SafetyGuardState.DISARMED:
                 self._rejected_command_count += 1
                 self._record_audit("command_joint_positions", accepted=False, reason="DISARMED", command_mode="position")
@@ -556,6 +559,9 @@ class GuardedRobotBackend(RobotBackend):
     ) -> bool:
         """Dispatches target joint velocities following safety envelope and authorization validation."""
         with self._command_lock:
+            if self._motion_session_active and self._config.watchdog_enabled:
+                self.check_watchdog()
+
             if self._guard_state == SafetyGuardState.DISARMED:
                 self._rejected_command_count += 1
                 self._record_audit("command_joint_velocities", accepted=False, reason="DISARMED", command_mode="velocity")
