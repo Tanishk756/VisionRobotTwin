@@ -583,3 +583,92 @@ def test_watchdog_concurrency_overlap_safety():
     assert max_active_calls <= 1
 
 
+def test_disconnect_lifecycle_variations():
+    """Verify disconnect behavior for DISARMED, ARMED without motion, active motion, and stop failure."""
+    model, mock_backend = _make_model_and_backend()
+
+    # 1. DISARMED: disconnects directly without calling halt
+    guard1 = GuardedRobotBackend(underlying_backend=mock_backend, resolved_model=model)
+    guard1.disconnect()
+    assert guard1.guard_state == SafetyGuardState.DISARMED
+    assert mock_backend.halt_motion.call_count == 0
+    assert mock_backend.disconnect.call_count == 1
+
+    mock_backend.reset_mock()
+
+    # 2. ARMED but no motion: disarms + disconnects directly without calling halt
+    guard2 = GuardedRobotBackend(underlying_backend=mock_backend, resolved_model=model)
+    guard2.arm()
+    guard2.disconnect()
+    assert guard2.guard_state == SafetyGuardState.DISARMED
+    assert mock_backend.halt_motion.call_count == 0
+    assert mock_backend.disconnect.call_count == 1
+
+    mock_backend.reset_mock()
+
+    # 3. ARMED with active motion: attempts software halt first, then disconnects
+    guard3 = GuardedRobotBackend(underlying_backend=mock_backend, resolved_model=model)
+    guard3.arm()
+    guard3.command_joint_positions([0.1, 0.1])
+    guard3.disconnect()
+    assert guard3.guard_state == SafetyGuardState.DISARMED
+    assert mock_backend.halt_motion.call_count == 1
+    assert mock_backend.disconnect.call_count == 1
+
+    mock_backend.reset_mock()
+
+    # 4. ARMED with active motion and halt failure: latches fault, raises BackendError, does NOT disconnect backend
+    mock_backend.halt_motion.side_effect = RuntimeError("Halt network error")
+    guard4 = GuardedRobotBackend(underlying_backend=mock_backend, resolved_model=model)
+    guard4.arm()
+    guard4.command_joint_positions([0.1, 0.1])
+    with pytest.raises(BackendError, match="(?i)Disconnect halted"):
+        guard4.disconnect()
+
+    assert guard4.guard_state == SafetyGuardState.FAULT_LATCHED
+    assert guard4.active_fault.code == CommandSafetyFaultCode.SOFTWARE_STOP_FAILED
+    assert mock_backend.halt_motion.call_count == 1
+    assert mock_backend.disconnect.call_count == 0
+
+
+def test_command_audit_log_boundedness_and_records():
+    """Verify CommandAuditRecord generation, boundedness, and diagnostic details."""
+    model, mock_backend = _make_model_and_backend()
+    guard = GuardedRobotBackend(
+        underlying_backend=mock_backend,
+        resolved_model=model,
+        safety_config=CommandSafetyConfig(audit_history_limit=3),
+    )
+
+    # 1. Rejected command while DISARMED
+    with pytest.raises(BackendCommandDisabledError):
+        guard.command_joint_positions([0.1, 0.1])
+
+    # 2. Arm guard
+    guard.arm()
+
+    # 3. Successful command 1
+    guard.command_joint_positions([0.1, 0.1])
+
+    # 4. Rejected limit command
+    with pytest.raises(CommandSafetyViolationError):
+        guard.command_joint_positions([5.0, 0.0])
+
+    # 5. Successful velocity command after fault reset & re-arm
+    guard.reset_fault()
+    guard.arm()
+    guard.command_joint_velocities([0.2, 0.2])
+
+    logs = guard.audit_log
+    assert len(logs) == 3  # bounded by audit_history_limit=3
+
+    # Check last record
+    last_rec = logs[-1]
+    assert last_rec.operation == "command_joint_velocities"
+    assert last_rec.accepted is True
+    assert last_rec.command_mode == "velocity"
+    assert last_rec.max_abs_value == pytest.approx(0.2)
+    assert last_rec.command_sequence == 2
+
+
+
