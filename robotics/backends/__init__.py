@@ -2,6 +2,8 @@
 
 from typing import Optional, Sequence
 from robotics.backends.base import (
+    BackendCommandDisabledError,
+    BackendCommandUnavailableError,
     BackendError,
     BackendHealthStatus,
     BackendStateFieldUnavailableError,
@@ -10,7 +12,9 @@ from robotics.backends.base import (
     OptionalDependencyError,
     ReadOnlyBackendError,
     RobotBackend,
+    RobotBackendCapabilities,
     TimestampedJointState,
+    UnsupportedBackendOperationError,
 )
 from robotics.backends.mock_backend import MockRobotBackend
 from robotics.backends.pybullet_backend import PyBulletRobotBackend
@@ -49,6 +53,8 @@ def create_mock_backend(
 
 
 __all__ = [
+    "BackendCommandDisabledError",
+    "BackendCommandUnavailableError",
     "BackendError",
     "BackendHealthStatus",
     "BackendStateFieldUnavailableError",
@@ -59,7 +65,9 @@ __all__ = [
     "PyBulletRobotBackend",
     "ReadOnlyBackendError",
     "RobotBackend",
+    "RobotBackendCapabilities",
     "TimestampedJointState",
+    "UnsupportedBackendOperationError",
     "create_mock_backend",
     "create_pybullet_backend",
 ]
