@@ -5,7 +5,27 @@ All notable changes to the VisionRobotTwin project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [Unreleased] - v1.3.0-dev
+
+### Added
+- **Phase A1 — Execution Backend Boundary**: Introduced abstract `RobotBackend` contract and `TimestampedJointState` model, providing `PyBulletRobotBackend` and `MockRobotBackend` for backend-agnostic execution I/O.
+- **Phase A2 — KinematicsProvider Boundary**: Introduced abstract `KinematicsProvider` contract and `PyBulletKinematicsProvider` for forward kinematics, spatial Jacobians, SVD manipulability, and inverse kinematics.
+- **Phase A3 — CollisionProvider Boundary**: Introduced abstract `CollisionProvider` contract and `PyBulletCollisionProvider` for state-preserving self, table, and obstacle collision queries and RRT-Connect motion planning.
+- **Phase A4 — Resolved Robot Model Boundary**: Decoupled `GenericRobotController` completely from PyBullet initialization via immutable `ResolvedRobotModel`, `ResolvedJointMetadata`, and `JointMotionType`.
+- **Phase B1 — Read-Only ROS2 JointState Telemetry**: Implemented `ROS2JointStateBackend` for fail-closed ROS2 `sensor_msgs/msg/JointState` subscription and telemetry streaming with zero Windows runtime dependencies.
+- **Phase B2 — ROS2 Simulation Command Transport**: Implemented `ROS2SimulationBackend` for commanding `ros2_control` forward position and velocity controllers in simulation.
+- **Phase B3 — Hardware-Readiness Software Command Safety Layer**: Implemented defensive `GuardedRobotBackend`, preflight verification, position step jump limiting, velocity clamping, non-auto-clearing fault latching, software stop, monotonic command watchdog, and audit logging.
+- **Phase B3.5 — Real ros2_control Controller-Level Validation**: Validated closed-loop position and velocity control, live readiness inspection, and watchdog timeout software stop against real ROS2 Humble `controller_manager` and `ForwardCommandController` plugins on RRBot.
+- **Phase B4.1 — Vendor-Neutral Read-Only Physical Commissioning Framework**: Implemented immutable `PhysicalRobotIdentity`, normalized `PhysicalSafetyStatus` (safe-oriented three-state signals: `SAFE`, `UNSAFE`, `UNKNOWN`), `PhysicalReadinessEvaluator`, strictly read-only `PhysicalRobotStateBackend` (`ReadOnlyBackendError` on command/halt), `LimitProvenanceEngine` with interval intersection, `PhysicalObservationSession` soak collector, and `CommissioningSessionRecord` with secret detection.
+
+### Changed
+- Refactored `GenericRobotController`, `GenericIKSolver`, `ResolvedRateController`, `MotionManager`, and `PyBulletSimulator` to operate entirely over backend, kinematics, collision, and model abstraction interfaces.
+- Registered `physical_hardware` and `manual_commissioning` markers in `pytest.ini`.
+
+### Status & Gates
+- **Phase B4.1 Software Framework**: COMPLETE.
+- **Phase B4.1 Physical Commissioning**: BLOCKED — Physical target unresolved.
+- **Phase B4.2 (Physical Commanding)**: BLOCKED.
 
 ## [1.2.0] - 2026-09-14
 

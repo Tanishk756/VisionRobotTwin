@@ -9,7 +9,8 @@ from typing import List, Optional, Tuple, Union
 import numpy as np
 
 from robotics.robot_controller import GenericRobotController
-from robotics.kinematics import compute_jacobian, compute_manipulability, compute_damped_pseudoinverse, ManipulabilityMetrics
+from robotics.kinematics import compute_manipulability, compute_damped_pseudoinverse, ManipulabilityMetrics
+from robotics.kinematics_provider import KinematicsProvider, PyBulletKinematicsProvider
 from utils.logger import get_logger
 
 logger = get_logger("Robotics.DifferentialIK")
@@ -20,27 +21,40 @@ class ResolvedRateController:
 
     def __init__(
         self,
-        physics_client_id: int,
-        robot_controller: GenericRobotController,
+        physics_client_id: Optional[int] = None,
+        robot_controller: Optional[GenericRobotController] = None,
         kp_pos: float = 4.0,
         kp_orn: float = 2.5,
         max_joint_velocity_radps: Optional[float] = None,
         enable_nullspace: bool = True,
         nullspace_gain: float = 1.0,
         singularity_threshold: float = 0.05,
+        kinematics_provider: Optional[KinematicsProvider] = None,
     ):
-        self.client_id = physics_client_id
+        self.client_id = int(physics_client_id) if physics_client_id is not None else -1
         self.controller = robot_controller
-        self.kp_pos = kp_pos
-        self.kp_orn = kp_orn
+        self.kp_pos = float(kp_pos)
+        self.kp_orn = float(kp_orn)
         self.max_joint_vel = (
-            max_joint_velocity_radps
+            float(max_joint_velocity_radps)
             if max_joint_velocity_radps is not None
-            else robot_controller.spec.max_joint_velocity_radps
+            else float(robot_controller.spec.max_joint_velocity_radps)
         )
-        self.enable_nullspace = enable_nullspace
-        self.nullspace_gain = nullspace_gain
-        self.singularity_threshold = singularity_threshold
+        self.enable_nullspace = bool(enable_nullspace)
+        self.nullspace_gain = float(nullspace_gain)
+        self.singularity_threshold = float(singularity_threshold)
+
+        if kinematics_provider is not None:
+            self.kinematics_provider: KinematicsProvider = kinematics_provider
+        elif hasattr(robot_controller, "kinematics_provider") and robot_controller.kinematics_provider is not None:
+            self.kinematics_provider = robot_controller.kinematics_provider
+        else:
+            self.kinematics_provider = PyBulletKinematicsProvider(
+                physics_client_id=self.client_id,
+                robot_body_id=robot_controller.robot_id,
+                arm_joint_indices=robot_controller.arm_joint_indices,
+                end_effector_link_index=robot_controller.ee_link_index,
+            )
 
         lows, highs, ranges, rests = self.controller.get_joint_limits()
         self.lower_limits = np.array(lows, dtype=np.float64)
@@ -78,7 +92,7 @@ class ResolvedRateController:
             return zero_qdot, dummy_metrics
 
         current_q = np.array(self.controller.get_current_joint_positions(), dtype=np.float64)
-        current_p, current_orn = self.controller.get_end_effector_pose()
+        current_p, current_orn = self.kinematics_provider.compute_fk(list(current_q))
 
         # 1. Position Error & Linear Velocity Feedback
         pos_error = target_p - current_p
@@ -94,10 +108,7 @@ class ResolvedRateController:
                 target_q = np.array([1.0, 0.0, 0.0, 0.0])
 
             # Quaternion error: e_rot = 2 * (q_target * q_current^-1).xyz
-            # For small angles, error vector ~ 2 * (q_tgt.w * q_curr.xyz - q_curr.w * q_tgt.xyz - cross(q_tgt.xyz, q_curr.xyz))
-            # Or standard quaternion delta representation
             q_curr_conj = np.array([-current_orn[0], -current_orn[1], -current_orn[2], current_orn[3]])
-            # q_err = target_q * q_curr_conj
             w1, x1, y1, z1 = target_q[3], target_q[0], target_q[1], target_q[2]
             w2, x2, y2, z2 = q_curr_conj[3], q_curr_conj[0], q_curr_conj[1], q_curr_conj[2]
             err_w = w1 * w2 - x1 * x2 - y1 * y2 - z1 * z2
@@ -115,14 +126,8 @@ class ResolvedRateController:
         # Form full 6-DoF spatial twist
         spatial_twist = np.concatenate([v_lin, v_ang])  # (6,)
 
-        # 3. Compute Jacobian and SVD Manipulability
-        _, _, J = compute_jacobian(
-            physics_client_id=self.client_id,
-            robot_id=self.controller.robot_id,
-            ee_link_index=self.controller.ee_link_index,
-            arm_joint_indices=self.controller.arm_joint_indices,
-            joint_positions=list(current_q),
-        )
+        # 3. Compute Jacobian via KinematicsProvider
+        _, _, J = self.kinematics_provider.compute_jacobian(list(current_q))
 
         metrics = compute_manipulability(J, singularity_threshold=self.singularity_threshold)
 

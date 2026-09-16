@@ -59,6 +59,7 @@ def benchmark_controller(
 
     body_id = p.loadURDF(spec.urdf_path, useFixedBase=True, physicsClientId=client_id)
     controller = GenericRobotController(client_id, body_id, spec)
+    controller.reset_to_home()
 
     lows, highs, ranges, rests = controller.get_joint_limits()
     ik_solver = GenericIKSolver(

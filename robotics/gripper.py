@@ -7,7 +7,10 @@ to the target manipulable object, eliminating remote/magical attachments.
 
 from dataclasses import dataclass
 from typing import List, Optional
-import pybullet as p
+try:
+    import pybullet as p
+except ImportError:
+    p = None  # type: ignore
 import numpy as np
 
 from utils.logger import get_logger

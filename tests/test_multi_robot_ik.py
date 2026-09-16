@@ -8,6 +8,7 @@ import numpy as np
 from robotics.robot_registry import get_robot_registry
 from robotics.robot_controller import GenericRobotController
 from robotics.inverse_kinematics import GenericIKSolver, PandaIKSolver, IKStatus, IKResult
+from robotics.kinematics_provider import PyBulletKinematicsProvider
 
 
 @pytest.fixture
@@ -35,6 +36,7 @@ def test_generic_ik_solver_panda(pybullet_direct):
     )
     
     controller = GenericRobotController(client_id, body_id, spec)
+    controller.reset_to_home()
     lows, highs, ranges, rests = controller.get_joint_limits()
     
     ik_solver = GenericIKSolver(
@@ -86,6 +88,7 @@ def test_generic_ik_solver_kuka(pybullet_direct):
     )
     
     controller = GenericRobotController(client_id, body_id, spec)
+    controller.reset_to_home()
     lows, highs, ranges, rests = controller.get_joint_limits()
     
     ik_solver = GenericIKSolver(
@@ -152,3 +155,52 @@ def test_generic_ik_solver_unreachable_and_nan_rejection(pybullet_direct):
     res_nan = ik_solver.solve([np.nan, 0.0, 0.5])
     assert res_nan.success is False
     assert res_nan.status == IKStatus.INVALID_TARGET
+
+
+def test_generic_ik_solver_with_injected_kinematics_provider(pybullet_direct):
+    """Verifies GenericIKSolver operates when injected with an explicit KinematicsProvider."""
+    client_id = pybullet_direct
+    spec = get_robot_registry().get_robot_spec("panda")
+    body_id = p.loadURDF(spec.urdf_path, useFixedBase=True, physicsClientId=client_id)
+    controller = GenericRobotController(client_id, body_id, spec)
+    controller.reset_to_home()
+    lows, highs, ranges, rests = controller.get_joint_limits()
+
+    provider = PyBulletKinematicsProvider(
+        physics_client_id=client_id,
+        robot_body_id=body_id,
+        arm_joint_indices=controller.arm_joint_indices,
+        end_effector_link_index=controller.ee_link_index,
+    )
+
+    ik_solver = GenericIKSolver(
+        physics_client_id=client_id,
+        robot_id=body_id,
+        arm_joint_indices=controller.arm_joint_indices,
+        lower_limits=lows,
+        upper_limits=highs,
+        joint_ranges=ranges,
+        rest_poses=rests,
+        end_effector_link_index=controller.ee_link_index,
+        kinematics_provider=provider,
+    )
+
+    assert ik_solver.provider is provider
+    res = ik_solver.solve([0.45, 0.0, 0.35], [1.0, 0.0, 0.0, 0.0])
+    assert res.success is True
+    assert res.status == IKStatus.SOLUTION_RETURNED
+    assert len(res.joint_positions) == 7
+
+
+def test_generic_ik_solver_has_zero_direct_pybullet_calls():
+    """Verifies that GenericIKSolver module contains no direct pybullet references or calls."""
+    import inspect
+    import robotics.inverse_kinematics as ik_module
+
+    source = inspect.getsource(ik_module)
+    assert "p.calculateInverseKinematics" not in source
+    assert "p.getNumJoints" not in source
+    assert "p.getJointInfo" not in source
+    assert "p.resetJointState" not in source
+    assert "p.getLinkState" not in source
+    assert "import pybullet as p" not in source

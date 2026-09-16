@@ -1,18 +1,35 @@
-# Security & Simulation Safety Policy
+# Security & Robotics Safety Policy
 
 ## Reporting Security or Safety Vulnerabilities
 
 If you discover a security vulnerability or safety-critical defect in VisionRobotTwin, please report it privately by contacting the maintainer:
 
-- **Contact**: Tanishk Singhal
+- **Maintainer**: Tanishk Singhal
 - **Email**: [tanisksinghal6285@gmail.com](mailto:tanisksinghal6285@gmail.com)
 
-Please do not open public issues for security vulnerabilities until a fix or advisory has been coordinated.
+### What to Include in Your Report
+To help us investigate and remediate the issue effectively, please include:
+- A clear description of the vulnerability or defect.
+- Steps to reproduce the issue, including minimal example scripts or configuration files.
+- Affected application version or commit SHA.
+- Potential security or physical safety implications.
+
+Please do not open public issues or disclose exploitable vulnerabilities until a coordinated remediation has been deployed.
 
 ---
 
 ## ⚠️ Robotics & Physical Safety Advisory
 
-1. **Simulation Scope**: **VisionRobotTwin v1.1.0** is designed, tested, and validated as a **software simulation and digital twin system** in PyBullet.
-2. **Physical Robot Disclaimer**: This software must **not** be assumed safe for direct, unmediated control of physical industrial robot manipulators (including real Franka Emika Panda arms) without independent hardware safety interlocks, emergency stop (E-Stop) circuitry, collision-avoidance verification, and formal compliance certification.
-3. **Sensor Limitations**: Monocular optical pose estimation is subject to occlusion, lighting variations, and calibration drift. High-consequence physical robotic deployments require redundant hardware sensing and certified safety controllers.
+1. **Non-Safety-Rated Software Disclaimer**:  
+   All software safety supervisors (`GuardedRobotBackend`, `CommandSafetySupervisor`), monotonic watchdogs, velocity limiters, position jump guards, and software stop routines in VisionRobotTwin are **defensive software layers only and are strictly NON-SAFETY-RATED**. They do not constitute functional safety certification under ISO 13849-1, ISO 10218, or IEC 62061.
+
+2. **Physical Robot Safety Requirements**:  
+   This software must **never** be assumed sufficient on its own for the safe operation of physical industrial manipulators (e.g. Franka Emika Panda, KUKA LBR iiwa, Universal Robots). Physical deployments strictly require independent, hardwired physical safety systems, including:
+   - Dedicated physical Emergency Stop (E-Stop) buttons and circuits.
+   - Hardware-level Safe Torque Off (STO).
+   - Physical barriers, safety fences, or certified optical light curtains.
+   - Manufacturer-certified safety controllers.
+
+3. **Perception & Teleoperation Limits**:  
+   Monocular optical pose estimation and marker-based teleoperation are inherently subject to visual occlusion, lighting variations, camera vibration, and calibration inaccuracies. Physical applications require redundant multi-modal sensing and certified fault-tolerant safety monitoring.
+

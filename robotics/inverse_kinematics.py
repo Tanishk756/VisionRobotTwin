@@ -1,19 +1,19 @@
 """Generic and Multi-Robot Inverse Kinematics (IK) Solver.
 
 Computes joint space solutions for arbitrary N-DoF robotic manipulators
-(e.g., Franka Emika Panda, KUKA LBR iiwa) using PyBullet's Damped Least-Squares
-IK solver with explicit joint limits, null-space rest poses, and performance diagnostics.
+(e.g., Franka Emika Panda, KUKA LBR iiwa) using decoupled KinematicsProvider
+with explicit joint limits, null-space rest poses, and performance diagnostics.
 """
 
 from dataclasses import dataclass
-from typing import List, Optional, Tuple, Union
+from typing import List, Optional, Sequence, Tuple, Union
 from enum import Enum, auto
 import time
-import pybullet as p
 import numpy as np
 
 from config.settings import RobotConfig
 from robotics.coordinate_transform import compute_angular_distance
+from robotics.kinematics_provider import KinematicsProvider, PyBulletKinematicsProvider
 from utils.logger import get_logger
 
 logger = get_logger("Robotics.IK")
@@ -48,17 +48,17 @@ JOINT_LIMIT_TOLERANCE_RAD: float = 0.01
 
 
 class GenericIKSolver:
-    """Robot-agnostic Inverse Kinematics solver for multi-DoF arms in PyBullet."""
+    """Robot-agnostic Inverse Kinematics solver orchestrator for multi-DoF arms."""
 
     def __init__(
         self,
         physics_client_id: int,
         robot_id: int,
-        arm_joint_indices: List[int],
-        lower_limits: List[float],
-        upper_limits: List[float],
-        joint_ranges: List[float],
-        rest_poses: List[float],
+        arm_joint_indices: Sequence[int],
+        lower_limits: Sequence[float],
+        upper_limits: Sequence[float],
+        joint_ranges: Sequence[float],
+        rest_poses: Sequence[float],
         end_effector_link_index: int,
         max_reach_m: float = 0.855,
         min_reach_m: float = 0.10,
@@ -66,43 +66,38 @@ class GenericIKSolver:
         damping_constant: float = 0.01,
         max_residual_position_m: float = 0.06,
         max_residual_orientation_rad: Optional[float] = 0.50,
+        kinematics_provider: Optional[KinematicsProvider] = None,
     ):
-        self.client_id = physics_client_id
-        self.robot_id = robot_id
-        self.arm_joint_indices = arm_joint_indices
+        self.client_id = int(physics_client_id)
+        self.robot_id = int(robot_id)
+        self.arm_joint_indices = list(arm_joint_indices)
         self.lower_limits = list(lower_limits)
         self.upper_limits = list(upper_limits)
         self.joint_ranges = list(joint_ranges)
         self.rest_poses = list(rest_poses)
-        self.ee_link_index = end_effector_link_index
+        self.ee_link_index = int(end_effector_link_index)
         self.num_arm_joints = len(arm_joint_indices)
-        self.max_reach_m = max_reach_m
-        self.min_reach_m = min_reach_m
+        self.max_reach_m = float(max_reach_m)
+        self.min_reach_m = float(min_reach_m)
         self.default_ee_orientation = default_ee_orientation
-        self.max_residual_position_m = max_residual_position_m
-        self.max_residual_orientation_rad = max_residual_orientation_rad
+        self.max_residual_position_m = float(max_residual_position_m)
+        self.max_residual_orientation_rad = (
+            float(max_residual_orientation_rad)
+            if max_residual_orientation_rad is not None
+            else None
+        )
+        self.damping_constant = float(damping_constant)
+        self.damping = [self.damping_constant] * self.num_arm_joints
 
-        # Count actual movable DOFs (revolute + prismatic) for null-space vector sizing in PyBullet
-        movable_joint_count = 0
-        num_total_joints = p.getNumJoints(self.robot_id, physicsClientId=self.client_id)
-        for i in range(num_total_joints):
-            info = p.getJointInfo(self.robot_id, i, physicsClientId=self.client_id)
-            if info[2] in (p.JOINT_REVOLUTE, p.JOINT_PRISMATIC):
-                movable_joint_count += 1
-
-        if len(self.lower_limits) < movable_joint_count:
-            pad_len = movable_joint_count - len(self.lower_limits)
-            self.full_lower = self.lower_limits + [0.0] * pad_len
-            self.full_upper = self.upper_limits + [0.04] * pad_len
-            self.full_ranges = self.joint_ranges + [0.04] * pad_len
-            self.full_rests = self.rest_poses + [0.04] * pad_len
-            self.damping = [damping_constant] * movable_joint_count
+        if kinematics_provider is None:
+            self.provider: KinematicsProvider = PyBulletKinematicsProvider(
+                physics_client_id=self.client_id,
+                robot_body_id=self.robot_id,
+                arm_joint_indices=self.arm_joint_indices,
+                end_effector_link_index=self.ee_link_index,
+            )
         else:
-            self.full_lower = self.lower_limits
-            self.full_upper = self.upper_limits
-            self.full_ranges = self.joint_ranges
-            self.full_rests = self.rest_poses
-            self.damping = [damping_constant] * len(self.lower_limits)
+            self.provider = kinematics_provider
 
     def solve(
         self,
@@ -116,7 +111,7 @@ class GenericIKSolver:
         Args:
             target_position: [x, y, z] target coordinates in robot base frame.
             target_orientation: Optional unit quaternion [x, y, z, w].
-            max_iterations: Max PyBullet internal solver iterations.
+            max_iterations: Max internal solver iterations.
             residual_threshold: Convergence threshold.
 
         Returns:
@@ -155,19 +150,16 @@ class GenericIKSolver:
                 orn = list(self.default_ee_orientation)
 
         try:
-            raw_joint_poses = p.calculateInverseKinematics(
-                self.robot_id,
-                self.ee_link_index,
-                targetPosition=pos,
-                targetOrientation=orn,
-                lowerLimits=self.full_lower,
-                upperLimits=self.full_upper,
-                jointRanges=self.full_ranges,
-                restPoses=self.full_rests,
-                jointDamping=self.damping,
-                maxNumIterations=max_iterations,
-                residualThreshold=residual_threshold,
-                physicsClientId=self.client_id,
+            raw_joint_poses = self.provider.solve_ik_raw(
+                target_position=pos,
+                target_orientation=orn,
+                lower_limits=self.lower_limits,
+                upper_limits=self.upper_limits,
+                joint_ranges=self.joint_ranges,
+                rest_poses=self.rest_poses,
+                joint_damping=self.damping,
+                max_iterations=max_iterations,
+                residual_threshold=residual_threshold,
             )
 
             arm_poses = [float(raw_joint_poses[i]) for i in range(self.num_arm_joints)]
@@ -197,11 +189,8 @@ class GenericIKSolver:
                 # Apply minor numerical clamping strictly within valid limits
                 arm_poses[idx] = float(np.clip(val, low, high))
 
-            # 3. State-Preserving Forward Kinematics (FK) Residual Measurement
-            from robotics.kinematics import compute_fk_at_configuration
-            fk_pos, fk_orn = compute_fk_at_configuration(
-                self.client_id, self.robot_id, self.arm_joint_indices, arm_poses, self.ee_link_index
-            )
+            # 3. State-Preserving Forward Kinematics (FK) Residual Measurement via Provider
+            fk_pos, fk_orn = self.provider.compute_fk(arm_poses)
 
             target_pos_arr = np.array(pos, dtype=np.float64)
             residual_pos_m = float(np.linalg.norm(target_pos_arr - fk_pos))
@@ -263,19 +252,20 @@ class PandaIKSolver(GenericIKSolver):
         physics_client_id: int,
         robot_id: int,
         robot_config: Optional[RobotConfig] = None,
-        arm_joint_indices: Optional[List[int]] = None,
-        lower_limits: Optional[List[float]] = None,
-        upper_limits: Optional[List[float]] = None,
-        joint_ranges: Optional[List[float]] = None,
-        rest_poses: Optional[List[float]] = None,
+        arm_joint_indices: Optional[Sequence[int]] = None,
+        lower_limits: Optional[Sequence[float]] = None,
+        upper_limits: Optional[Sequence[float]] = None,
+        joint_ranges: Optional[Sequence[float]] = None,
+        rest_poses: Optional[Sequence[float]] = None,
         end_effector_link_index: int = 11,
+        kinematics_provider: Optional[KinematicsProvider] = None,
     ):
         config = robot_config or RobotConfig()
-        arm_indices = arm_joint_indices or [0, 1, 2, 3, 4, 5, 6]
-        lows = lower_limits or [-2.8973, -1.7628, -2.8973, -3.0718, -2.8973, -0.0175, -2.8973]
-        highs = upper_limits or [2.8973, 1.7628, 2.8973, -0.0698, 2.8973, 3.7525, 2.8973]
-        ranges = joint_ranges or [h - l for l, h in zip(lows, highs)]
-        rests = rest_poses or list(config.home_joint_positions[: len(arm_indices)])
+        arm_indices = list(arm_joint_indices or [0, 1, 2, 3, 4, 5, 6])
+        lows = list(lower_limits or [-2.8973, -1.7628, -2.8973, -3.0718, -2.8973, -0.0175, -2.8973])
+        highs = list(upper_limits or [2.8973, 1.7628, 2.8973, -0.0698, 2.8973, 3.7525, 2.8973])
+        ranges = list(joint_ranges or [h - l for l, h in zip(lows, highs)])
+        rests = list(rest_poses or list(config.home_joint_positions[: len(arm_indices)]))
 
         super().__init__(
             physics_client_id=physics_client_id,
@@ -289,4 +279,5 @@ class PandaIKSolver(GenericIKSolver):
             max_reach_m=0.855,
             min_reach_m=0.10,
             default_ee_orientation=config.default_ee_orientation,
+            kinematics_provider=kinematics_provider,
         )

@@ -1,13 +1,12 @@
 """Differential Kinematics, Geometric Jacobian, and Manipulability Metrics.
 
-Provides spatial Jacobian computation via PyBullet, Yoshikawa manipulability index,
+Provides spatial Jacobian computation, Yoshikawa manipulability index,
 singular value decomposition, condition number analysis, and adaptive damped
 least-squares (DLS) pseudoinverse calculation.
 """
 
 from dataclasses import dataclass
 from typing import List, Tuple, Optional
-import pybullet as p
 import numpy as np
 
 from utils.logger import get_logger
@@ -34,8 +33,7 @@ def compute_fk_at_configuration(
 ) -> Tuple[np.ndarray, np.ndarray]:
     """Computes forward kinematics (EE position and quaternion) for a candidate joint configuration.
 
-    Temporarily applies joint_positions in PyBullet, queries forward kinematics via getLinkState,
-    and unconditionally restores original joint positions and velocities.
+    Legacy backward-compatibility wrapper delegating to PyBulletKinematicsProvider.
 
     Args:
         physics_client_id: PyBullet client ID.
@@ -47,18 +45,15 @@ def compute_fk_at_configuration(
     Returns:
         (position, quaternion_xyzw) as (np.ndarray shape (3,), np.ndarray shape (4,)).
     """
-    saved_states = p.getJointStates(robot_id, list(arm_joint_indices), physicsClientId=physics_client_id)
-    try:
-        for j_idx, angle in zip(arm_joint_indices, joint_positions):
-            p.resetJointState(robot_id, int(j_idx), targetValue=float(angle), targetVelocity=0.0, physicsClientId=physics_client_id)
-        link_state = p.getLinkState(robot_id, int(ee_link_index), computeForwardKinematics=True, physicsClientId=physics_client_id)
-        fk_pos = np.array(link_state[0], dtype=np.float64)
-        fk_orn = np.array(link_state[1], dtype=np.float64)
-        return fk_pos, fk_orn
-    finally:
-        for j_idx, state in zip(arm_joint_indices, saved_states):
-            p.resetJointState(robot_id, int(j_idx), targetValue=float(state[0]), targetVelocity=float(state[1]), physicsClientId=physics_client_id)
+    from robotics.kinematics_provider import PyBulletKinematicsProvider
 
+    provider = PyBulletKinematicsProvider(
+        physics_client_id=physics_client_id,
+        robot_body_id=robot_id,
+        arm_joint_indices=arm_joint_indices,
+        end_effector_link_index=ee_link_index,
+    )
+    return provider.compute_fk(joint_positions)
 
 
 def compute_jacobian(
@@ -70,6 +65,8 @@ def compute_jacobian(
 ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
     """Computes spatial geometric Jacobian at the current joint configuration.
 
+    Legacy backward-compatibility wrapper delegating to PyBulletKinematicsProvider.
+
     Args:
         physics_client_id: PyBullet client ID.
         robot_id: PyBullet robot body ID.
@@ -80,41 +77,15 @@ def compute_jacobian(
     Returns:
         (J_linear, J_angular, J_full) where J_full has shape (6, n).
     """
-    n = len(arm_joint_indices)
+    from robotics.kinematics_provider import PyBulletKinematicsProvider
 
-    # Query total movable joints (revolute + prismatic) for PyBullet calculateJacobian
-    movable_joint_indices = []
-    num_total_joints = p.getNumJoints(robot_id, physicsClientId=physics_client_id)
-    for i in range(num_total_joints):
-        info = p.getJointInfo(robot_id, i, physicsClientId=physics_client_id)
-        if info[2] in (p.JOINT_REVOLUTE, p.JOINT_PRISMATIC):
-            movable_joint_indices.append(i)
-
-    num_movable = len(movable_joint_indices)
-
-    if len(joint_positions) < num_movable:
-        pad_len = num_movable - len(joint_positions)
-        q_full = list(joint_positions) + [0.0] * pad_len
-        zeros_full = [0.0] * num_movable
-    else:
-        q_full = list(joint_positions[:num_movable])
-        zeros_full = [0.0] * num_movable
-
-    # PyBullet calculateJacobian computes Jacobian with respect to all movable joints
-    j_trans, j_rot = p.calculateJacobian(
-        bodyUniqueId=robot_id,
-        linkIndex=ee_link_index,
-        localPosition=[0.0, 0.0, 0.0],
-        objPositions=q_full,
-        objVelocities=zeros_full,
-        objAccelerations=zeros_full,
-        physicsClientId=physics_client_id,
+    provider = PyBulletKinematicsProvider(
+        physics_client_id=physics_client_id,
+        robot_body_id=robot_id,
+        arm_joint_indices=arm_joint_indices,
+        end_effector_link_index=ee_link_index,
     )
-
-    J_lin = np.array(j_trans, dtype=np.float64)[:, :n]
-    J_ang = np.array(j_rot, dtype=np.float64)[:, :n]
-    J_full = np.vstack([J_lin, J_ang])
-    return J_lin, J_ang, J_full
+    return provider.compute_jacobian(joint_positions)
 
 
 def compute_manipulability(

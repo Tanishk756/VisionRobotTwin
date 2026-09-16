@@ -48,6 +48,7 @@ def test_direct_path_validator_free_and_blocked(pybullet_scene):
 
     body_id = p.loadURDF(spec.urdf_path, useFixedBase=True, physicsClientId=client_id)
     controller = GenericRobotController(client_id, body_id, spec)
+    controller.reset_to_home()
 
     checker = CollisionChecker(
         physics_client_id=client_id,
@@ -82,6 +83,7 @@ def test_rrt_connect_planner_deterministic_success(pybullet_scene):
 
     body_id = p.loadURDF(spec.urdf_path, useFixedBase=True, physicsClientId=client_id)
     controller = GenericRobotController(client_id, body_id, spec)
+    controller.reset_to_home()
 
     checker = CollisionChecker(
         physics_client_id=client_id,
@@ -136,6 +138,7 @@ def test_path_shortcutting_preserves_validity(pybullet_scene):
 
     body_id = p.loadURDF(spec.urdf_path, useFixedBase=True, physicsClientId=client_id)
     controller = GenericRobotController(client_id, body_id, spec)
+    controller.reset_to_home()
 
     checker = CollisionChecker(
         physics_client_id=client_id,
@@ -188,6 +191,7 @@ def test_impossible_scene_failure_and_state_restoration(pybullet_scene):
 
     body_id = p.loadURDF(spec.urdf_path, useFixedBase=True, physicsClientId=client_id)
     controller = GenericRobotController(client_id, body_id, spec)
+    controller.reset_to_home()
 
     # Encase goal position inside an impenetrable obstacle
     giant_col = p.createCollisionShape(p.GEOM_BOX, halfExtents=[0.5, 0.5, 0.5], physicsClientId=client_id)
@@ -224,3 +228,65 @@ def test_impossible_scene_failure_and_state_restoration(pybullet_scene):
     # Verify robot state was restored
     restored_q = controller.get_current_joint_positions()
     assert np.allclose(restored_q, initial_q, atol=1e-5)
+
+
+class MockCollisionProvider:
+    """Mock collision provider for testing planning algorithms without PyBullet."""
+
+    def __init__(self, blocked_predicate=None):
+        self.blocked_predicate = blocked_predicate
+        self.queries = []
+
+    def check_collision(self, joint_positions=None):
+        from robotics.collision_provider import CollisionResult
+        if joint_positions is None:
+            return CollisionResult(in_collision=False)
+        q = list(joint_positions)
+        self.queries.append(q)
+        is_blocked = self.blocked_predicate(q) if self.blocked_predicate else False
+        return CollisionResult(
+            in_collision=is_blocked,
+            self_collision=False,
+            env_collision=is_blocked,
+            min_distance_m=0.0 if is_blocked else 0.5,
+        )
+
+
+def test_pure_rrt_planning_without_pybullet():
+    """Verifies RRTConnectPlanner functions with a MockCollisionProvider without any PyBullet dependency."""
+    # Define a 3-DoF robot with a spherical obstacle in joint space around [0.5, 0.5, 0.5]
+    def in_obstacle(q):
+        return np.linalg.norm(np.array(q) - np.array([0.5, 0.5, 0.5])) < 0.25
+
+    mock_provider = MockCollisionProvider(blocked_predicate=in_obstacle)
+
+    planner = RRTConnectPlanner(
+        lower_limits=[0.0, 0.0, 0.0],
+        upper_limits=[1.0, 1.0, 1.0],
+        collision_checker=mock_provider,
+        step_size_rad=0.10,
+        max_iterations=300,
+        random_seed=42,
+    )
+
+    q_start = [0.1, 0.1, 0.1]
+    q_goal = [0.9, 0.9, 0.9]
+
+    res = planner.plan(q_start, q_goal)
+    assert res.success
+    assert len(res.path) >= 2
+    assert np.allclose(res.path[0], q_start, atol=1e-5)
+    assert np.allclose(res.path[-1], q_goal, atol=1e-5)
+
+    # Every waypoint must be collision free
+    for wpt in res.path:
+        assert not in_obstacle(wpt)
+
+    # Test shortcutting
+    smoothed = shortcut_path(res.path, mock_provider, max_attempts=20, random_seed=42)
+    assert len(smoothed) >= 2
+    assert len(smoothed) <= len(res.path)
+    assert np.allclose(smoothed[0], q_start, atol=1e-5)
+    assert np.allclose(smoothed[-1], q_goal, atol=1e-5)
+    for wpt in smoothed:
+        assert not in_obstacle(wpt)

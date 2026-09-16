@@ -17,8 +17,12 @@ import subprocess
 import time
 from typing import Any, Dict, List, Optional, Sequence, Tuple, Union
 import numpy as np
-import pybullet as p
-import pybullet_data
+try:
+    import pybullet as p
+    import pybullet_data
+except ImportError:
+    p = None  # type: ignore
+    pybullet_data = None  # type: ignore
 from scipy.spatial.transform import Rotation as R
 
 from config.settings import AppConfig, RobotConfig
@@ -616,6 +620,7 @@ def check_shared_feasibility(
                 physicsClientId=cid,
             )
             ctrl = GenericRobotController(cid, rid, spec)
+            ctrl.reset_to_home()
             lows, highs, ranges, rests = ctrl.get_joint_limits()
             solver = GenericIKSolver(
                 physics_client_id=cid,
@@ -1028,6 +1033,7 @@ def execute_experiment_trial(
     )
 
     ctrl = GenericRobotController(cid, rid, spec)
+    ctrl.reset_to_home()
     lows, highs, ranges, rests = ctrl.get_joint_limits()
     ik_solver = GenericIKSolver(
         physics_client_id=cid,
@@ -1310,6 +1316,7 @@ def execute_obstacle_reach_experiment(
     )
 
     ctrl = GenericRobotController(cid, rid, spec)
+    ctrl.reset_to_home()
     lows, highs, ranges, rests = ctrl.get_joint_limits()
     ik_solver = GenericIKSolver(
         physics_client_id=cid,

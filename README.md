@@ -49,6 +49,20 @@ The platform natively supports multiple 7-DoF industrial manipulators with stron
 
 ---
 
+## ⚡ Development Status (`v1.3.0-dev`)
+
+VisionRobotTwin is currently in active development on the `develop/v1.3.0` branch:
+- **Backend-Agnostic Architecture (Phases A1–A4 Complete)**: Decoupled runtime execution (`RobotBackend`), kinematic modeling (`KinematicsProvider`), spatial collision queries (`CollisionProvider`), and model metadata (`ResolvedRobotModel`).
+- **ROS2 Middleware & Simulation Stack (Phases B1–B2 Complete)**: Read-only `JointState` telemetry backend and simulation forward command transport.
+- **Defensive Command Safety Layer (Phase B3 Complete)**: Software command safety guard (`GuardedRobotBackend`), non-auto-clearing fault latching, software stop, and monotonic watchdog timer.
+- **Real `ros2_control` Controller Validation (Phase B3.5 Complete)**: Closed-loop position/velocity control verified against real ROS2 Humble `controller_manager` and `ForwardCommandController` plugins (using RRBot simulation hardware).
+- **Vendor-Neutral Read-Only Physical Commissioning Framework (Phase B4.1 Complete)**: Pure observation framework (`PhysicalRobotIdentity`, three-state safety schema, `PhysicalReadinessEvaluator`, read-only `PhysicalRobotStateBackend`, limit intersection provenance, soak session collector).
+- **Physical Manipulator Target**: `UNRESOLVED` — No physical manipulator connection, no vendor SDK, no physical motion, and zero physical commands sent. Physical commissioning and Phase B4.2 remain blocked pending physical hardware selection.
+
+For complete engineering milestones, capability verification matrix, and architecture logs, see **[End-of-Day Development Summary (2026-09-16)](docs/status/2026-09-16-v1.3-development-summary.md)**.
+
+---
+
 ## 🏗️ System Architecture
 
 ```mermaid

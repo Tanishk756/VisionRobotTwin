@@ -8,9 +8,14 @@ and screenshot capture.
 
 from collections import deque
 from pathlib import Path
+import threading
 from typing import Deque, List, Optional, Tuple
-import pybullet as p
-import pybullet_data
+try:
+    import pybullet as p
+    import pybullet_data
+except ImportError:
+    p = None  # type: ignore
+    pybullet_data = None  # type: ignore
 import numpy as np
 
 from config.settings import AppConfig, SimulationConfig, WorkspaceConfig
@@ -192,18 +197,33 @@ class PyBulletSimulator:
             physicsClientId=self.client_id,
         )
 
+        from robotics.pybullet_model import PyBulletRobotModelResolver, teleport_robot_to_home
+        self.resolved_model = PyBulletRobotModelResolver.resolve(
+            physics_client_id=self.client_id,
+            robot_body_id=self.robot_id,
+            spec=self.robot_spec,
+        )
+        teleport_robot_to_home(self.client_id, self.robot_id, self.resolved_model)
+
+        self._model_query_lock = threading.RLock()
+
         self.controller = GenericRobotController(
             physics_client_id=self.client_id,
             robot_id=self.robot_id,
             spec=self.robot_spec,
             config=self.config.robot,
+            model_query_lock=self._model_query_lock,
+            resolved_model=self.resolved_model,
         )
 
+        self.kinematics_provider = self.controller.kinematics_provider
+
         lows, highs, ranges, rests = self.controller.get_joint_limits()
+        arm_indices = list(self.resolved_model.require_arm_native_indices())
         self.ik_solver = GenericIKSolver(
             physics_client_id=self.client_id,
             robot_id=self.robot_id,
-            arm_joint_indices=self.controller.arm_joint_indices,
+            arm_joint_indices=arm_indices,
             lower_limits=lows,
             upper_limits=highs,
             joint_ranges=ranges,
@@ -212,9 +232,10 @@ class PyBulletSimulator:
             max_reach_m=self.robot_spec.spherical_reach_m,
             min_reach_m=self.robot_spec.min_reach_m,
             default_ee_orientation=self.robot_spec.default_ee_orientation,
+            kinematics_provider=self.kinematics_provider,
         )
 
-        from robotics.collision import CollisionChecker
+        from robotics.collision_provider import PyBulletCollisionProvider
         allowed_mount_pairs = []
         if self.table_id is not None:
             allowed_mount_pairs.extend([
@@ -222,27 +243,31 @@ class PyBulletSimulator:
                 (self.robot_id, 0, self.table_id, -1),
             ])
 
-        self.collision_checker = CollisionChecker(
+        self.collision_provider = PyBulletCollisionProvider(
             physics_client_id=self.client_id,
-            robot_id=self.robot_id,
+            robot_body_id=self.robot_id,
+            arm_joint_indices=arm_indices,
             table_id=self.table_id,
             obstacle_ids=self.obstacle_ids,
             allowed_link_pairs=allowed_mount_pairs,
             allowed_self_link_pairs=self.robot_spec.allowed_self_collision_pairs,
+            query_lock=self._model_query_lock,
         )
+        self.collision_checker = self.collision_provider
 
         from robotics.differential_ik import ResolvedRateController
         self.resolved_rate_controller = ResolvedRateController(
             physics_client_id=self.client_id,
             robot_controller=self.controller,
             enable_nullspace=True,
+            kinematics_provider=self.kinematics_provider,
         )
 
         from robotics.motion_manager import MotionManager
         self.motion_manager = MotionManager(
             robot_controller=self.controller,
             ik_solver=self.ik_solver,
-            collision_checker=self.collision_checker,
+            collision_checker=self.collision_provider,
             trajectory_mode=getattr(self.config, "trajectory_mode", "quintic"),
             scene_type=getattr(self.config, "scene_type", "default"),
         )
@@ -260,15 +285,9 @@ class PyBulletSimulator:
 
     def get_current_manipulability(self):
         """Computes live geometric Jacobian and manipulability metrics for the active robot."""
-        from robotics.kinematics import compute_jacobian, compute_manipulability
+        from robotics.kinematics import compute_manipulability
         curr_q = self.controller.get_current_joint_positions()
-        _, _, J = compute_jacobian(
-            physics_client_id=self.client_id,
-            robot_id=self.robot_id,
-            ee_link_index=self.controller.ee_link_index,
-            arm_joint_indices=self.controller.arm_joint_indices,
-            joint_positions=curr_q,
-        )
+        _, _, J = self.kinematics_provider.compute_jacobian(curr_q)
         metrics = compute_manipulability(J)
         return metrics, J
 

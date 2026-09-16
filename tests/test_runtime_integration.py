@@ -40,6 +40,7 @@ def sim_env():
     spec = registry.get_robot_spec("panda")
     robot_id = p.loadURDF(spec.urdf_path, useFixedBase=True, physicsClientId=client_id)
     controller = GenericRobotController(client_id, robot_id, spec)
+    controller.reset_to_home()
 
     yield client_id, robot_id, table_id, controller, spec
     p.disconnect(physicsClientId=client_id)
@@ -377,3 +378,68 @@ def test_compare_controllers_final_goal_settling_and_accounting():
     assert "time_to_final_goal_tolerance_s" in res
     assert "settle_duration_s" in res
     assert res["settle_duration_s"] == 0.2
+
+
+def test_simulator_shared_kinematics_provider_identity():
+    """Verifies that PyBulletSimulator instantiates a single PyBulletKinematicsProvider shared across all components."""
+    from robotics.simulator import PyBulletSimulator
+    from robotics.kinematics_provider import PyBulletKinematicsProvider
+    from config.settings import get_default_config
+
+    config = get_default_config()
+    sim = PyBulletSimulator(config, headless=True)
+
+    try:
+        assert isinstance(sim.kinematics_provider, PyBulletKinematicsProvider)
+        assert sim.controller.kinematics_provider is sim.kinematics_provider
+        assert sim.ik_solver.provider is sim.kinematics_provider
+        assert sim.resolved_rate_controller.kinematics_provider is sim.kinematics_provider
+
+        # Test manipulability query using the shared provider
+        metrics, J = sim.get_current_manipulability()
+        assert J.shape == (6, len(sim.controller.arm_joint_indices))
+        assert metrics.manipulability > 0.0
+    finally:
+        sim.close()
+
+
+def test_simulator_shared_lock_identity():
+    """Verifies that PyBulletSimulator shares a single model-query lock between kinematics and collision providers."""
+    from robotics.simulator import PyBulletSimulator
+    from robotics.collision_provider import PyBulletCollisionProvider
+    from config.settings import get_default_config
+
+    config = get_default_config()
+    sim = PyBulletSimulator(config, headless=True)
+
+    try:
+        assert isinstance(sim.collision_provider, PyBulletCollisionProvider)
+        assert sim.collision_checker is sim.collision_provider
+        assert sim.motion_manager.collision_provider is sim.collision_provider
+        assert sim.kinematics_provider.query_lock is sim.collision_provider.query_lock
+
+        # Verify collision query succeeds
+        col = sim.collision_provider.check_collision()
+        assert not col.in_collision
+    finally:
+        sim.close()
+
+
+def test_simulator_resolved_model_identity():
+    """Verifies that PyBulletSimulator resolves a canonical ResolvedRobotModel and wires it across subsystems."""
+    from robotics.simulator import PyBulletSimulator
+    from robotics.robot_model import ResolvedRobotModel
+    from config.settings import get_default_config
+
+    config = get_default_config()
+    sim = PyBulletSimulator(config, headless=True)
+
+    try:
+        assert isinstance(sim.resolved_model, ResolvedRobotModel)
+        assert sim.controller.model is sim.resolved_model
+        assert sim.resolved_model.dof == 7
+        assert sim.resolved_model.robot_id == "panda"
+        assert sim.resolved_model.require_arm_native_indices() == tuple(sim.controller.arm_joint_indices)
+    finally:
+        sim.close()
+

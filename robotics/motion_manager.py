@@ -11,7 +11,7 @@ import numpy as np
 
 from robotics.robot_controller import GenericRobotController
 from robotics.inverse_kinematics import GenericIKSolver, IKStatus
-from robotics.collision import CollisionChecker
+from robotics.collision_provider import CollisionProvider
 from robotics.planning import RRTConnectPlanner, shortcut_path, is_joint_path_collision_free, PlanningResult
 from robotics.trajectory import JointQuinticTrajectory, TrajectoryExecutor
 from utils.logger import get_logger
@@ -37,24 +37,31 @@ class MotionManager:
         self,
         robot_controller: GenericRobotController,
         ik_solver: GenericIKSolver,
-        collision_checker: Optional[CollisionChecker] = None,
+        collision_checker: Optional[CollisionProvider] = None,
         trajectory_mode: str = "quintic",
         scene_type: str = "default",
         default_trajectory_duration: float = 2.0,
+        collision_provider: Optional[CollisionProvider] = None,
     ):
+        if collision_checker is not None and collision_provider is not None:
+            if collision_checker is not collision_provider:
+                raise ValueError("Conflicting collision_checker and collision_provider arguments provided.")
+        effective_provider = collision_provider if collision_provider is not None else collision_checker
+
         self.controller = robot_controller
         self.ik_solver = ik_solver
-        self.checker = collision_checker
+        self.collision_provider = effective_provider
+        self.checker = effective_provider
         self.trajectory_mode = trajectory_mode
         self.scene_type = scene_type
         self.default_duration = default_trajectory_duration
 
         lows, highs, _, _ = self.controller.get_joint_limits()
-        if self.checker is not None:
+        if self.collision_provider is not None:
             self.planner = RRTConnectPlanner(
                 lower_limits=lows,
                 upper_limits=highs,
-                collision_checker=self.checker,
+                collision_checker=self.collision_provider,
                 arm_joint_indices=self.controller.arm_joint_indices,
                 step_size_rad=0.10,
                 max_iterations=400,
@@ -110,11 +117,11 @@ class MotionManager:
         traj_duration = duration if duration is not None else self.default_duration
 
         # 2. Check direct linear joint path
-        if self.checker is not None:
+        if self.collision_provider is not None:
             is_free, _ = is_joint_path_collision_free(
                 current_q,
                 goal_q,
-                self.checker,
+                self.collision_provider,
                 arm_joint_indices=self.controller.arm_joint_indices,
             )
         else:
@@ -150,7 +157,7 @@ class MotionManager:
         # 4. Shortcut path
         smoothed = shortcut_path(
             plan_res.path,
-            self.checker,
+            self.collision_provider,
             arm_joint_indices=self.controller.arm_joint_indices,
             max_attempts=30,
         )
