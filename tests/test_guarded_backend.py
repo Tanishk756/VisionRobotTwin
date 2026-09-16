@@ -126,7 +126,7 @@ def test_arm_fails_when_backend_disconnected():
     mock_backend.is_connected.return_value = False
     guard = GuardedRobotBackend(underlying_backend=mock_backend, resolved_model=model)
 
-    with pytest.raises(BackendError, match="(?i)disconnected"):
+    with pytest.raises(BackendError, match="(?i)not connected"):
         guard.arm()
 
     assert guard.guard_state == SafetyGuardState.DISARMED
@@ -260,3 +260,167 @@ def test_require_velocity_feedback_enforcement():
 
     assert guard_req.guard_state == SafetyGuardState.FAULT_LATCHED
     assert guard_req.active_fault.code == CommandSafetyFaultCode.STATE_INVALID
+
+
+def test_fault_does_not_auto_clear_and_blocks_further_commands():
+    """Verify that once a fault is latched, subsequent valid commands are blocked until reset."""
+    model, mock_backend = _make_model_and_backend()
+    guard = GuardedRobotBackend(underlying_backend=mock_backend, resolved_model=model)
+    guard.arm()
+
+    # Trigger limit violation fault
+    with pytest.raises(CommandSafetyViolationError):
+        guard.command_joint_positions([3.0, 0.0])
+
+    assert guard.guard_state == SafetyGuardState.FAULT_LATCHED
+
+    # Try sending a completely valid command while in FAULT_LATCHED
+    with pytest.raises(CommandSafetyViolationError, match="(?i)FAULT_LATCHED"):
+        guard.command_joint_positions([0.0, 0.0])
+
+    assert mock_backend.command_joint_positions.call_count == 0
+
+
+def test_reset_fault_lifecycle_and_transition_to_disarmed():
+    """Verify reset_fault clears fault to DISARMED (never ARMED) requiring explicit re-arm."""
+    model, mock_backend = _make_model_and_backend()
+    guard = GuardedRobotBackend(underlying_backend=mock_backend, resolved_model=model)
+    guard.arm()
+
+    # Trigger fault
+    with pytest.raises(CommandSafetyViolationError):
+        guard.command_joint_positions([3.0, 0.0])
+
+    assert guard.guard_state == SafetyGuardState.FAULT_LATCHED
+    assert guard.active_fault is not None
+
+    # Reset fault
+    guard.reset_fault()
+    assert guard.guard_state == SafetyGuardState.DISARMED
+    assert guard.is_armed is False
+    assert guard.active_fault is None
+
+    # Command while DISARMED fails
+    with pytest.raises(BackendCommandDisabledError):
+        guard.command_joint_positions([0.1, 0.1])
+
+    # Re-arm succeeds and enables commanding
+    guard.arm()
+    assert guard.is_armed is True
+    assert guard.command_joint_positions([0.1, 0.1]) is True
+
+
+def test_reset_fault_rejected_when_readiness_fails():
+    """Verify reset_fault fails and remains FAULT_LATCHED if backend prerequisites fail."""
+    model, mock_backend = _make_model_and_backend()
+    guard = GuardedRobotBackend(underlying_backend=mock_backend, resolved_model=model)
+    guard.arm()
+
+    # Trigger fault
+    with pytest.raises(CommandSafetyViolationError):
+        guard.command_joint_positions([3.0, 0.0])
+
+    assert guard.guard_state == SafetyGuardState.FAULT_LATCHED
+
+    # Backend disconnects before reset attempt
+    mock_backend.is_connected.return_value = False
+    with pytest.raises(BackendError, match="(?i)readiness checks failed"):
+        guard.reset_fault()
+
+    assert guard.guard_state == SafetyGuardState.FAULT_LATCHED
+
+
+def test_reset_fault_only_allowed_from_fault_latched():
+    """Verify calling reset_fault when DISARMED or ARMED raises BackendError."""
+    model, mock_backend = _make_model_and_backend()
+    guard = GuardedRobotBackend(underlying_backend=mock_backend, resolved_model=model)
+
+    with pytest.raises(BackendError, match="(?i)only allowed from FAULT_LATCHED"):
+        guard.reset_fault()
+
+    guard.arm()
+    with pytest.raises(BackendError, match="(?i)only allowed from FAULT_LATCHED"):
+        guard.reset_fault()
+
+
+def test_privileged_software_stop_semantics():
+    """Verify request_software_stop and halt_motion succeed from ARMED, DISARMED, and FAULT_LATCHED."""
+    model, mock_backend = _make_model_and_backend()
+    guard = GuardedRobotBackend(underlying_backend=mock_backend, resolved_model=model)
+
+    # 1. From DISARMED
+    assert guard.request_software_stop() is True
+    assert mock_backend.halt_motion.call_count == 1
+    assert guard.guard_state == SafetyGuardState.DISARMED
+
+    # 2. From ARMED -> transitions to DISARMED
+    guard.arm()
+    assert guard.guard_state == SafetyGuardState.ARMED
+    guard.halt_motion()
+    assert mock_backend.halt_motion.call_count == 2
+    assert guard.guard_state == SafetyGuardState.DISARMED
+
+    # 3. From FAULT_LATCHED -> stays FAULT_LATCHED
+    guard.arm()
+    with pytest.raises(CommandSafetyViolationError):
+        guard.command_joint_positions([3.0, 0.0])
+    assert guard.guard_state == SafetyGuardState.FAULT_LATCHED
+    guard.halt_motion()
+    assert mock_backend.halt_motion.call_count == 3  # 1 (DISARMED) + 1 (ARMED) + 1 (FAULT_LATCHED)
+    assert guard.guard_state == SafetyGuardState.FAULT_LATCHED
+
+
+def test_privileged_software_stop_failure_latches_fault():
+    """Verify failure in underlying halt_motion latches SOFTWARE_STOP_FAILED."""
+    model, mock_backend = _make_model_and_backend()
+    mock_backend.halt_motion.side_effect = RuntimeError("Transport communication dropped")
+    guard = GuardedRobotBackend(underlying_backend=mock_backend, resolved_model=model)
+
+    with pytest.raises(BackendError, match="(?i)software stop request failed"):
+        guard.request_software_stop()
+
+    assert guard.guard_state == SafetyGuardState.FAULT_LATCHED
+    assert guard.active_fault.code == CommandSafetyFaultCode.SOFTWARE_STOP_FAILED
+
+
+def test_disarm_software_stop_lifecycle():
+    """Verify disarm skips halt if no motion occurred, but executes halt if motion occurred."""
+    model, mock_backend = _make_model_and_backend()
+    guard = GuardedRobotBackend(underlying_backend=mock_backend, resolved_model=model)
+    guard.arm()
+
+    # Case A: Armed but no motion commands -> disarm doesn't halt
+    guard.disarm()
+    assert guard.guard_state == SafetyGuardState.DISARMED
+    assert mock_backend.halt_motion.call_count == 0
+
+    # Case B: Armed and commanded motion -> disarm executes halt
+    guard.arm()
+    guard.command_joint_positions([0.1, 0.1])
+    guard.disarm()
+    assert guard.guard_state == SafetyGuardState.DISARMED
+    assert mock_backend.halt_motion.call_count == 1
+
+
+def test_custom_readiness_probe_integration():
+    """Verify custom CommandReadinessProbe is queried during evaluate_readiness and arm."""
+    model, mock_backend = _make_model_and_backend()
+    mock_probe = MagicMock()
+    mock_probe.check.return_value = (False, ("External safety loop open",))
+
+    guard = GuardedRobotBackend(
+        underlying_backend=mock_backend,
+        resolved_model=model,
+        readiness_probe=mock_probe,
+    )
+
+    report = guard.evaluate_readiness()
+    assert report.ready_to_arm is False
+    assert report.external_readiness_ok is False
+    assert "External safety loop open" in report.reasons
+
+    with pytest.raises(BackendError, match="(?i)External safety loop open"):
+        guard.arm()
+
+    assert guard.guard_state == SafetyGuardState.DISARMED
+

@@ -13,7 +13,7 @@ from enum import Enum
 import math
 import threading
 import time
-from typing import Optional, Sequence, Tuple
+from typing import Optional, Protocol, Sequence, Tuple, runtime_checkable
 
 from robotics.backends.base import (
     BackendCommandDisabledError,
@@ -109,6 +109,15 @@ class SoftwareCommandReadinessReport:
     reasons: Tuple[str, ...] = ()
 
 
+@runtime_checkable
+class CommandReadinessProbe(Protocol):
+    """Protocol for optional external readiness checks (e.g. ROS 2 controller manager)."""
+
+    def check(self, backend: RobotBackend, model: ResolvedRobotModel) -> Tuple[bool, Tuple[str, ...]]:
+        """Inspects subsystem configuration/lifecycle and returns (is_ready, reasons)."""
+        ...
+
+
 class GuardedRobotBackend(RobotBackend):
     """Defensive software safety decorator for command-capable robot backends.
 
@@ -121,27 +130,24 @@ class GuardedRobotBackend(RobotBackend):
         underlying_backend: RobotBackend,
         resolved_model: ResolvedRobotModel,
         safety_config: Optional[CommandSafetyConfig] = None,
+        readiness_probe: Optional[CommandReadinessProbe] = None,
     ) -> None:
-        if not isinstance(underlying_backend, RobotBackend):
-            raise TypeError(f"underlying_backend must be an instance of RobotBackend, got {type(underlying_backend)}")
-        if not isinstance(resolved_model, ResolvedRobotModel):
-            raise TypeError(f"resolved_model must be an instance of ResolvedRobotModel, got {type(resolved_model)}")
-
         self._backend = underlying_backend
         self._model = resolved_model
-        self._config = safety_config if safety_config is not None else CommandSafetyConfig()
+        self._config = safety_config or CommandSafetyConfig()
+        self._readiness_probe = readiness_probe
 
         self._command_lock = threading.RLock()
         self._guard_state = SafetyGuardState.DISARMED
         self._active_fault: Optional[CommandSafetyFault] = None
-        self._motion_session_active: bool = False
+        self._accepted_command_sequence = 0
+        self._rejected_command_count = 0
+        self._motion_session_active = False
         self._last_accepted_command_s: Optional[float] = None
-        self._accepted_command_sequence: int = 0
-        self._rejected_command_count: int = 0
 
     @property
     def guard_state(self) -> SafetyGuardState:
-        """Returns the current authorization state of the safety guard."""
+        """Returns the current SafetyGuardState."""
         with self._command_lock:
             return self._guard_state
 
@@ -153,47 +159,67 @@ class GuardedRobotBackend(RobotBackend):
 
     @property
     def active_fault(self) -> Optional[CommandSafetyFault]:
-        """Returns the active latched fault if currently in FAULT_LATCHED state."""
+        """Returns the active CommandSafetyFault if in FAULT_LATCHED state, else None."""
         with self._command_lock:
             return self._active_fault
 
     @property
+    def accepted_command_sequence(self) -> int:
+        """Returns the count of successfully validated and dispatched motion commands."""
+        with self._command_lock:
+            return self._accepted_command_sequence
+
+    @property
+    def rejected_command_count(self) -> int:
+        """Returns the total count of rejected command attempts."""
+        with self._command_lock:
+            return self._rejected_command_count
+
+    @property
     def transport_capabilities(self) -> RobotBackendCapabilities:
-        """Delegates capability introspection to the underlying execution backend."""
+        """Returns capabilities of the underlying execution backend."""
         return self._backend.transport_capabilities
 
-    def evaluate_readiness(self) -> SoftwareCommandReadinessReport:
-        """Evaluates software command preflight readiness conditions without mutating guard state."""
+    def evaluate_readiness(self, ignore_active_fault: bool = False) -> SoftwareCommandReadinessReport:
+        """Evaluates readiness conditions for arming or fault clearing.
+
+        If ignore_active_fault is True, fault_clear evaluates whether the underlying prerequisites
+        are healthy regardless of the current FAULT_LATCHED state.
+        """
         reasons = []
+
         is_conn = self._backend.is_connected()
         if not is_conn:
-            reasons.append("Underlying execution backend is disconnected.")
+            reasons.append("Underlying backend is not connected.")
 
         health = self._backend.health_status()
         health_ok = health in (BackendHealthStatus.HEALTHY, BackendHealthStatus.DEGRADED)
         if not health_ok:
-            reasons.append(f"Underlying backend health is not acceptable: {health.value}")
+            reasons.append(f"Underlying backend health is {health.name}.")
 
-        state_avail = True
-        state_fresh = True
-        model_match = True
+        state_avail = False
+        state_fresh = False
+        model_match = False
+
         try:
             state = self._backend.get_joint_state()
-            # Freshness check
+            state_avail = True
             now_mono = time.monotonic()
-            age_s = now_mono - state.receive_timestamp_s
-            if age_s > self._config.state_timeout_s:
-                state_fresh = False
-                reasons.append(f"Joint telemetry is stale (age {age_s:.3f}s > timeout {self._config.state_timeout_s:.3f}s).")
 
-            # Model alignment check
+            age = now_mono - state.receive_timestamp_s
+            if age <= self._config.state_timeout_s:
+                state_fresh = True
+            else:
+                reasons.append(f"Joint state telemetry is stale ({age:.4f}s > {self._config.state_timeout_s:.4f}s).")
+
             if state.joint_names != self._model.arm_joint_names:
                 model_match = False
                 reasons.append(f"Telemetry joint names {state.joint_names} do not match model arm joint names {self._model.arm_joint_names}.")
-
-            if len(state.positions) != len(self._model.arm_joints):
+            elif len(state.positions) != len(self._model.arm_joints):
                 model_match = False
                 reasons.append(f"Telemetry positions length {len(state.positions)} != model DoF {len(self._model.arm_joints)}.")
+            else:
+                model_match = True
 
         except Exception as err:
             state_avail = False
@@ -211,8 +237,19 @@ class GuardedRobotBackend(RobotBackend):
             reasons.append("Underlying backend does not declare halt_motion capability.")
 
         transport_ready = is_conn and health_ok
+
         external_readiness_ok = True
-        fault_clear = self._active_fault is None
+        if self._readiness_probe is not None:
+            try:
+                probe_ok, probe_reasons = self._readiness_probe.check(self._backend, self._model)
+                if not probe_ok:
+                    external_readiness_ok = False
+                    reasons.extend(probe_reasons)
+            except Exception as probe_err:
+                external_readiness_ok = False
+                reasons.append(f"Readiness probe check failed with error: {probe_err}")
+
+        fault_clear = (self._active_fault is None) if not ignore_active_fault else True
 
         ready_to_arm = (
             is_conn
@@ -262,18 +299,54 @@ class GuardedRobotBackend(RobotBackend):
         with self._command_lock:
             if self._motion_session_active:
                 try:
-                    self._backend.halt_motion()
+                    self.request_software_stop()
                 except Exception as err:
-                    self._guard_state = SafetyGuardState.FAULT_LATCHED
-                    self._active_fault = CommandSafetyFault(
-                        code=CommandSafetyFaultCode.SOFTWARE_STOP_FAILED,
-                        monotonic_timestamp_s=time.monotonic(),
-                        detail=f"Software stop failed during disarm: {err}",
-                    )
                     raise BackendError(f"Disarm software stop failed: {err}") from err
 
             self._motion_session_active = False
             self._guard_state = SafetyGuardState.DISARMED
+
+    def reset_fault(self) -> None:
+        """Clears FAULT_LATCHED state after verifying readiness prerequisites are healthy.
+
+        Transitions to DISARMED upon success. Requires explicit arm() to resume commanding.
+        """
+        with self._command_lock:
+            if self._guard_state != SafetyGuardState.FAULT_LATCHED:
+                raise BackendError(
+                    f"reset_fault() is only allowed from FAULT_LATCHED state, current state is {self._guard_state.name}."
+                )
+
+            report = self.evaluate_readiness(ignore_active_fault=True)
+            if not report.ready_to_arm:
+                reasons_str = "; ".join(report.reasons)
+                raise BackendError(f"Fault reset rejected because readiness checks failed: {reasons_str}")
+
+            self._active_fault = None
+            self._guard_state = SafetyGuardState.DISARMED
+
+    def request_software_stop(self) -> bool:
+        """Privileged software stop path. Bypasses ARMED gating, position/velocity envelopes,
+
+        and existing FAULT_LATCHED state to dispatch halt_motion() to the underlying backend.
+        """
+        with self._command_lock:
+            try:
+                self._backend.halt_motion()
+                self._motion_session_active = False
+                if self._guard_state == SafetyGuardState.ARMED:
+                    self._guard_state = SafetyGuardState.DISARMED
+                return True
+            except Exception as err:
+                self._latch_fault(
+                    CommandSafetyFaultCode.SOFTWARE_STOP_FAILED,
+                    f"Underlying software stop failed: {err}",
+                )
+                raise BackendError(f"Software stop request failed: {err}") from err
+
+    def halt_motion(self) -> None:
+        """Privileged software stop mapping to underlying halt_motion()."""
+        self.request_software_stop()
 
     def is_connected(self) -> bool:
         """Delegates connection status query to the underlying execution backend."""
@@ -422,14 +495,6 @@ class GuardedRobotBackend(RobotBackend):
                 self._motion_session_active = True
                 return True
             return False
-
-    def halt_motion(self) -> None:
-        """Privileged software stop mapping to underlying halt_motion()."""
-        with self._command_lock:
-            self._backend.halt_motion()
-            self._motion_session_active = False
-            if self._guard_state == SafetyGuardState.ARMED:
-                self._guard_state = SafetyGuardState.DISARMED
 
     def _latch_fault(self, code: CommandSafetyFaultCode, detail: str) -> None:
         """Internal helper transitioning state to FAULT_LATCHED and recording fault detail."""
