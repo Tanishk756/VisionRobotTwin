@@ -19,18 +19,42 @@ def generate_launch_description():
     from launch_ros.actions import Node
 
     # Locate installed example_3 package
-    pkg_share = get_package_share_directory("ros2_control_demo_example_3")
+    pkg_candidates = [
+        "ros2_control_demo_example_3",
+        "ros2_control_demo_bringup",
+        "ros2_control_demo_description",
+    ]
+    pkg_share = None
+    for pkg in pkg_candidates:
+        try:
+            pkg_share = get_package_share_directory(pkg)
+            break
+        except Exception:
+            continue
+
+    if pkg_share is None:
+        raise FileNotFoundError(f"Could not locate any ros2_control demo packages: {pkg_candidates}")
 
     # Locate URDF / Xacro
-    xacro_file = os.path.join(pkg_share, "urdf", "rrbot_system_multi_interface.urdf.xacro")
-    if not os.path.exists(xacro_file):
+    xacro_candidates = [
+        os.path.join(pkg_share, "urdf", "rrbot_system_multi_interface.urdf.xacro"),
+        os.path.join(pkg_share, "urdf", "rrbot.urdf.xacro"),
+    ]
+    xacro_file = None
+    for candidate in xacro_candidates:
+        if os.path.exists(candidate):
+            xacro_file = candidate
+            break
+
+    if xacro_file is None:
         # Fallback search if named differently in specific package version
         urdf_dir = os.path.join(pkg_share, "urdf")
-        candidates = [os.path.join(urdf_dir, f) for f in os.listdir(urdf_dir) if f.endswith(".xacro")]
-        if candidates:
-            xacro_file = candidates[0]
-        else:
-            raise FileNotFoundError(f"No xacro file found in {urdf_dir}")
+        if os.path.exists(urdf_dir):
+            candidates = [os.path.join(urdf_dir, f) for f in os.listdir(urdf_dir) if f.endswith(".xacro")]
+            if candidates:
+                xacro_file = candidates[0]
+        if xacro_file is None:
+            raise FileNotFoundError(f"No xacro file found in {pkg_share}")
 
     doc = xacro.process_file(xacro_file)
     robot_description = {"robot_description": doc.toxml()}

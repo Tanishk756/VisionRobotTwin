@@ -25,11 +25,34 @@ jobs:
             python3-pip \
             python3-pytest \
             python3-pytest-cov \
+            ros-humble-controller-manager \
             ros-humble-controller-manager-msgs \
+            ros-humble-ros2-control \
+            ros-humble-ros2-controllers \
+            ros-humble-ros2controlcli \
+            ros-humble-robot-state-publisher \
+            ros-humble-xacro \
+            ros-humble-joint-state-broadcaster \
+            ros-humble-forward-command-controller \
             libgl1 \
             libglib2.0-0
+          DEMO_PKGS=$(apt-cache search "ros-humble.*control.*demo" | awk '{print $1}')
+          echo "Discovered demo packages: $DEMO_PKGS"
+          if [ -n "$DEMO_PKGS" ]; then
+            apt-get install -y --no-install-recommends $DEMO_PKGS || true
+          fi
           python3 -m pip install --upgrade pip
           python3 -m pip install -r requirements-dev.txt
+
+      - name: Verify ros2_control Demo Package Availability
+        shell: bash
+        run: |
+          source /opt/ros/humble/setup.bash
+          ros2 pkg prefix ros2_control_demo_example_3 || ros2 pkg prefix ros2_control_demo_bringup || ros2 pkg prefix ros2_control_demo_description || {
+            echo "Searching available ros2_control packages in environment:"
+            ros2 pkg list | grep -i control || true
+            exit 1
+          }
 
       - name: Bytecode Compilation Check
         run: |
@@ -39,13 +62,33 @@ jobs:
         run: |
           python3 tools/generate_aruco_markers.py
 
-      - name: Run Full Test Suite including Real ROS2 Integration
+      - name: Run Full Regression Suite (Phase B1 - B3)
         shell: bash
         env:
           PYTEST_DISABLE_PLUGIN_AUTOLOAD: "1"
         run: |
           source /opt/ros/humble/setup.bash
-          python3 -m pytest -v
+          python3 -m pytest -v -m "not ros2_control_e2e"
+
+      - name: Run ros2_control Controller-Level E2E Gate (Phase B3.5)
+        shell: bash
+        env:
+          PYTEST_DISABLE_PLUGIN_AUTOLOAD: "1"
+        run: |
+          source /opt/ros/humble/setup.bash
+          python3 -m pytest -v -m "ros2_control_e2e"
+
+      - name: Capture ROS2 Diagnostics on Failure
+        if: failure()
+        shell: bash
+        run: |
+          source /opt/ros/humble/setup.bash
+          echo "=== ROS 2 Topics ==="
+          ros2 topic list || true
+          echo "=== Controller Manager Status ==="
+          ros2 control list_controllers || true
+          ros2 control list_hardware_components -v || true
+          ros2 control list_hardware_interfaces || true
 
       - name: Run ROS2 JointState Diagnostic Probe Smoke
         shell: bash
