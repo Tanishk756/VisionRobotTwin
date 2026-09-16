@@ -132,16 +132,29 @@ def test_guarded_ros2_simulation_position_mode_lifecycle():
         assert guarded.connect() is True
         assert guarded.guard_state == SafetyGuardState.DISARMED
 
-        # 1. Publish fresh telemetry
-        now_ns = time.time_ns()
+        # 1. Publish fresh telemetry and wait for endpoint discovery
         telemetry = ROSJointState()
-        telemetry.header.stamp = ROSTime(sec=now_ns // 1_000_000_000, nanosec=now_ns % 1_000_000_000)
         telemetry.name = list(joint_names)
         telemetry.position = [0.0, 0.0, 0.0]
         telemetry.velocity = [0.0, 0.0, 0.0]
-        state_pub.publish(telemetry)
-        state_exec.spin_once(timeout_sec=0.2)
-        time.sleep(0.05)
+
+        t_start = time.monotonic()
+        ready = False
+        while time.monotonic() - t_start < 3.0:
+            now_ns = time.time_ns()
+            telemetry.header.stamp = ROSTime(sec=now_ns // 1_000_000_000, nanosec=now_ns % 1_000_000_000)
+            state_pub.publish(telemetry)
+            state_exec.spin_once(timeout_sec=0.02)
+            try:
+                guarded.get_joint_state()
+                if raw_backend.command_endpoint_ready():
+                    ready = True
+                    break
+            except Exception:
+                pass
+            time.sleep(0.02)
+
+        assert ready is True, "Failed to establish telemetry and command endpoint readiness within deadline"
 
         # 2. Command before B2 enablement fails
         with pytest.raises(BackendCommandDisabledError):
@@ -154,8 +167,12 @@ def test_guarded_ros2_simulation_position_mode_lifecycle():
 
         # 3. Safe command succeeds
         assert guarded.command_joint_positions([0.1, 0.1, 0.1]) is True
-        time.sleep(0.05)
-        cmd_exec.spin_once(timeout_sec=0.2)
+
+        t_spin = time.monotonic()
+        while time.monotonic() - t_spin < 3.0 and len(received_commands) == 0:
+            cmd_exec.spin_once(timeout_sec=0.02)
+            time.sleep(0.01)
+
         assert len(received_commands) >= 1
         assert received_commands[-1] == pytest.approx([0.1, 0.1, 0.1])
 
@@ -166,13 +183,14 @@ def test_guarded_ros2_simulation_position_mode_lifecycle():
         assert guarded.guard_state == SafetyGuardState.FAULT_LATCHED
         assert guarded.active_fault.code == CommandSafetyFaultCode.POSITION_STEP_VIOLATION
 
-        # 5. Fault recovery
-        # Publish fresh telemetry
-        now_ns = time.time_ns()
-        telemetry.header.stamp = ROSTime(sec=now_ns // 1_000_000_000, nanosec=now_ns % 1_000_000_000)
-        state_pub.publish(telemetry)
-        state_exec.spin_once(timeout_sec=0.2)
-        time.sleep(0.05)
+        # 5. Fault recovery: publish fresh telemetry and verify readiness
+        t_rec = time.monotonic()
+        while time.monotonic() - t_rec < 1.0:
+            now_ns = time.time_ns()
+            telemetry.header.stamp = ROSTime(sec=now_ns // 1_000_000_000, nanosec=now_ns % 1_000_000_000)
+            state_pub.publish(telemetry)
+            state_exec.spin_once(timeout_sec=0.02)
+            time.sleep(0.02)
 
         guarded.reset_fault()
         assert guarded.guard_state == SafetyGuardState.DISARMED
@@ -187,8 +205,10 @@ def test_guarded_ros2_simulation_position_mode_lifecycle():
         assert guarded.is_connected() is False
 
     finally:
-        rclpy.shutdown(context=pub_ctx)
-        rclpy.shutdown(context=sub_ctx)
+        if pub_ctx.ok():
+            pub_ctx.shutdown()
+        if sub_ctx.ok():
+            sub_ctx.shutdown()
 
 
 def test_guarded_ros2_simulation_velocity_mode_and_watchdog_halt():
@@ -231,25 +251,42 @@ def test_guarded_ros2_simulation_velocity_mode_and_watchdog_halt():
         )
 
         assert guarded.connect() is True
-        raw_backend.enable_simulation_commands()
 
-        # Telemetry
-        now_ns = time.time_ns()
+        # Telemetry and discovery loop
         telemetry = ROSJointState()
-        telemetry.header.stamp = ROSTime(sec=now_ns // 1_000_000_000, nanosec=now_ns % 1_000_000_000)
         telemetry.name = list(joint_names)
         telemetry.position = [0.0, 0.0, 0.0]
         telemetry.velocity = [0.0, 0.0, 0.0]
-        state_pub.publish(telemetry)
-        state_exec.spin_once(timeout_sec=0.2)
-        time.sleep(0.05)
 
+        t_start = time.monotonic()
+        ready = False
+        while time.monotonic() - t_start < 3.0:
+            now_ns = time.time_ns()
+            telemetry.header.stamp = ROSTime(sec=now_ns // 1_000_000_000, nanosec=now_ns % 1_000_000_000)
+            state_pub.publish(telemetry)
+            state_exec.spin_once(timeout_sec=0.02)
+            try:
+                guarded.get_joint_state()
+                if raw_backend.command_endpoint_ready():
+                    ready = True
+                    break
+            except Exception:
+                pass
+            time.sleep(0.02)
+
+        assert ready is True, "Failed to establish telemetry and command endpoint readiness within deadline"
+
+        raw_backend.enable_simulation_commands()
         guarded.arm()
 
         # Dispatch valid velocity
         assert guarded.command_joint_velocities([0.5, -0.5, 0.2]) is True
-        time.sleep(0.05)
-        cmd_exec.spin_once(timeout_sec=0.2)
+
+        t_spin = time.monotonic()
+        while time.monotonic() - t_spin < 3.0 and len(received_commands) == 0:
+            cmd_exec.spin_once(timeout_sec=0.02)
+            time.sleep(0.01)
+
         assert len(received_commands) >= 1
         assert received_commands[-1] == pytest.approx([0.5, -0.5, 0.2])
 
@@ -260,12 +297,18 @@ def test_guarded_ros2_simulation_velocity_mode_and_watchdog_halt():
         assert guarded.active_fault.code == CommandSafetyFaultCode.COMMAND_WATCHDOG_TIMEOUT
 
         # Check that zero-velocity halt was published by underlying halt_motion()
-        time.sleep(0.05)
-        cmd_exec.spin_once(timeout_sec=0.2)
+        t_spin2 = time.monotonic()
+        while time.monotonic() - t_spin2 < 3.0 and (len(received_commands) < 2 or received_commands[-1] != [0.0, 0.0, 0.0]):
+            cmd_exec.spin_once(timeout_sec=0.02)
+            time.sleep(0.01)
+
+        assert len(received_commands) >= 2
         assert received_commands[-1] == pytest.approx([0.0, 0.0, 0.0])
 
         guarded.disconnect()
 
     finally:
-        rclpy.shutdown(context=pub_ctx)
-        rclpy.shutdown(context=sub_ctx)
+        if pub_ctx.ok():
+            pub_ctx.shutdown()
+        if sub_ctx.ok():
+            sub_ctx.shutdown()

@@ -92,25 +92,28 @@ def test_ros2_simulation_position_command_streaming():
         backend = ROS2SimulationBackend(sim_cfg)
         assert backend.connect() is True
 
-        # Publish initial telemetry so state is valid
-        now_ns = time.time_ns()
+        # Publish telemetry and poll until discovery and state reception succeed
         telemetry = ROSJointState()
-        telemetry.header.stamp = ROSTime(sec=now_ns // 1_000_000_000, nanosec=now_ns % 1_000_000_000)
         telemetry.name = ["j1", "j2", "j3"]
         telemetry.position = [0.1, 0.2, 0.3]
-        state_pub.publish(telemetry)
 
-        # Spin briefly to allow state reception and graph discovery
         t_start = time.monotonic()
-        while time.monotonic() - t_start < 1.0:
+        ready = False
+        while time.monotonic() - t_start < 3.0:
+            now_ns = time.time_ns()
+            telemetry.header.stamp = ROSTime(sec=now_ns // 1_000_000_000, nanosec=now_ns % 1_000_000_000)
+            state_pub.publish(telemetry)
             state_exec.spin_once(timeout_sec=0.02)
             try:
                 backend.get_joint_state()
                 if backend.command_endpoint_ready():
+                    ready = True
                     break
             except Exception:
                 pass
             time.sleep(0.02)
+
+        assert ready is True, "Failed to establish telemetry and command endpoint readiness within deadline"
 
         # Enable simulation commands
         backend.enable_simulation_commands()
@@ -121,7 +124,7 @@ def test_ros2_simulation_position_command_streaming():
 
         # Spin subscriber executor
         t_spin = time.monotonic()
-        while time.monotonic() - t_spin < 1.0 and len(received_commands) == 0:
+        while time.monotonic() - t_spin < 3.0 and len(received_commands) == 0:
             cmd_exec.spin_once(timeout_sec=0.02)
             time.sleep(0.01)
 
@@ -164,23 +167,27 @@ def test_ros2_simulation_velocity_command_and_zero_halt():
         backend = ROS2SimulationBackend(sim_cfg)
         assert backend.connect() is True
 
-        now_ns = time.time_ns()
         telemetry = ROSJointState()
-        telemetry.header.stamp = ROSTime(sec=now_ns // 1_000_000_000, nanosec=now_ns % 1_000_000_000)
         telemetry.name = ["j1", "j2"]
         telemetry.position = [0.0, 0.0]
-        state_pub.publish(telemetry)
 
         t_start = time.monotonic()
-        while time.monotonic() - t_start < 1.0:
+        ready = False
+        while time.monotonic() - t_start < 3.0:
+            now_ns = time.time_ns()
+            telemetry.header.stamp = ROSTime(sec=now_ns // 1_000_000_000, nanosec=now_ns % 1_000_000_000)
+            state_pub.publish(telemetry)
             state_exec.spin_once(timeout_sec=0.02)
             try:
                 backend.get_joint_state()
                 if backend.command_endpoint_ready():
+                    ready = True
                     break
             except Exception:
                 pass
             time.sleep(0.02)
+
+        assert ready is True, "Failed to establish telemetry and command endpoint readiness within deadline"
 
         backend.enable_simulation_commands()
 
@@ -191,7 +198,7 @@ def test_ros2_simulation_velocity_command_and_zero_halt():
         backend.halt_motion()
 
         t_spin = time.monotonic()
-        while time.monotonic() - t_spin < 1.0 and len(received_commands) < 2:
+        while time.monotonic() - t_spin < 3.0 and len(received_commands) < 2:
             cmd_exec.spin_once(timeout_sec=0.02)
             time.sleep(0.01)
 
