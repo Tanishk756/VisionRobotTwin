@@ -56,6 +56,7 @@ def test_ros2_control_position_e2e_closed_loop():
             node_name="rrbot_pos_state_sub",
             state_timeout_s=2.0,
             domain_id=domain_id,
+            qos_reliability="reliable",
         )
         sim_cfg = ROS2SimulationBackendConfig(
             state_config=state_cfg,
@@ -63,6 +64,7 @@ def test_ros2_control_position_e2e_closed_loop():
             position_command_topic="/forward_position_controller/commands",
             require_subscriber_ready=True,
             command_node_name="rrbot_pos_cmd_pub",
+            command_qos="reliable",
         )
 
         raw_backend = ROS2SimulationBackend(sim_cfg)
