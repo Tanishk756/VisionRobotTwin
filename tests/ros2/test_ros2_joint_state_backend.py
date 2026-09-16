@@ -29,10 +29,12 @@ from robotics.backends.ros2_joint_state_backend import ROS2JointStateBackend
 
 
 def _create_publisher_helper(topic_name: str, qos_profile: QoSProfile, context: Context):
-    """Helper to create a dedicated publisher node in its own context."""
+    """Helper to create a dedicated publisher node and executor in its own context."""
     node = rclpy.create_node("test_joint_state_publisher", context=context)
     pub = node.create_publisher(ROSJointState, topic_name, qos_profile)
-    return node, pub
+    executor = SingleThreadedExecutor(context=context)
+    executor.add_node(node)
+    return node, pub, executor
 
 
 def test_ros2_joint_state_reordering_and_mapping():
@@ -46,7 +48,7 @@ def test_ros2_joint_state_reordering_and_mapping():
             reliability=ReliabilityPolicy.BEST_EFFORT,
             durability=DurabilityPolicy.VOLATILE,
         )
-        pub_node, pub = _create_publisher_helper("/test_reorder_joint_states", qos, pub_ctx)
+        pub_node, pub, pub_exec = _create_publisher_helper("/test_reorder_joint_states", qos, pub_ctx)
 
         config = ROS2JointStateBackendConfig(
             expected_joint_names=("joint_a", "joint_b", "joint_c"),
@@ -73,7 +75,7 @@ def test_ros2_joint_state_reordering_and_mapping():
         received_state = None
         while time.monotonic() - start < 3.0:
             pub.publish(msg)
-            rclpy.spin_once(pub_node, timeout_sec=0.05)
+            pub_exec.spin_once(timeout_sec=0.05)
             if backend.health_status().is_healthy:
                 received_state = backend.get_joint_state()
                 break
@@ -90,6 +92,7 @@ def test_ros2_joint_state_reordering_and_mapping():
         backend.disconnect()
         assert backend.is_connected() is False
     finally:
+        pub_exec.shutdown()
         pub_node.destroy_node()
         pub_ctx.try_shutdown()
 
@@ -105,7 +108,7 @@ def test_ros2_joint_state_position_only():
             reliability=ReliabilityPolicy.BEST_EFFORT,
             durability=DurabilityPolicy.VOLATILE,
         )
-        pub_node, pub = _create_publisher_helper("/test_pos_only_joint_states", qos, pub_ctx)
+        pub_node, pub, pub_exec = _create_publisher_helper("/test_pos_only_joint_states", qos, pub_ctx)
 
         config = ROS2JointStateBackendConfig(
             expected_joint_names=("j1", "j2"),
@@ -128,7 +131,7 @@ def test_ros2_joint_state_position_only():
         received_state = None
         while time.monotonic() - start < 3.0:
             pub.publish(msg)
-            rclpy.spin_once(pub_node, timeout_sec=0.05)
+            pub_exec.spin_once(timeout_sec=0.05)
             if backend.health_status().is_healthy:
                 received_state = backend.get_joint_state()
                 break
@@ -144,6 +147,7 @@ def test_ros2_joint_state_position_only():
 
         backend.disconnect()
     finally:
+        pub_exec.shutdown()
         pub_node.destroy_node()
         pub_ctx.try_shutdown()
 
@@ -159,7 +163,7 @@ def test_ros2_stale_state_timeout():
             reliability=ReliabilityPolicy.BEST_EFFORT,
             durability=DurabilityPolicy.VOLATILE,
         )
-        pub_node, pub = _create_publisher_helper("/test_stale_joint_states", qos, pub_ctx)
+        pub_node, pub, pub_exec = _create_publisher_helper("/test_stale_joint_states", qos, pub_ctx)
 
         config = ROS2JointStateBackendConfig(
             expected_joint_names=("j1",),
@@ -180,7 +184,7 @@ def test_ros2_stale_state_timeout():
         start = time.monotonic()
         while time.monotonic() - start < 3.0:
             pub.publish(msg)
-            rclpy.spin_once(pub_node, timeout_sec=0.05)
+            pub_exec.spin_once(timeout_sec=0.05)
             if backend.health_status().is_healthy:
                 break
             time.sleep(0.05)
@@ -198,6 +202,7 @@ def test_ros2_stale_state_timeout():
 
         backend.disconnect()
     finally:
+        pub_exec.shutdown()
         pub_node.destroy_node()
         pub_ctx.try_shutdown()
 
