@@ -345,3 +345,119 @@ def test_ros2_diagnostics_dataclass():
     assert diag.topic == "/joint_states"
     assert diag.is_stale is False
     assert diag.executor_error is None
+
+
+def test_ros2_simulation_command_mode_enum():
+    """Verify ROS2SimulationCommandMode enum members."""
+    from robotics.backends.ros2_state_mapping import ROS2SimulationCommandMode
+
+    assert ROS2SimulationCommandMode.POSITION.name == "POSITION"
+    assert ROS2SimulationCommandMode.VELOCITY.name == "VELOCITY"
+
+
+def test_ros2_simulation_backend_config_valid():
+    """Verify valid construction and defaults of ROS2SimulationBackendConfig."""
+    from robotics.backends.ros2_state_mapping import (
+        ROS2JointStateBackendConfig,
+        ROS2SimulationBackendConfig,
+    )
+
+    state_cfg = ROS2JointStateBackendConfig(expected_joint_names=("j1", "j2"))
+    cfg = ROS2SimulationBackendConfig(state_config=state_cfg)
+
+    assert cfg.state_config is state_cfg
+    assert cfg.command_mode == "position"
+    assert cfg.position_command_topic == "/forward_position_controller/commands"
+    assert cfg.velocity_command_topic == "/forward_velocity_controller/commands"
+    assert cfg.commands_enabled is False
+    assert cfg.require_subscriber_ready is True
+    assert cfg.command_qos == "system_default"
+    assert cfg.environment == "simulation"
+    assert cfg.command_node_name == "visionrobottwin_sim_command"
+
+
+def test_ros2_simulation_backend_config_validation_rejections():
+    """Verify validation rejections for ROS2SimulationBackendConfig."""
+    from robotics.backends.ros2_state_mapping import (
+        ROS2JointStateBackendConfig,
+        ROS2SimulationBackendConfig,
+    )
+
+    state_cfg = ROS2JointStateBackendConfig(expected_joint_names=("j1", "j2"))
+
+    # Invalid state_config type
+    with pytest.raises(TypeError, match="state_config"):
+        ROS2SimulationBackendConfig(state_config="not_a_config")  # type: ignore[arg-type]
+
+    # Non-simulation environment
+    with pytest.raises(ValueError, match="environment must strictly be 'simulation'"):
+        ROS2SimulationBackendConfig(state_config=state_cfg, environment="hardware")
+
+    # Invalid command mode
+    with pytest.raises(ValueError, match="command_mode"):
+        ROS2SimulationBackendConfig(state_config=state_cfg, command_mode="torque")
+
+    # Empty position topic in position mode
+    with pytest.raises(ValueError, match="position_command_topic"):
+        ROS2SimulationBackendConfig(
+            state_config=state_cfg, command_mode="position", position_command_topic=""
+        )
+
+    # Empty velocity topic in velocity mode
+    with pytest.raises(ValueError, match="velocity_command_topic"):
+        ROS2SimulationBackendConfig(
+            state_config=state_cfg, command_mode="velocity", velocity_command_topic=""
+        )
+
+    # Invalid command QoS
+    with pytest.raises(ValueError, match="command_qos"):
+        ROS2SimulationBackendConfig(state_config=state_cfg, command_qos="invalid_qos")
+
+    # Empty node name
+    with pytest.raises(ValueError, match="command_node_name"):
+        ROS2SimulationBackendConfig(state_config=state_cfg, command_node_name="")
+
+
+def test_ros2_simulation_diagnostics_dataclass():
+    """Verify ROS2SimulationDiagnostics fields and immutability."""
+    from robotics.backends.ros2_state_mapping import (
+        ROS2JointStateDiagnostics,
+        ROS2SimulationDiagnostics,
+    )
+
+    state_diag = ROS2JointStateDiagnostics(
+        messages_received=10,
+        valid_messages=10,
+        invalid_messages=0,
+        last_receive_monotonic_s=100.0,
+        last_source_timestamp_s=50.0,
+        last_validation_error=None,
+        topic="/joint_states",
+        is_stale=False,
+        executor_error=None,
+    )
+    sim_diag = ROS2SimulationDiagnostics(
+        commands_attempted=5,
+        commands_published=4,
+        commands_rejected=1,
+        last_command_monotonic_s=100.1,
+        last_command_mode="position",
+        last_command_vector=(0.1, 0.2),
+        last_command_error="Subscriber not ready",
+        last_halt_monotonic_s=99.0,
+        command_subscriber_count=1,
+        commands_enabled=True,
+        state_diagnostics=state_diag,
+    )
+    assert sim_diag.commands_attempted == 5
+    assert sim_diag.commands_published == 4
+    assert sim_diag.commands_rejected == 1
+    assert sim_diag.last_command_monotonic_s == 100.1
+    assert sim_diag.last_command_mode == "position"
+    assert sim_diag.last_command_vector == (0.1, 0.2)
+    assert sim_diag.last_command_error == "Subscriber not ready"
+    assert sim_diag.last_halt_monotonic_s == 99.0
+    assert sim_diag.command_subscriber_count == 1
+    assert sim_diag.commands_enabled is True
+    assert sim_diag.state_diagnostics is state_diag
+

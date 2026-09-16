@@ -6,6 +6,7 @@ requiring rclpy, sensor_msgs, or any ROS2 system packages.
 """
 
 from dataclasses import dataclass
+from enum import Enum, auto
 import math
 from typing import List, Optional, Sequence, Tuple
 
@@ -207,3 +208,107 @@ def map_joint_state_payload(
         efforts=tuple(mapped_efforts) if mapped_efforts is not None else None,
         sequence_id=int(sequence_id),
     )
+
+
+class ROS2SimulationCommandMode(Enum):
+    """Supported commanding modes for ROS2SimulationBackend."""
+
+    POSITION = auto()
+    VELOCITY = auto()
+
+
+@dataclass(frozen=True)
+class ROS2SimulationBackendConfig:
+    """Immutable configuration for ROS2SimulationBackend.
+
+    IMPORTANT SAFETY NOTICE:
+    Setting environment="simulation" is a SOFTWARE POLICY DECLARATION only.
+    The software cannot independently prove that a configured ROS command endpoint
+    is not connected to physical hardware. Physical robot commanding is strictly
+    prohibited in Phase B2.
+
+    Attributes:
+        state_config: Configuration for the composed read-only JointState backend.
+        command_mode: Command streaming mode ('position' or 'velocity').
+        position_command_topic: Command topic for JointGroupPositionController (used when command_mode='position').
+        velocity_command_topic: Command topic for JointGroupVelocityController (used when command_mode='velocity').
+        commands_enabled: If True, commands are enabled upon connection. Defaults to False.
+        require_subscriber_ready: If True, requiring at least one active subscriber before commands succeed.
+        command_qos: QoS profile for command publisher ('system_default', 'reliable', 'best_effort').
+        environment: Software policy declaration. Must strictly equal 'simulation'.
+        command_node_name: ROS2 node name for the command publisher node.
+        command_node_namespace: ROS2 namespace for the command publisher node.
+    """
+
+    state_config: ROS2JointStateBackendConfig
+    command_mode: str = "position"
+    position_command_topic: Optional[str] = "/forward_position_controller/commands"
+    velocity_command_topic: Optional[str] = "/forward_velocity_controller/commands"
+    commands_enabled: bool = False
+    require_subscriber_ready: bool = True
+    command_qos: str = "system_default"
+    environment: str = "simulation"
+    command_node_name: str = "visionrobottwin_sim_command"
+    command_node_namespace: str = ""
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.state_config, ROS2JointStateBackendConfig):
+            raise TypeError(
+                f"state_config must be an instance of ROS2JointStateBackendConfig, got {type(self.state_config)}"
+            )
+
+        if self.environment != "simulation":
+            raise ValueError(
+                f"environment must strictly be 'simulation' for ROS2SimulationBackend, got '{self.environment}'. "
+                "Physical hardware command backends are not supported."
+            )
+
+        if self.command_mode not in ("position", "velocity"):
+            raise ValueError(f"command_mode must be 'position' or 'velocity', got '{self.command_mode}'")
+
+        if self.command_qos not in ("system_default", "reliable", "best_effort"):
+            raise ValueError(
+                f"command_qos must be one of ('system_default', 'reliable', 'best_effort'), got '{self.command_qos}'"
+            )
+
+        if self.command_mode == "position":
+            if not self.position_command_topic or not self.position_command_topic.strip():
+                raise ValueError("position_command_topic must be a non-empty string when command_mode is 'position'")
+        elif self.command_mode == "velocity":
+            if not self.velocity_command_topic or not self.velocity_command_topic.strip():
+                raise ValueError("velocity_command_topic must be a non-empty string when command_mode is 'velocity'")
+
+        if not self.command_node_name or not self.command_node_name.strip():
+            raise ValueError("command_node_name must be a non-empty string")
+
+
+@dataclass(frozen=True)
+class ROS2SimulationDiagnostics:
+    """Immutable runtime diagnostics snapshot for ROS2SimulationBackend.
+
+    Attributes:
+        commands_attempted: Total command dispatch invocations.
+        commands_published: Successfully published messages.
+        commands_rejected: Rejected command dispatches.
+        last_command_monotonic_s: Monotonic timestamp of last command attempt.
+        last_command_mode: Active command mode ('position' or 'velocity').
+        last_command_vector: Copy of last commanded vector.
+        last_command_error: Error message from last rejected command.
+        last_halt_monotonic_s: Monotonic timestamp of last halt_motion call.
+        command_subscriber_count: Count of active subscribers to command topic.
+        commands_enabled: Boolean flag indicating if command dispatch is authorized.
+        state_diagnostics: Telemetry diagnostics snapshot from composed state backend.
+    """
+
+    commands_attempted: int = 0
+    commands_published: int = 0
+    commands_rejected: int = 0
+    last_command_monotonic_s: Optional[float] = None
+    last_command_mode: str = "position"
+    last_command_vector: Optional[Tuple[float, ...]] = None
+    last_command_error: Optional[str] = None
+    last_halt_monotonic_s: Optional[float] = None
+    command_subscriber_count: int = 0
+    commands_enabled: bool = False
+    state_diagnostics: Optional[ROS2JointStateDiagnostics] = None
+
