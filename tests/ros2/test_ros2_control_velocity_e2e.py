@@ -103,8 +103,12 @@ def test_ros2_control_velocity_e2e_closed_loop_and_software_stop():
 
         if not ready:
             logs = harness.get_logs()
+            diag = raw_backend.diagnostics()
+            state_diag = raw_backend._state_backend.diagnostics()
             raise AssertionError(
                 f"Backend failed to establish telemetry and command endpoint readiness: {last_err}\n"
+                f"Simulation Diagnostics: {diag}\n"
+                f"State Diagnostics: {state_diag}\n"
                 f"Controller manager logs:\n{logs}"
             )
 
