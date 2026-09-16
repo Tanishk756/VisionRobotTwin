@@ -42,7 +42,7 @@ jobs:
         shell: bash
         run: |
           source /opt/ros/humble/setup.bash
-          python3 -m pytest -v
+          python3 -m pytest -p no:launch_testing -p no:launch_testing_ros -v
 
       - name: Run ROS2 JointState Diagnostic Probe Smoke
         shell: bash
