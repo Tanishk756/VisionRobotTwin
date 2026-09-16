@@ -1,5 +1,12 @@
 # Multi-Robot Control, Kinematics, and Motion Planning Architecture Design
 
+> [!NOTE]
+> **Document Status**: Historical / Executed  
+> **Phase**: v1.2 Multi-Robot Architecture  
+> **Original Role**: Architecture Specification  
+> **Implementation Status**: Complete (Released in v1.2.0)  
+> **Current Repository State**: See [docs/status/2026-09-16-v1.3-development-summary.md](../../status/2026-09-16-v1.3-development-summary.md)
+
 **Document ID**: `SPEC-2026-09-13-MULTI-ROBOT-CONTROL`  
 **Version**: `1.2.0-dev`  
 **Target Release**: VisionRobotTwin v1.2.0  

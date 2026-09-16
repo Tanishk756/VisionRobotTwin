@@ -1,5 +1,12 @@
 # Multi-Robot Control and Planning Implementation Plan
 
+> [!NOTE]
+> **Document Status**: Historical / Executed  
+> **Phase**: v1.2 Multi-Robot Implementation  
+> **Original Role**: Implementation Plan  
+> **Implementation Status**: Complete (Released in v1.2.0)  
+> **Current Repository State**: See [docs/status/2026-09-16-v1.3-development-summary.md](../../status/2026-09-16-v1.3-development-summary.md)
+
 **Plan ID**: `PLAN-2026-09-13-MULTI-ROBOT-IMPLEMENTATION`  
 **Target Milestone**: VisionRobotTwin v1.2.0-dev  
 **Strategy**: Test-Driven Development (TDD) across 6 structured milestone commits.
