@@ -424,3 +424,162 @@ def test_custom_readiness_probe_integration():
 
     assert guard.guard_state == SafetyGuardState.DISARMED
 
+
+def test_watchdog_inactive_when_armed_with_no_motion():
+    """Verify watchdog does not trigger when ARMED without any dispatched motion."""
+    model, mock_backend = _make_model_and_backend()
+    fake_time = [100.0]
+
+    guard = GuardedRobotBackend(
+        underlying_backend=mock_backend,
+        resolved_model=model,
+        safety_config=CommandSafetyConfig(command_watchdog_timeout_s=0.2),
+        time_source=lambda: fake_time[0],
+    )
+    guard.arm()
+
+    # Advance fake time significantly
+    fake_time[0] = 200.0
+    assert guard.check_watchdog() is False
+    assert guard.guard_state == SafetyGuardState.ARMED
+    assert mock_backend.halt_motion.call_count == 0
+
+
+def test_watchdog_deadline_reset_and_timeout_trigger():
+    """Verify watchdog deadline resets on valid command and halts on starvation."""
+    model, mock_backend = _make_model_and_backend()
+    fake_time = [100.0]
+
+    guard = GuardedRobotBackend(
+        underlying_backend=mock_backend,
+        resolved_model=model,
+        safety_config=CommandSafetyConfig(command_watchdog_timeout_s=0.2),
+        time_source=lambda: fake_time[0],
+    )
+    guard.arm()
+
+    # 1. First command activates watchdog at t=100.0
+    assert guard.command_joint_positions([0.1, 0.1]) is True
+    assert guard.accepted_command_sequence == 1
+
+    # 2. Check at t=100.1 (< 0.2s elapsed) -> no timeout
+    fake_time[0] = 100.1
+    assert guard.check_watchdog() is False
+    assert guard.guard_state == SafetyGuardState.ARMED
+
+    # 3. New command at t=100.15 resets watchdog deadline to 100.35
+    fake_time[0] = 100.15
+    assert guard.command_joint_positions([0.2, 0.2]) is True
+    assert guard.accepted_command_sequence == 2
+
+    # 4. Check at t=100.30 (0.15s since last command < 0.2s) -> no timeout
+    fake_time[0] = 100.30
+    assert guard.check_watchdog() is False
+    assert guard.guard_state == SafetyGuardState.ARMED
+
+    # 5. Check at t=100.36 (0.21s since last command > 0.2s) -> timeout triggers!
+    fake_time[0] = 100.36
+    assert guard.check_watchdog() is True
+    assert guard.guard_state == SafetyGuardState.FAULT_LATCHED
+    assert guard.active_fault is not None
+    assert guard.active_fault.code == CommandSafetyFaultCode.COMMAND_WATCHDOG_TIMEOUT
+    assert mock_backend.halt_motion.call_count == 1
+
+    # 6. Subsequent check does not re-trigger or repeat halt
+    assert guard.check_watchdog() is False
+    assert mock_backend.halt_motion.call_count == 1
+
+
+def test_watchdog_halt_failure_latches_halt_failed():
+    """Verify watchdog timeout when underlying halt fails latches COMMAND_WATCHDOG_HALT_FAILED."""
+    model, mock_backend = _make_model_and_backend()
+    mock_backend.halt_motion.side_effect = RuntimeError("Halt communication timeout")
+    fake_time = [100.0]
+
+    guard = GuardedRobotBackend(
+        underlying_backend=mock_backend,
+        resolved_model=model,
+        safety_config=CommandSafetyConfig(command_watchdog_timeout_s=0.2),
+        time_source=lambda: fake_time[0],
+    )
+    guard.arm()
+    guard.command_joint_positions([0.1, 0.1])
+
+    fake_time[0] = 100.5  # Timeout exceeded
+    assert guard.check_watchdog() is True
+    assert guard.guard_state == SafetyGuardState.FAULT_LATCHED
+    assert guard.active_fault.code == CommandSafetyFaultCode.COMMAND_WATCHDOG_HALT_FAILED
+
+
+def test_watchdog_concurrency_overlap_safety():
+    """Verify command dispatch and watchdog evaluation cannot execute concurrently."""
+    import threading
+    import time
+
+    model, mock_backend = _make_model_and_backend()
+    active_calls = 0
+    max_active_calls = 0
+    tracker_lock = threading.Lock()
+
+    def slow_command_positions(*args, **kwargs):
+        nonlocal active_calls, max_active_calls
+        with tracker_lock:
+            active_calls += 1
+            if active_calls > max_active_calls:
+                max_active_calls = active_calls
+        time.sleep(0.005)
+        with tracker_lock:
+            active_calls -= 1
+        return True
+
+    def slow_halt_motion():
+        nonlocal active_calls, max_active_calls
+        with tracker_lock:
+            active_calls += 1
+            if active_calls > max_active_calls:
+                max_active_calls = active_calls
+        time.sleep(0.005)
+        with tracker_lock:
+            active_calls -= 1
+
+    mock_backend.command_joint_positions.side_effect = slow_command_positions
+    mock_backend.halt_motion.side_effect = slow_halt_motion
+
+    guard = GuardedRobotBackend(
+        underlying_backend=mock_backend,
+        resolved_model=model,
+        safety_config=CommandSafetyConfig(command_watchdog_timeout_s=0.01),
+    )
+    guard.arm()
+
+    def command_worker():
+        for _ in range(20):
+            try:
+                guard.command_joint_positions([0.05, 0.05])
+            except Exception:
+                pass
+            time.sleep(0.001)
+
+    def watchdog_worker():
+        for _ in range(20):
+            try:
+                guard.check_watchdog()
+            except Exception:
+                pass
+            time.sleep(0.001)
+
+    threads = [
+        threading.Thread(target=command_worker),
+        threading.Thread(target=watchdog_worker),
+        threading.Thread(target=command_worker),
+    ]
+
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+
+    # Verify maximum concurrent executions inside backend was exactly 1 (0 overlap)
+    assert max_active_calls <= 1
+
+

@@ -13,7 +13,7 @@ from enum import Enum
 import math
 import threading
 import time
-from typing import Optional, Protocol, Sequence, Tuple, runtime_checkable
+from typing import Callable, Optional, Protocol, Sequence, Tuple, runtime_checkable
 
 from robotics.backends.base import (
     BackendCommandDisabledError,
@@ -34,7 +34,7 @@ class SafetyGuardState(Enum):
 
 
 class CommandSafetyFaultCode(Enum):
-    """Categorized root causes for safety violations and fault latching."""
+    """Specific cause identifiers for command safety faults."""
     NONE = "none"
     STATE_UNAVAILABLE = "state_unavailable"
     STATE_STALE = "state_stale"
@@ -53,12 +53,12 @@ class CommandSafetyFaultCode(Enum):
 
 
 class CommandSafetyViolationError(BackendError):
-    """Raised when a command violates the software safety envelope."""
+    """Raised when a commanded target violates safety envelopes or guard authorization."""
     pass
 
 
 class CommandWatchdogTimeoutError(BackendError):
-    """Raised when the command watchdog timer expires during an active motion session."""
+    """Raised when the software command watchdog expires due to command starvation."""
     pass
 
 
@@ -72,7 +72,7 @@ class CommandSafetyFault:
 
 @dataclass(frozen=True)
 class CommandSafetyConfig:
-    """Configuration for GuardedRobotBackend safety parameters."""
+    """Configuration parameters for the hardware-readiness command safety layer."""
     state_timeout_s: float = 0.5
     command_watchdog_timeout_s: float = 0.2
     position_limit_margin_rad: float = 0.0
@@ -87,14 +87,15 @@ class CommandSafetyConfig:
         if self.command_watchdog_timeout_s <= 0.0:
             raise ValueError(f"command_watchdog_timeout_s must be positive, got {self.command_watchdog_timeout_s}")
         if not (0.0 < self.velocity_limit_scale <= 1.0):
-            raise ValueError(f"velocity_limit_scale must be in (0.0, 1.0], got {self.velocity_limit_scale}")
-        if self.position_limit_margin_rad < 0.0:
-            raise ValueError(f"position_limit_margin_rad must be non-negative, got {self.position_limit_margin_rad}")
+            raise ValueError(f"velocity_limit_scale must be in (0, 1.0], got {self.velocity_limit_scale}")
+        if self.max_position_step_by_joint is not None:
+            if any(step <= 0.0 for step in self.max_position_step_by_joint):
+                raise ValueError(f"All values in max_position_step_by_joint must be positive: {self.max_position_step_by_joint}")
 
 
 @dataclass(frozen=True)
 class SoftwareCommandReadinessReport:
-    """Diagnostic report detailing software preflight check evaluation."""
+    """Immutable diagnostic report detailing software preflight readiness checks."""
     backend_connected: bool
     backend_health_ok: bool
     state_available: bool
@@ -118,6 +119,31 @@ class CommandReadinessProbe(Protocol):
         ...
 
 
+class CommandWatchdog:
+    """Pure logic evaluator for application-level command watchdog timeouts."""
+
+    @staticmethod
+    def evaluate_timeout(
+        now_s: float,
+        guard_state: SafetyGuardState,
+        motion_session_active: bool,
+        last_accepted_command_s: Optional[float],
+        timeout_s: float,
+    ) -> bool:
+        """Determines whether a command watchdog timeout has elapsed.
+
+        Watchdog triggers ONLY when the system is ARMED, has active motion sessions,
+        and the elapsed time since the last accepted motion command strictly exceeds timeout_s.
+        """
+        if guard_state != SafetyGuardState.ARMED:
+            return False
+        if not motion_session_active:
+            return False
+        if last_accepted_command_s is None:
+            return False
+        return (now_s - last_accepted_command_s) > timeout_s
+
+
 class GuardedRobotBackend(RobotBackend):
     """Defensive software safety decorator for command-capable robot backends.
 
@@ -131,11 +157,13 @@ class GuardedRobotBackend(RobotBackend):
         resolved_model: ResolvedRobotModel,
         safety_config: Optional[CommandSafetyConfig] = None,
         readiness_probe: Optional[CommandReadinessProbe] = None,
+        time_source: Optional[Callable[[], float]] = None,
     ) -> None:
         self._backend = underlying_backend
         self._model = resolved_model
         self._config = safety_config or CommandSafetyConfig()
         self._readiness_probe = readiness_probe
+        self._time_source = time_source or time.monotonic
 
         self._command_lock = threading.RLock()
         self._guard_state = SafetyGuardState.DISARMED
@@ -144,6 +172,9 @@ class GuardedRobotBackend(RobotBackend):
         self._rejected_command_count = 0
         self._motion_session_active = False
         self._last_accepted_command_s: Optional[float] = None
+
+        self._watchdog_stop_event = threading.Event()
+        self._watchdog_thread: Optional[threading.Thread] = None
 
     @property
     def guard_state(self) -> SafetyGuardState:
@@ -204,7 +235,7 @@ class GuardedRobotBackend(RobotBackend):
         try:
             state = self._backend.get_joint_state()
             state_avail = True
-            now_mono = time.monotonic()
+            now_mono = self._time_source()
 
             age = now_mono - state.receive_timestamp_s
             if age <= self._config.state_timeout_s:
@@ -429,7 +460,7 @@ class GuardedRobotBackend(RobotBackend):
             res = self._backend.command_joint_positions(target_positions)
             if res:
                 self._accepted_command_sequence += 1
-                self._last_accepted_command_s = time.monotonic()
+                self._last_accepted_command_s = self._time_source()
                 self._motion_session_active = True
                 return True
             return False
@@ -491,17 +522,86 @@ class GuardedRobotBackend(RobotBackend):
             res = self._backend.command_joint_velocities(target_velocities, effort_limit=effort_limit)
             if res:
                 self._accepted_command_sequence += 1
-                self._last_accepted_command_s = time.monotonic()
+                self._last_accepted_command_s = self._time_source()
                 self._motion_session_active = True
                 return True
             return False
+
+    def check_watchdog(self, now_s: Optional[float] = None) -> bool:
+        """Evaluates watchdog status and triggers software stop if deadline exceeded.
+
+        Returns True if a timeout was detected and fault latched, False otherwise.
+        """
+        current_time = now_s if now_s is not None else self._time_source()
+        if not self._config.watchdog_enabled:
+            return False
+
+        with self._command_lock:
+            # Recheck conditions inside command lock to prevent race with newly accepted commands
+            is_timeout = CommandWatchdog.evaluate_timeout(
+                now_s=current_time,
+                guard_state=self._guard_state,
+                motion_session_active=self._motion_session_active,
+                last_accepted_command_s=self._last_accepted_command_s,
+                timeout_s=self._config.command_watchdog_timeout_s,
+            )
+            if not is_timeout:
+                return False
+
+            # Timeout confirmed -> dispatch halt and latch fault
+            try:
+                self._backend.halt_motion()
+                self._guard_state = SafetyGuardState.FAULT_LATCHED
+                self._active_fault = CommandSafetyFault(
+                    code=CommandSafetyFaultCode.COMMAND_WATCHDOG_TIMEOUT,
+                    monotonic_timestamp_s=current_time,
+                    detail=f"Command watchdog timeout exceeded ({self._config.command_watchdog_timeout_s:.3f}s)",
+                )
+            except Exception as err:
+                self._guard_state = SafetyGuardState.FAULT_LATCHED
+                self._active_fault = CommandSafetyFault(
+                    code=CommandSafetyFaultCode.COMMAND_WATCHDOG_HALT_FAILED,
+                    monotonic_timestamp_s=current_time,
+                    detail=f"Command watchdog timeout software halt failed: {err}",
+                )
+            finally:
+                self._motion_session_active = False
+
+            return True
+
+    def start_watchdog_monitor(self, poll_interval_s: float = 0.02) -> None:
+        """Starts a background monitor thread that periodically checks the watchdog."""
+        with self._command_lock:
+            if self._watchdog_thread is not None and self._watchdog_thread.is_alive():
+                return
+            self._watchdog_stop_event.clear()
+            self._watchdog_thread = threading.Thread(
+                target=self._watchdog_monitor_loop,
+                args=(poll_interval_s,),
+                daemon=True,
+                name="GuardedBackendWatchdog",
+            )
+            self._watchdog_thread.start()
+
+    def stop_watchdog_monitor(self) -> None:
+        """Stops the background watchdog monitor thread."""
+        self._watchdog_stop_event.set()
+        if self._watchdog_thread is not None and self._watchdog_thread.is_alive():
+            self._watchdog_thread.join(timeout=1.0)
+            self._watchdog_thread = None
+
+    def _watchdog_monitor_loop(self, poll_interval_s: float) -> None:
+        while not self._watchdog_stop_event.is_set():
+            if self.check_watchdog():
+                break
+            self._watchdog_stop_event.wait(timeout=poll_interval_s)
 
     def _latch_fault(self, code: CommandSafetyFaultCode, detail: str) -> None:
         """Internal helper transitioning state to FAULT_LATCHED and recording fault detail."""
         self._guard_state = SafetyGuardState.FAULT_LATCHED
         self._active_fault = CommandSafetyFault(
             code=code,
-            monotonic_timestamp_s=time.monotonic(),
+            monotonic_timestamp_s=self._time_source(),
             detail=detail,
         )
         self._rejected_command_count += 1

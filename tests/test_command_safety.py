@@ -75,3 +75,63 @@ def test_software_command_readiness_report():
     )
     assert report.ready_to_arm is True
     assert report.backend_connected is True
+
+
+def test_command_watchdog_pure_evaluator():
+    """Verify CommandWatchdog.evaluate_timeout logic with deterministic inputs."""
+    from robotics.safety import CommandWatchdog
+
+    # 1. DISARMED -> False
+    assert CommandWatchdog.evaluate_timeout(
+        now_s=10.0,
+        guard_state=SafetyGuardState.DISARMED,
+        motion_session_active=True,
+        last_accepted_command_s=5.0,
+        timeout_s=0.2,
+    ) is False
+
+    # 2. ARMED but no active motion -> False
+    assert CommandWatchdog.evaluate_timeout(
+        now_s=10.0,
+        guard_state=SafetyGuardState.ARMED,
+        motion_session_active=False,
+        last_accepted_command_s=5.0,
+        timeout_s=0.2,
+    ) is False
+
+    # 3. ARMED, active motion, but no command timestamp -> False
+    assert CommandWatchdog.evaluate_timeout(
+        now_s=10.0,
+        guard_state=SafetyGuardState.ARMED,
+        motion_session_active=True,
+        last_accepted_command_s=None,
+        timeout_s=0.2,
+    ) is False
+
+    # 4. ARMED, active motion, within timeout -> False
+    assert CommandWatchdog.evaluate_timeout(
+        now_s=10.15,
+        guard_state=SafetyGuardState.ARMED,
+        motion_session_active=True,
+        last_accepted_command_s=10.0,
+        timeout_s=0.2,
+    ) is False
+
+    # 5. ARMED, active motion, strictly past timeout -> True
+    assert CommandWatchdog.evaluate_timeout(
+        now_s=10.25,
+        guard_state=SafetyGuardState.ARMED,
+        motion_session_active=True,
+        last_accepted_command_s=10.0,
+        timeout_s=0.2,
+    ) is True
+
+    # 6. FAULT_LATCHED -> False
+    assert CommandWatchdog.evaluate_timeout(
+        now_s=10.25,
+        guard_state=SafetyGuardState.FAULT_LATCHED,
+        motion_session_active=True,
+        last_accepted_command_s=10.0,
+        timeout_s=0.2,
+    ) is False
+
