@@ -78,11 +78,11 @@ jobs:
         run: |
           source /opt/ros/humble/setup.bash
           echo "=== ROS 2 Topics ==="
-          ros2 topic list || true
+          timeout 5s ros2 topic list || true
           echo "=== Controller Manager Status ==="
-          ros2 control list_controllers || true
-          ros2 control list_hardware_components -v || true
-          ros2 control list_hardware_interfaces || true
+          timeout 5s ros2 control list_controllers || true
+          timeout 5s ros2 control list_hardware_components -v || true
+          timeout 5s ros2 control list_hardware_interfaces || true
 
       - name: Run ROS2 JointState Diagnostic Probe Smoke
         shell: bash

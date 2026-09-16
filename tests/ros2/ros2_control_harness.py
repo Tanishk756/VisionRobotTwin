@@ -97,9 +97,13 @@ class ROS2ControlHarness:
         """Polls controller manager services and joint_states until all readiness conditions pass."""
         t_start = time.monotonic()
 
+        from rclpy.executors import SingleThreadedExecutor
+
         context = rclpy.Context()
         rclpy.init(context=context)
         node = Node("harness_readiness_probe", context=context)
+        executor = SingleThreadedExecutor(context=context)
+        executor.add_node(node)
 
         received_states: List[ROSJointState] = []
 
@@ -134,7 +138,7 @@ class ROS2ControlHarness:
             while time.monotonic() - t_start < self.launch_timeout_s:
                 req = ListControllers.Request()
                 future = client.call_async(req)
-                rclpy.spin_until_future_complete(node, future, timeout_sec=1.0)
+                executor.spin_until_future_complete(future, timeout_sec=1.0)
 
                 if future.done() and future.exception() is None:
                     resp = future.result()
@@ -163,7 +167,7 @@ class ROS2ControlHarness:
             # 3. Wait for initial valid /joint_states message
             state_received = False
             while time.monotonic() - t_start < self.launch_timeout_s:
-                rclpy.spin_once(node, timeout_sec=0.1)
+                executor.spin_once(timeout_sec=0.1)
                 if received_states:
                     last_msg = received_states[-1]
                     if "joint1" in last_msg.name and "joint2" in last_msg.name:
@@ -180,7 +184,9 @@ class ROS2ControlHarness:
         finally:
             node.destroy_subscription(sub)
             node.destroy_client(client)
+            executor.remove_node(node)
             node.destroy_node()
+            executor.shutdown()
             if context.ok():
                 rclpy.shutdown(context=context)
 

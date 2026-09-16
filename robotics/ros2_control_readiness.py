@@ -168,6 +168,22 @@ def evaluate_hardware_interfaces_response(
     return (len(reasons) == 0), tuple(reasons)
 
 
+def _spin_future_complete(node: Any, future: Any, timeout_sec: float) -> None:
+    """Spins a future to completion safely supporting custom contexts and executors."""
+    executor = getattr(node, "executor", None)
+    if executor is not None:
+        executor.spin_until_future_complete(future, timeout_sec=timeout_sec)
+    else:
+        from rclpy.executors import SingleThreadedExecutor
+        temp_executor = SingleThreadedExecutor(context=node.context)
+        temp_executor.add_node(node)
+        try:
+            temp_executor.spin_until_future_complete(future, timeout_sec=timeout_sec)
+        finally:
+            temp_executor.remove_node(node)
+            temp_executor.shutdown()
+
+
 class ROS2ControlReadinessProbe(CommandReadinessProbe):
     """Inspects ros2_control controller_manager read-only services during software preflight checks."""
 
@@ -208,7 +224,7 @@ class ROS2ControlReadinessProbe(CommandReadinessProbe):
             else:
                 req = ListControllers.Request()
                 future = client_lc.call_async(req)
-                rclpy.spin_until_future_complete(self._node, future, timeout_sec=self._expected.service_timeout_s)
+                _spin_future_complete(self._node, future, timeout_sec=self._expected.service_timeout_s)
                 if not future.done():
                     reasons.append(f"Service '{srv_list_controllers}' call timed out.")
                 elif future.exception() is not None:
@@ -231,7 +247,7 @@ class ROS2ControlReadinessProbe(CommandReadinessProbe):
                 else:
                     req = ListHardwareComponents.Request()
                     future = client_hw.call_async(req)
-                    rclpy.spin_until_future_complete(self._node, future, timeout_sec=self._expected.service_timeout_s)
+                    _spin_future_complete(self._node, future, timeout_sec=self._expected.service_timeout_s)
                     if not future.done():
                         reasons.append(f"Service '{srv_list_hw}' call timed out.")
                     elif future.exception() is not None:
@@ -254,7 +270,7 @@ class ROS2ControlReadinessProbe(CommandReadinessProbe):
                 else:
                     req = ListHardwareInterfaces.Request()
                     future = client_ifaces.call_async(req)
-                    rclpy.spin_until_future_complete(self._node, future, timeout_sec=self._expected.service_timeout_s)
+                    _spin_future_complete(self._node, future, timeout_sec=self._expected.service_timeout_s)
                     if not future.done():
                         reasons.append(f"Service '{srv_list_ifaces}' call timed out.")
                     elif future.exception() is not None:

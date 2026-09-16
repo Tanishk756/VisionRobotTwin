@@ -49,17 +49,21 @@ def test_live_ros2_control_readiness_probe():
     try:
         harness.start()
 
+        from rclpy.executors import SingleThreadedExecutor
+
         # Initialize node on same domain to run probe queries
         context = rclpy.Context()
         rclpy.init(context=context)
         node = Node("test_readiness_probe_node", context=context)
+        executor = SingleThreadedExecutor(context=context)
+        executor.add_node(node)
 
         # Detect active hardware component name from live controller manager
         hw_client = node.create_client(ListHardwareComponents, "/controller_manager/list_hardware_components")
         assert hw_client.wait_for_service(timeout_sec=5.0)
         req = ListHardwareComponents.Request()
         fut = hw_client.call_async(req)
-        rclpy.spin_until_future_complete(node, fut, timeout_sec=5.0)
+        executor.spin_until_future_complete(fut, timeout_sec=5.0)
         assert fut.done() and fut.exception() is None
         hw_resp = fut.result()
         assert len(hw_resp.component) > 0
@@ -133,7 +137,11 @@ def test_live_ros2_control_readiness_probe():
 
     finally:
         if node is not None:
+            if "executor" in locals() and executor is not None:
+                executor.remove_node(node)
             node.destroy_node()
+        if "executor" in locals() and executor is not None:
+            executor.shutdown()
         if context is not None and context.ok():
             rclpy.shutdown(context=context)
         harness.stop()
