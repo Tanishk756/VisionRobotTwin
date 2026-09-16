@@ -1,5 +1,5 @@
-"""Tests for Generic Robot Controller across supported manipulators."""
-
+import time
+from unittest.mock import MagicMock, patch
 import pytest
 import pybullet as p
 import pybullet_data
@@ -686,6 +686,194 @@ def test_controller_deferred_backend_validation_and_subsequent_read():
 
     with pytest.raises(ValueError, match="names mismatch"):
         controller.get_current_joint_positions()
+
+
+def test_ros2_simulation_backend_generic_robot_controller_position_integration():
+    """Verify GenericRobotController rate-limits and dispatches position commands through ROS2SimulationBackend."""
+    import robotics.backends.ros2_simulation_backend as sim_module
+    import robotics.backends.ros2_joint_state_backend as state_module
+    from robotics.backends.ros2_simulation_backend import ROS2SimulationBackend
+    from robotics.backends.ros2_state_mapping import (
+        ROS2JointStateBackendConfig,
+        ROS2SimulationBackendConfig,
+    )
+    from robotics.backends.base import TimestampedJointState
+    from robotics.kinematics_provider import KinematicsProvider
+    from robotics.robot_model import (
+        JointRole,
+        JointMotionType,
+        ResolvedJointMetadata,
+        ResolvedRobotModel,
+    )
+
+    class MockFloat64MultiArray:
+        def __init__(self):
+            self.data = []
+
+    with patch.object(sim_module, "_HAS_RCLPY", True), \
+         patch.object(state_module, "_HAS_RCLPY", True), \
+         patch.object(sim_module, "Float64MultiArray", MockFloat64MultiArray):
+
+        j0 = ResolvedJointMetadata(
+            model_index=0,
+            canonical_index=0,
+            name="j1",
+            role=JointRole.ARM,
+            motion_type=JointMotionType.REVOLUTE,
+            lower_limit=-2.0,
+            upper_limit=2.0,
+            max_force=50.0,
+            max_velocity=1.0,
+            link_name="l1",
+        )
+        j1 = ResolvedJointMetadata(
+            model_index=1,
+            canonical_index=1,
+            name="j2",
+            role=JointRole.ARM,
+            motion_type=JointMotionType.REVOLUTE,
+            lower_limit=-2.0,
+            upper_limit=2.0,
+            max_force=50.0,
+            max_velocity=1.0,
+            link_name="l2",
+        )
+        model = ResolvedRobotModel(
+            robot_id="sim_bot",
+            display_name="SimBot",
+            all_joints=(j0, j1),
+            arm_joints=(j0, j1),
+            gripper_joints=(),
+            ee_link_name="l2",
+            home_joint_positions=(0.0, 0.0),
+        )
+
+        state_cfg = ROS2JointStateBackendConfig(expected_joint_names=("j1", "j2"))
+        sim_cfg = ROS2SimulationBackendConfig(
+            state_config=state_cfg,
+            command_mode="position",
+            position_command_topic="/sim_bot/position_commands",
+            require_subscriber_ready=False,
+        )
+
+        sim_backend = ROS2SimulationBackend(sim_cfg)
+        sim_backend._is_connected = True
+        sim_backend._commands_enabled = True
+        sim_backend._cmd_publisher = MagicMock()
+        sim_backend._state_backend = MagicMock()
+        sim_backend._state_backend.is_connected.return_value = True
+
+        current_state = TimestampedJointState(
+            source_timestamp_s=1.0,
+            receive_timestamp_s=time.monotonic(),
+            joint_names=("j1", "j2"),
+            positions=(0.0, 0.0),
+            velocities=(0.0, 0.0),
+        )
+        sim_backend._state_backend.get_joint_state.return_value = current_state
+
+        mock_kinematics = MagicMock(spec=KinematicsProvider)
+        controller = GenericRobotController(
+            resolved_model=model,
+            backend=sim_backend,
+            kinematics_provider=mock_kinematics,
+        )
+
+        # Dispatch position command through GenericRobotController
+        # dt=0.01s, max_vel=1.0 rad/s -> max step = 0.01 rad
+        controller.set_arm_joint_positions([1.0, -1.0], dt=0.01)
+        sim_backend._cmd_publisher.publish.assert_called_once()
+        published_msg = sim_backend._cmd_publisher.publish.call_args[0][0]
+        # GenericRobotController rate-limiting clamps change to 0.01
+        assert published_msg.data[0] == pytest.approx(0.01, abs=1e-5)
+        assert published_msg.data[1] == pytest.approx(-0.01, abs=1e-5)
+
+
+def test_ros2_simulation_backend_generic_robot_controller_velocity_integration():
+    """Verify GenericRobotController clamps velocity and dispatches commands through ROS2SimulationBackend."""
+    import robotics.backends.ros2_simulation_backend as sim_module
+    import robotics.backends.ros2_joint_state_backend as state_module
+    from robotics.backends.ros2_simulation_backend import ROS2SimulationBackend
+    from robotics.backends.ros2_state_mapping import (
+        ROS2JointStateBackendConfig,
+        ROS2SimulationBackendConfig,
+    )
+    from robotics.backends.base import TimestampedJointState
+    from robotics.kinematics_provider import KinematicsProvider
+    from robotics.robot_model import (
+        JointRole,
+        JointMotionType,
+        ResolvedJointMetadata,
+        ResolvedRobotModel,
+    )
+
+    class MockFloat64MultiArray:
+        def __init__(self):
+            self.data = []
+
+    with patch.object(sim_module, "_HAS_RCLPY", True), \
+         patch.object(state_module, "_HAS_RCLPY", True), \
+         patch.object(sim_module, "Float64MultiArray", MockFloat64MultiArray):
+
+        j0 = ResolvedJointMetadata(
+            model_index=0,
+            canonical_index=0,
+            name="j1",
+            role=JointRole.ARM,
+            motion_type=JointMotionType.REVOLUTE,
+            lower_limit=-2.0,
+            upper_limit=2.0,
+            max_force=50.0,
+            max_velocity=1.0,
+            link_name="l1",
+        )
+        model = ResolvedRobotModel(
+            robot_id="sim_bot_vel",
+            display_name="SimBotVel",
+            all_joints=(j0,),
+            arm_joints=(j0,),
+            gripper_joints=(),
+            ee_link_name="l1",
+            home_joint_positions=(0.0,),
+        )
+
+        state_cfg = ROS2JointStateBackendConfig(expected_joint_names=("j1",))
+        sim_cfg = ROS2SimulationBackendConfig(
+            state_config=state_cfg,
+            command_mode="velocity",
+            velocity_command_topic="/sim_bot/velocity_commands",
+            require_subscriber_ready=False,
+        )
+
+        sim_backend = ROS2SimulationBackend(sim_cfg)
+        sim_backend._is_connected = True
+        sim_backend._commands_enabled = True
+        sim_backend._cmd_publisher = MagicMock()
+        sim_backend._state_backend = MagicMock()
+        sim_backend._state_backend.is_connected.return_value = True
+
+        current_state = TimestampedJointState(
+            source_timestamp_s=1.0,
+            receive_timestamp_s=time.monotonic(),
+            joint_names=("j1",),
+            positions=(0.0,),
+            velocities=(0.0,),
+        )
+        sim_backend._state_backend.get_joint_state.return_value = current_state
+
+        mock_kinematics = MagicMock(spec=KinematicsProvider)
+        controller = GenericRobotController(
+            resolved_model=model,
+            backend=sim_backend,
+            kinematics_provider=mock_kinematics,
+        )
+
+        # Command exceeding max_velocity (2.5 > 1.0)
+        controller.set_arm_joint_velocities([2.5])
+        sim_backend._cmd_publisher.publish.assert_called_once()
+        published_msg = sim_backend._cmd_publisher.publish.call_args[0][0]
+        # GenericRobotController clamps velocity to joint max_velocity (1.0)
+        assert published_msg.data[0] == pytest.approx(1.0, abs=1e-5)
 
 
 

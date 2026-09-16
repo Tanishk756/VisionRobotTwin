@@ -124,3 +124,116 @@ def test_resolved_rate_controller_has_zero_direct_pybullet_calls():
     assert "p.getNumJoints" not in source
     assert "p.getJointInfo" not in source
     assert "import pybullet as p" not in source
+
+
+def test_resolved_rate_controller_with_ros2_simulation_backend():
+    """Verifies ResolvedRateController computes q_dot and GenericRobotController publishes it via ROS2SimulationBackend."""
+    import time
+    from unittest.mock import MagicMock, patch
+    import robotics.backends.ros2_simulation_backend as sim_module
+    import robotics.backends.ros2_joint_state_backend as state_module
+    from robotics.backends.ros2_simulation_backend import ROS2SimulationBackend
+    from robotics.backends.ros2_state_mapping import (
+        ROS2JointStateBackendConfig,
+        ROS2SimulationBackendConfig,
+    )
+    from robotics.backends.base import TimestampedJointState
+    from robotics.kinematics_provider import KinematicsProvider
+    from robotics.robot_model import (
+        JointRole,
+        JointMotionType,
+        ResolvedJointMetadata,
+        ResolvedRobotModel,
+    )
+
+    class MockFloat64MultiArray:
+        def __init__(self):
+            self.data = []
+
+    with patch.object(sim_module, "_HAS_RCLPY", True), \
+         patch.object(state_module, "_HAS_RCLPY", True), \
+         patch.object(sim_module, "Float64MultiArray", MockFloat64MultiArray):
+
+        joints = tuple(
+            ResolvedJointMetadata(
+                model_index=i,
+                canonical_index=i,
+                name=f"panda_joint{i+1}",
+                role=JointRole.ARM,
+                motion_type=JointMotionType.REVOLUTE,
+                lower_limit=-2.8973,
+                upper_limit=2.8973,
+                max_force=87.0,
+                max_velocity=2.175,
+                link_name=f"panda_link{i+1}",
+            )
+            for i in range(7)
+        )
+        model = ResolvedRobotModel(
+            robot_id="panda",
+            display_name="Panda",
+            all_joints=joints,
+            arm_joints=joints,
+            gripper_joints=(),
+            ee_link_name="panda_link7",
+            home_joint_positions=(0.0, -0.785, 0.0, -2.356, 0.0, 1.571, 0.785),
+        )
+
+        state_cfg = ROS2JointStateBackendConfig(expected_joint_names=tuple(f"panda_joint{i+1}" for i in range(7)))
+        sim_cfg = ROS2SimulationBackendConfig(
+            state_config=state_cfg,
+            command_mode="velocity",
+            velocity_command_topic="/panda/velocity_commands",
+            require_subscriber_ready=False,
+        )
+
+        sim_backend = ROS2SimulationBackend(sim_cfg)
+        sim_backend._is_connected = True
+        sim_backend._commands_enabled = True
+        sim_backend._cmd_publisher = MagicMock()
+        sim_backend._state_backend = MagicMock()
+        sim_backend._state_backend.is_connected.return_value = True
+
+        current_state = TimestampedJointState(
+            source_timestamp_s=1.0,
+            receive_timestamp_s=time.monotonic(),
+            joint_names=tuple(f"panda_joint{i+1}" for i in range(7)),
+            positions=(0.0, -0.785, 0.0, -2.356, 0.0, 1.571, 0.785),
+            velocities=(0.0,) * 7,
+        )
+        sim_backend._state_backend.get_joint_state.return_value = current_state
+
+        mock_kinematics = MagicMock(spec=KinematicsProvider)
+        mock_kinematics.compute_fk.return_value = (np.array([0.4, 0.0, 0.4]), np.array([1.0, 0.0, 0.0, 0.0]))
+        # 6x7 dummy Jacobian
+        J = np.zeros((6, 7))
+        for i in range(6):
+            J[i, i] = 1.0
+        mock_kinematics.compute_jacobian.return_value = (J[:3, :], J[3:, :], J)
+
+        controller = GenericRobotController(
+            resolved_model=model,
+            backend=sim_backend,
+            kinematics_provider=mock_kinematics,
+        )
+
+        rr_controller = ResolvedRateController(
+            robot_controller=controller,
+            kinematics_provider=mock_kinematics,
+            kp_pos=2.0,
+            enable_nullspace=False,
+        )
+
+        target_pos = np.array([0.45, 0.0, 0.40])
+        target_orn = np.array([1.0, 0.0, 0.0, 0.0])
+
+        q_dot, metrics = rr_controller.compute_step(target_pos, target_orn, dt=0.01)
+        assert len(q_dot) == 7
+        assert np.all(np.isfinite(q_dot))
+
+        # Command velocities to GenericRobotController, which dispatches to ROS2SimulationBackend
+        controller.set_arm_joint_velocities(q_dot)
+        sim_backend._cmd_publisher.publish.assert_called_once()
+        published_msg = sim_backend._cmd_publisher.publish.call_args[0][0]
+        for val, qd in zip(published_msg.data, q_dot):
+            assert val == pytest.approx(qd, abs=1e-5)

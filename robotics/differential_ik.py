@@ -21,8 +21,8 @@ class ResolvedRateController:
 
     def __init__(
         self,
-        physics_client_id: int,
-        robot_controller: GenericRobotController,
+        physics_client_id: Optional[int] = None,
+        robot_controller: Optional[GenericRobotController] = None,
         kp_pos: float = 4.0,
         kp_orn: float = 2.5,
         max_joint_velocity_radps: Optional[float] = None,
@@ -31,7 +31,7 @@ class ResolvedRateController:
         singularity_threshold: float = 0.05,
         kinematics_provider: Optional[KinematicsProvider] = None,
     ):
-        self.client_id = int(physics_client_id)
+        self.client_id = int(physics_client_id) if physics_client_id is not None else -1
         self.controller = robot_controller
         self.kp_pos = float(kp_pos)
         self.kp_orn = float(kp_orn)
