@@ -376,7 +376,9 @@ def test_manifest_generation_and_serialization():
     )
 
     m_dict = manifest.to_dict()
-    assert m_dict["version"] == "1.2.0"
+    from visionrobottwin_version import __version__
+    assert m_dict["version"] == __version__
+    assert len(m_dict["provenance"]["runtime_source_sha256"]) == 64
     assert "git_commit_sha" in m_dict
     assert "environment" in m_dict
     assert "execution" in m_dict

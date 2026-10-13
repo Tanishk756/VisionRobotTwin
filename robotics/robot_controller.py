@@ -148,6 +148,8 @@ class GenericRobotController:
                     arm_joint_indices=self.arm_joint_indices,
                     joint_names=list(self.model.arm_joint_names),
                     default_joint_force=self.spec.max_joint_force,
+                    position_gain=config.position_gain if config is not None else self.spec.position_gain,
+                    velocity_gain=config.velocity_gain if config is not None else self.spec.velocity_gain,
                 )
             else:
                 raise ValueError("backend must be supplied when constructing without PyBullet client.")
@@ -252,7 +254,11 @@ class GenericRobotController:
         Returns:
             The actual commanded target positions (after rate limiting if applied).
         """
-        num_targets = min(len(target_joint_positions), self.model.dof)
+        if len(target_joint_positions) != self.model.dof or not np.all(np.isfinite(target_joint_positions)):
+            raise ValueError("Position targets must be finite and match model DoF")
+        if dt is not None and (not np.isfinite(dt) or dt <= 0):
+            raise ValueError("Command dt must be positive and finite")
+        num_targets = self.model.dof
         raw_targets = [float(target_joint_positions[i]) for i in range(num_targets)]
         max_vels = [float(self.model.arm_max_velocities[i]) for i in range(num_targets)]
 
@@ -273,7 +279,9 @@ class GenericRobotController:
         else:
             active_targets = raw_targets
 
-        self.backend.command_joint_positions(active_targets)
+        if not self.backend.command_joint_positions(active_targets):
+            from robotics.backends.base import BackendError
+            raise BackendError("Backend rejected position command")
         return active_targets
 
     def set_arm_joint_velocities(
@@ -296,14 +304,20 @@ class GenericRobotController:
                 f"The connected backend '{self.backend.__class__.__name__}' does not support torque/effort limit overrides."
             )
 
-        num_targets = min(len(target_joint_velocities), self.model.dof)
+        if len(target_joint_velocities) != self.model.dof or not np.all(np.isfinite(target_joint_velocities)):
+            raise ValueError("Velocity targets must be finite and match model DoF")
+        if max_force is not None and (not np.isfinite(max_force) or max_force <= 0):
+            raise ValueError("Effort limit must be positive and finite")
+        num_targets = self.model.dof
         clamped_velocities = []
         for i in range(num_targets):
             max_vel = self.model.arm_max_velocities[i]
             v = float(np.clip(target_joint_velocities[i], -max_vel, max_vel))
             clamped_velocities.append(v)
 
-        self.backend.command_joint_velocities(clamped_velocities, effort_limit=max_force)
+        if not self.backend.command_joint_velocities(clamped_velocities, effort_limit=max_force):
+            from robotics.backends.base import BackendError
+            raise BackendError("Backend rejected velocity command")
         return clamped_velocities
 
 

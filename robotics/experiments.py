@@ -12,6 +12,8 @@ from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
 import math
+import hashlib
+from pathlib import Path
 import platform
 import subprocess
 import time
@@ -42,6 +44,7 @@ from robotics.robot_controller import GenericRobotController
 from robotics.robot_registry import get_robot_registry
 from robotics.trajectory import slerp_quaternion
 from utils.logger import get_logger
+from visionrobottwin_version import __version__
 
 logger = get_logger("Robotics.Experiments")
 
@@ -359,7 +362,7 @@ def generate_se3_orientation_sweep_trajectory(
         if dt > 1e-6:
             r0 = R.from_quat(orientations[i])
             r1 = R.from_quat(orientations[i + 1])
-            dr = r0.inv() * r1
+            dr = r1 * r0.inv()
             rotvec = dr.as_rotvec()
             ang_vels[i] = rotvec / dt
     if num_samples > 1:
@@ -844,14 +847,14 @@ def compute_experiment_metrics(
     # Success criteria
     has_collision = (self_col_count > 0) or (env_col_count > 0)
     pos_success = settled_final_pos_mm <= success_position_tolerance_mm
-    orn_success = True
-    if is_se3:
-        orn_success = final_orn_deg <= success_orientation_tolerance_deg
+    orn_success = final_orn_deg <= success_orientation_tolerance_deg
 
-    success = (not has_collision) and pos_success and orn_success
+    success = (not has_collision) and not limit_viol_count and pos_success and orn_success
     failure_reason = ""
     if has_collision:
         failure_reason = f"Collision detected (self: {self_col_count}, env: {env_col_count})"
+    elif limit_viol_count:
+        failure_reason = f"Joint limits violated in {limit_viol_count} samples"
     elif not pos_success:
         failure_reason = f"Final position error {settled_final_pos_mm:.2f}mm exceeded bound {success_position_tolerance_mm:.2f}mm"
     elif not orn_success:
@@ -1122,10 +1125,14 @@ def execute_experiment_trial(
                     target_position=target_p,
                     target_orientation=target_o,
                     dt=dt,
+                    target_linear_velocity=traj.linear_velocities[step_i] if step_i < traj_samples else np.zeros(3),
+                    target_angular_velocity=traj.angular_velocities[step_i] if step_i < traj_samples else np.zeros(3),
                 )
                 ctrl.set_arm_joint_velocities(q_dot)
             else:  # IK Position Control
                 ik_sol = ik_solver.solve(target_p, target_o)
+                if not ik_sol.success:
+                    raise RuntimeError(f"Trial IK failed at sample {step_i}: {ik_sol.status_message}")
                 ctrl.set_arm_joint_positions(
                     ik_sol.joint_positions,
                     dt=dt,
@@ -1461,6 +1468,7 @@ class ExperimentManifest:
     execution: Dict[str, Any]
     tolerances: Dict[str, Any]
     trajectory_definitions: Dict[str, Any]
+    provenance: Dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
@@ -1483,21 +1491,29 @@ def generate_experiment_manifest(
     git_commit_sha: Optional[str] = None,
 ) -> ExperimentManifest:
     """Builds a deterministic experiment manifest without machine-specific absolute paths or usernames."""
+    repo_root = Path(__file__).resolve().parent.parent
+    source_hash = hashlib.sha256()
+    source_files = sorted(
+        [path for folder in ("robotics", "vision", "utils", "config", "tools") for path in (repo_root / folder).rglob("*.py")]
+        + [repo_root / "main.py", repo_root / "visionrobottwin_version.py", repo_root / "requirements.txt"]
+    )
+    for path in source_files:
+        source_hash.update(path.relative_to(repo_root).as_posix().encode("utf-8") + b"\0" + path.read_bytes() + b"\0")
+    dirty = None
+    actual_head = "unknown"
+    try:
+        head_result = subprocess.run(["git", "rev-parse", "HEAD"], cwd=repo_root, capture_output=True, text=True, timeout=5)
+        if head_result.returncode == 0:
+            actual_head = head_result.stdout.strip()
+        status_result = subprocess.run(["git", "status", "--porcelain"], cwd=repo_root, capture_output=True, text=True, timeout=5)
+        if status_result.returncode == 0:
+            dirty = bool(status_result.stdout.strip())
+    except (OSError, subprocess.SubprocessError):
+        pass
     if git_commit_sha:
         git_sha = str(git_commit_sha).strip()
     else:
-        git_sha = "unknown"
-        try:
-            git_res = subprocess.run(
-                ["git", "rev-parse", "HEAD"],
-                capture_output=True,
-                text=True,
-                timeout=5,
-            )
-            if git_res.returncode == 0:
-                git_sha = git_res.stdout.strip()
-        except Exception:
-            pass
+        git_sha = actual_head
 
     pybullet_pkg_ver = "unknown"
     try:
@@ -1529,7 +1545,7 @@ def generate_experiment_manifest(
         )
 
     return ExperimentManifest(
-        version="1.2.0",
+        version=__version__,
         git_commit_sha=git_sha,
         timestamp_utc=datetime.now(timezone.utc).isoformat(),
         environment={
@@ -1558,4 +1574,7 @@ def generate_experiment_manifest(
             "planning_execution_position_tolerance_mm": planning_execution_position_tolerance_mm,
         },
         trajectory_definitions=traj_defs,
+        provenance={"working_tree_dirty": dirty, "actual_head_commit_sha": actual_head,
+                    "runtime_source_sha256": source_hash.hexdigest(), "pose_frame": "world_urdf_link",
+                    "resolved_rate_feedforward": True},
     )

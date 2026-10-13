@@ -51,7 +51,7 @@ The platform natively supports multiple 7-DoF industrial manipulators with stron
 
 ## ⚡ Development Status (`v1.3.0-dev`)
 
-VisionRobotTwin is currently in active development on the `develop/v1.3.0` branch:
+The v1.3 development milestones are integrated into `main`; the application remains `1.3.0-dev`. Local software hardening on 13 October 2026 adds the fixes and validation below:
 - **Backend-Agnostic Architecture (Phases A1–A4 Complete)**: Decoupled runtime execution (`RobotBackend`), kinematic modeling (`KinematicsProvider`), spatial collision queries (`CollisionProvider`), and model metadata (`ResolvedRobotModel`).
 - **ROS2 Middleware & Simulation Stack (Phases B1–B2 Complete)**: Read-only `JointState` telemetry backend and simulation forward command transport.
 - **Defensive Command Safety Layer (Phase B3 Complete)**: Software command safety guard (`GuardedRobotBackend`), non-auto-clearing fault latching, software stop, and monotonic watchdog timer.
@@ -59,7 +59,9 @@ VisionRobotTwin is currently in active development on the `develop/v1.3.0` branc
 - **Vendor-Neutral Read-Only Physical Commissioning Framework (Phase B4.1 Complete)**: Pure observation framework (`PhysicalRobotIdentity`, three-state safety schema, `PhysicalReadinessEvaluator`, read-only `PhysicalRobotStateBackend`, limit intersection provenance, soak session collector).
 - **Physical Manipulator Target**: `UNRESOLVED` — No physical manipulator connection, no vendor SDK, no physical motion, and zero physical commands sent. Physical commissioning and Phase B4.2 remain blocked pending physical hardware selection.
 
-For complete engineering milestones, capability verification matrix, and architecture logs, see **[End-of-Day Development Summary (2026-09-16)](docs/status/2026-09-16-v1.3-development-summary.md)**.
+**Latest local validation (13 October 2026):** 407 passed, 7 ROS2-dependent skips on Windows/Python 3.12; three synthetic smokes passed; 60/60 tracking trials and both obstacle planning runs passed. Corrections include link/world-frame kinematics, motor-gain transport, trajectory feedforward, per-command state checks, fault persistence, automatic watchdog monitoring, and explicit physical-readiness evidence. These results apply to local uncommitted changes; ROS2 CI has not been rerun for them.
+
+See the **[current hardening report](docs/status/2026-10-13-software-hardening.md)** and **[new benchmark package](docs/experiments/2026-10-13-hardening/REPORT.md)**. The [16 September milestone summary](docs/status/2026-09-16-v1.3-development-summary.md) preserves the earlier phase history.
 
 ---
 
@@ -210,7 +212,7 @@ VisionRobotTwin strictly distinguishes between automated unit verification, simu
 
 | Validation Tier | Environment | Status | Description |
 | :--- | :--- | :---: | :--- |
-| **Automated Software Validation** | GitHub Actions / Windows pytest | **`PASS` (131 / 131)** | Full unit, mathematical, and integration test suite across Python 3.11 & 3.12. |
+| **Automated Software Validation** | Local Windows / Python 3.12 | **407 passed, 7 skipped** | Current local suite; ROS2 and multi-Python CI still require rerunning for these changes. |
 | **PyBullet Reference Experiments** | 240 Hz Physics Twin | **`AVAILABLE`** | Reproducible multi-robot & multi-controller benchmark suite in PyBullet. |
 | **Basic Physical Webcam Smoke** | Monocular Webcam Teleoperation | **`USER-CONFIRMED / PASS`** | Operator-verified ArUco marker teleoperation smoke test (v1.1 baseline). |
 | **Physical Calibrated Camera Benchmark** | Chessboard Metric Rig | **`NOT YET MEASURED`** | Optical calibration metrics pending physical lab capture. |
@@ -242,7 +244,7 @@ pytest -v
 | `test_calibration_quality.py` | Camera Calibration Heuristics & Diagnostics | **PASS** |
 | `test_extrinsics_math.py` | World-Anchor Extrinsic Calibration Math | **PASS** |
 | `test_transforms.py` | SE(3) Lie Group Matrix & Quaternion Conversions | **PASS** |
-| **Total Automated Tests** | **Full Multi-Robot Robotics Suite** | **131 / 131 PASSING** |
+| **Total Automated Tests** | **Current local suite, including backend, safety, physical-framework and hardening tests** | **407 passed, 7 skipped** |
 
 ---
 
@@ -278,7 +280,7 @@ VisionRobotTwin/
 │   ├── calibrate_extrinsics.py # World-Anchor Extrinsic Calibration
 │   ├── benchmark_live.py       # Standstill & Dynamic Tracking Benchmark
 │   └── generate_aruco_markers.py # Printable Marker Generator
-└── tests/                      # 131 Automated Unit & Integration Tests
+└── tests/                      # Robotics, perception, backend, safety and integration tests
 ```
 
 ---

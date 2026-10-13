@@ -539,7 +539,7 @@ def create_experiment_arg_parser() -> argparse.ArgumentParser:
     mode_group.add_argument("--headless", action="store_true", help="Run in headless mode (DIRECT physics, default)")
     mode_group.add_argument("--gui", action="store_true", help="Run with PyBullet GUI")
 
-    parser.add_argument("--publish-reference", action="store_true", help="Publish output as reference results in docs/experiments/v1.2_reference/")
+    parser.add_argument("--publish-reference", action="store_true", help="Publish reference results under the current application version")
     parser.add_argument("--commit-sha", type=str, default=None, help="Explicit git commit SHA to record in manifest")
     return parser
 
@@ -547,6 +547,10 @@ def create_experiment_arg_parser() -> argparse.ArgumentParser:
 def main(argv: Optional[List[str]] = None) -> int:
     parser = create_experiment_arg_parser()
     args = parser.parse_args(argv)
+    if args.repeats < 1 or args.physics_hz < 1 or args.preflight_stride < 1:
+        parser.error("repeats, physics-hz and preflight-stride must be positive")
+    if args.trajectory_duration is not None and (not np.isfinite(args.trajectory_duration) or args.trajectory_duration <= 0):
+        parser.error("trajectory-duration must be positive and finite")
 
     # Resolve headless vs GUI mode (default: headless / DIRECT)
     gui_mode = bool(args.gui)
@@ -578,6 +582,14 @@ def main(argv: Optional[List[str]] = None) -> int:
     run_dir.mkdir(parents=True, exist_ok=True)
     timeseries_dir.mkdir(parents=True, exist_ok=True)
     plots_dir.mkdir(parents=True, exist_ok=True)
+
+    # Capture executable source provenance before running any trials.
+    manifest_obj = generate_experiment_manifest(
+        robot_names=robots, controller_types=controllers,
+        deterministic_repeats=args.repeats, random_seed=args.seed,
+        physics_hz=args.physics_hz, trajectory_duration=args.trajectory_duration,
+        preflight_sample_stride=preflight_stride, git_commit_sha=args.commit_sha,
+    )
 
     print("=" * 70)
     print("VisionRobotTwin Task-Space Benchmark Experiment Suite")
@@ -733,16 +745,6 @@ def main(argv: Optional[List[str]] = None) -> int:
                 }
 
     # 5. Export Manifest, Summary JSON, Trial Results CSV
-    manifest_obj = generate_experiment_manifest(
-        robot_names=robots,
-        controller_types=controllers,
-        deterministic_repeats=args.repeats,
-        random_seed=args.seed,
-        physics_hz=args.physics_hz,
-        trajectory_duration=args.trajectory_duration,
-        preflight_sample_stride=preflight_stride,
-        git_commit_sha=args.commit_sha,
-    )
     manifest_path = run_dir / "manifest.json"
     with open(manifest_path, "w", encoding="utf-8") as f:
         json.dump(manifest_obj.to_dict(), f, indent=2)
@@ -787,7 +789,7 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     # 9. Reference Results Publishing
     if args.publish_reference:
-        ref_dir = REPO_ROOT / "docs" / "experiments" / "v1.2_reference"
+        ref_dir = REPO_ROOT / "docs" / "experiments" / f"v{manifest_obj.version}_reference"
         ref_dir.mkdir(parents=True, exist_ok=True)
         ref_plots_dir = ref_dir / "plots"
         ref_plots_dir.mkdir(parents=True, exist_ok=True)

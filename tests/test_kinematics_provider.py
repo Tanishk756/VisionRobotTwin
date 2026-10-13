@@ -7,6 +7,7 @@ import pybullet as p
 import pybullet_data
 
 from robotics.robot_registry import get_robot_registry
+from tests.fixtures.link_frame_reference import link_pose_from_legacy
 from tests.fixtures.kinematics_golden import (
     PANDA_GOLDEN,
     KUKA_GOLDEN,
@@ -129,12 +130,12 @@ def test_pybullet_fk_parity(pybullet_direct_client, golden):
 
     # Home FK
     pos_home, orn_home = provider.compute_fk(golden["q_home"])
-    np.testing.assert_allclose(pos_home, golden["fk_pos_home"], atol=1e-7)
+    np.testing.assert_allclose(pos_home, link_pose_from_legacy(golden, "home")[0], atol=1e-7)
     assert sign_invariant_quaternion_distance(orn_home, np.array(golden["fk_orn_home"])) <= 1e-7
 
     # Mid FK
     pos_mid, orn_mid = provider.compute_fk(golden["q_mid"])
-    np.testing.assert_allclose(pos_mid, golden["fk_pos_mid"], atol=1e-7)
+    np.testing.assert_allclose(pos_mid, link_pose_from_legacy(golden, "mid")[0], atol=1e-7)
     assert sign_invariant_quaternion_distance(orn_mid, np.array(golden["fk_orn_mid"])) <= 1e-7
 
 

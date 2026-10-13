@@ -31,6 +31,8 @@ class PyBulletRobotBackend(RobotBackend):
         arm_joint_indices: Sequence[int],
         joint_names: Sequence[str],
         default_joint_force: float = 200.0,
+        position_gain: Optional[float] = None,
+        velocity_gain: Optional[float] = None,
     ) -> None:
         if len(arm_joint_indices) != len(joint_names):
             raise ValueError(
@@ -44,6 +46,11 @@ class PyBulletRobotBackend(RobotBackend):
         self.arm_joint_indices: List[int] = [int(idx) for idx in arm_joint_indices]
         self.joint_names: Tuple[str, ...] = tuple(joint_names)
         self.default_joint_force: float = float(default_joint_force)
+        for name, gain in (("position_gain", position_gain), ("velocity_gain", velocity_gain)):
+            if gain is not None and (not math.isfinite(gain) or not 0 < gain <= 1):
+                raise ValueError(f"{name} must be finite and in (0, 1]")
+        self.position_gain = position_gain
+        self.velocity_gain = velocity_gain
 
         self._attached: bool = False
         self._sequence_id: int = 0
@@ -147,11 +154,17 @@ class PyBulletRobotBackend(RobotBackend):
                 raise ValueError(f"Non-finite position command: {val}")
             validated_positions.append(float(val))
 
+        gains = {}
+        if self.position_gain is not None:
+            gains["positionGains"] = [self.position_gain] * len(self.arm_joint_indices)
+        if self.velocity_gain is not None:
+            gains["velocityGains"] = [self.velocity_gain] * len(self.arm_joint_indices)
         p.setJointMotorControlArray(
             bodyIndex=self.robot_body_id,
             jointIndices=self.arm_joint_indices,
             controlMode=p.POSITION_CONTROL,
             targetPositions=validated_positions,
+            **gains,
             forces=[self.default_joint_force] * len(self.arm_joint_indices),
             physicsClientId=self.physics_client_id,
         )

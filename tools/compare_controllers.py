@@ -156,7 +156,11 @@ def benchmark_controller(
                     )
             elif controller_type == "resolved-rate":
                 # Genuine velocity control command
-                q_dot, m_metrics = rr_controller.compute_step(cmd_pos, cmd_orn, dt=dt)
+                q_dot, m_metrics = rr_controller.compute_step(
+                    cmd_pos, cmd_orn, dt=dt,
+                    target_linear_velocity=sample.linear_velocity if step_idx < steps_traj else np.zeros(3),
+                    target_angular_velocity=sample.angular_velocity if step_idx < steps_traj else np.zeros(3),
+                )
                 if m_metrics.near_singularity:
                     singularity_warnings += 1
                 controller.set_arm_joint_velocities(q_dot)

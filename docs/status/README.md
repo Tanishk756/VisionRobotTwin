@@ -1,13 +1,15 @@
 # VisionRobotTwin Documentation & Project Status Index
 
-This directory contains canonical project status reports, documentation audit logs, and status indexes for the VisionRobotTwin robotics platform.
+This directory contains project status reports, documentation audit logs, and status indexes.
+
+**Current local checkpoint:** [Software hardening, 13 October 2026](2026-10-13-software-hardening.md). This report covers the uncommitted changes on integrated `main`, current tests, corrected benchmarks, and remaining physical/ROS2 validation gates.
 
 ---
 
 ## 📌 Current Authoritative Status Documents
 
 - **[End-of-Day Development Summary (2026-09-16)](2026-09-16-v1.3-development-summary.md)**:  
-  The single canonical source of truth regarding the true development state of VisionRobotTwin v1.3 on branch `develop/v1.3.0`. Summarizes architecture boundaries (A1–A4), ROS2 integration (B1–B3.5), vendor-neutral physical framework (B4.1), test evidence, capability matrix, and physical hardware gate boundaries.
+  Historical milestone checkpoint for VisionRobotTwin v1.3 on `develop/v1.3.0`, subsequently merged into `main`. Summarizes architecture boundaries (A1–A4), ROS2 integration (B1–B3.5), vendor-neutral physical framework (B4.1), test evidence, capability matrix, and physical hardware gate boundaries.
 
 - **[Markdown Audit & Reconciliation Report (2026-09-16)](2026-09-16-markdown-audit.md)**:  
   Exhaustive audit and classification table of every Markdown file in the repository, resolving contradictions, fixing local link leaks, and documenting the source-of-truth hierarchy.
@@ -53,5 +55,5 @@ Historical and active phase specifications and plans are maintained under `docs/
 ## 📖 Source-of-Truth Rules
 
 1. **Current Code & Tests Override Planning Prose**: A historical plan describing future intent does not override code proving that a feature has been completed.
-2. **Current Development Summary Governs Present State**: For all questions regarding current readiness, active gates, test baselines, and physical hardware status, refer directly to `docs/status/2026-09-16-v1.3-development-summary.md`.
+2. **Current Development Summary Governs Present State**: For all questions regarding current readiness, active gates, test baselines, and physical hardware status, refer to `docs/status/2026-10-13-software-hardening.md`; retain the September summary as historical evidence.
 3. **Historical Context Is Preserved**: Baselines and initial statements in historical specifications and plans represent authentic engineering history and must not be retroactively altered.

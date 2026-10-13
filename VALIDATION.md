@@ -1,5 +1,7 @@
 # Systems Validation Matrix & Technical Audit Report
 
+**Current local validation, 13 October 2026:** 407 passed, 7 skipped; three synthetic smokes exited 0; 60/60 tracking trials and both obstacle planning runs passed. See the [current hardening report](docs/status/2026-10-13-software-hardening.md) for scope, source provenance, and remaining limitations. The v1.2 sections below are historical release evidence; they do not describe current test totals or claim fresh remote CI.
+
 ## VisionRobotTwin (v1.2.0 Multi-Robot Robotics Stack)
 
 This document provides a strict, evidence-grounded validation report for all perception, kinematics, control, trajectory, collision, motion planning, and benchmarking subsystems. In accordance with rigorous robotics engineering standards, **synthetic simulation results are explicitly distinguished from physical hardware validation**.

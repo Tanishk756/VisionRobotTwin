@@ -6,7 +6,7 @@ import pytest
 import numpy as np
 
 from vision.extrinsics import ExtrinsicCalibration
-from robotics.coordinate_transform import create_homogeneous_matrix
+from robotics.coordinate_transform import create_homogeneous_matrix, rotation_matrix_to_quaternion
 
 
 def test_extrinsics_save_load_roundtrip(tmp_path: Path):
@@ -27,7 +27,7 @@ def test_extrinsics_save_load_roundtrip(tmp_path: Path):
         },
         T_robot_camera_matrix=T_robot_camera,
         T_robot_camera_translation=T_robot_camera[:3, 3],
-        T_robot_camera_quaternion=np.array([1.0, 0.0, 0.0, 0.0]),
+        T_robot_camera_quaternion=rotation_matrix_to_quaternion(T_robot_camera[:3, :3]),
         sample_count=25,
         rejected_samples=2,
         translation_std_mm=1.45,

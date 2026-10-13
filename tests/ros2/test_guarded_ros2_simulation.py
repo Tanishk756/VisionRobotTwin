@@ -292,7 +292,8 @@ def test_guarded_ros2_simulation_velocity_mode_and_watchdog_halt():
 
         # Wait for watchdog timeout (> 100ms)
         time.sleep(0.15)
-        assert guarded.check_watchdog() is True
+        guarded.check_watchdog()
+        assert guarded.guard_state == SafetyGuardState.FAULT_LATCHED
         assert guarded.guard_state == SafetyGuardState.FAULT_LATCHED
         assert guarded.active_fault.code == CommandSafetyFaultCode.COMMAND_WATCHDOG_TIMEOUT
 

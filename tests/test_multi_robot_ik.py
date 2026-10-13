@@ -64,8 +64,9 @@ def test_generic_ik_solver_panda(pybullet_direct):
     assert res.solve_time_ms is not None and res.solve_time_ms >= 0.0
     
     # Test FK consistency: command joints and verify end-effector position
-    controller.set_arm_joint_positions(res.joint_positions)
-    for _ in range(60):
+    # Exercise bounded target updates rather than an instantaneous large step.
+    for _ in range(240):
+        controller.set_arm_joint_positions(res.joint_positions, dt=1.0 / 240.0)
         p.stepSimulation(physicsClientId=client_id)
     
     ee_pos, ee_orn = controller.get_end_effector_pose()
@@ -116,8 +117,8 @@ def test_generic_ik_solver_kuka(pybullet_direct):
     assert res.solve_time_ms is not None
     
     # FK consistency check
-    controller.set_arm_joint_positions(res.joint_positions)
-    for _ in range(60):
+    for _ in range(240):
+        controller.set_arm_joint_positions(res.joint_positions, dt=1.0 / 240.0)
         p.stepSimulation(physicsClientId=client_id)
     
     ee_pos, ee_orn = controller.get_end_effector_pose()

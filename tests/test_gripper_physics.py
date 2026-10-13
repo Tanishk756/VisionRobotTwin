@@ -32,11 +32,13 @@ def test_gripper_distance_gated_attachment():
         assert not gripper.is_grasping
 
         # 2. Command arm to descend onto pick cube
-        target_near = np.array([cube_pos[0], cube_pos[1], cube_pos[2] + 0.02])
+        target_near = np.array([cube_pos[0], cube_pos[1], cube_pos[2] + 0.04])
         ik_res = sim.ik_solver.solve(target_near)
         assert ik_res.success
-        sim.controller.set_arm_joint_positions(ik_res.joint_positions)
-        for _ in range(240):
+        # Approach with bounded joint updates, avoiding a high-gain position
+        # jump that strikes and displaces the cube before grasping.
+        for _ in range(480):
+            sim.controller.set_arm_joint_positions(ik_res.joint_positions, dt=config.simulation.time_step)
             sim.step()
 
         # Attempt grasp -> must SUCCEED

@@ -26,6 +26,8 @@ def create_pybullet_backend(
     arm_joint_indices: Sequence[int],
     joint_names: Sequence[str],
     default_joint_force: float = 200.0,
+    position_gain: Optional[float] = None,
+    velocity_gain: Optional[float] = None,
 ) -> PyBulletRobotBackend:
     """Factory helper to construct and connect a PyBulletRobotBackend."""
     backend = PyBulletRobotBackend(
@@ -34,6 +36,8 @@ def create_pybullet_backend(
         arm_joint_indices=arm_joint_indices,
         joint_names=joint_names,
         default_joint_force=default_joint_force,
+        position_gain=position_gain,
+        velocity_gain=velocity_gain,
     )
     backend.connect()
     return backend

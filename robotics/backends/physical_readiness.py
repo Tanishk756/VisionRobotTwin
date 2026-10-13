@@ -5,6 +5,7 @@ identity matching, model compatibility, and multi-signal safety chain status.
 """
 
 from dataclasses import dataclass
+import math
 import time
 from typing import Optional, Protocol, Sequence, Tuple
 
@@ -106,8 +107,15 @@ class PhysicalReadinessEvaluator:
             "protective_stop_clear",
             "emergency_stop_clear",
             "external_control_ready",
+            "drives_state_safe_or_known",
+            "operational_mode_safe",
+            "brakes_state_safe_or_known",
         ),
     ) -> None:
+        if not math.isfinite(physical_state_timeout_s) or physical_state_timeout_s <= 0:
+            raise ValueError("Physical state timeout must be positive and finite")
+        if not required_safety_signals or any(name not in PhysicalSafetyStatus.__dataclass_fields__ or name.endswith("timestamp_s") or name == "vendor_status_summary" for name in required_safety_signals):
+            raise ValueError("Required safety signals must name actual safety condition fields")
         self._physical_state_timeout_s = physical_state_timeout_s
         self._required_safety_signals = tuple(required_safety_signals)
 
@@ -116,7 +124,7 @@ class PhysicalReadinessEvaluator:
         provider: PhysicalTelemetryProvider,
         resolved_model: ResolvedRobotModel,
         expected_identity: Optional[ExpectedPhysicalRobotIdentity] = None,
-        limits_resolved: bool = True,
+        limits_resolved: bool = False,
         now_s: Optional[float] = None,
     ) -> PhysicalReadinessReport:
         """Evaluates physical readiness against telemetry, model, and safety requirements."""
@@ -124,8 +132,13 @@ class PhysicalReadinessEvaluator:
         reasons = []
 
         # 1. Connection and transport health
-        is_conn = provider.is_connected()
-        health = provider.health_status()
+        try:
+            is_conn = provider.is_connected()
+            health = provider.health_status()
+        except Exception as err:
+            is_conn = False
+            health = BackendHealthStatus.ERROR
+            reasons.append(f"Failed to inspect provider transport: {err}")
         if not is_conn:
             reasons.append("Provider is not connected.")
         if health != BackendHealthStatus.HEALTHY:
@@ -137,9 +150,11 @@ class PhysicalReadinessEvaluator:
         joint_model_match = False
         try:
             state = provider.read_joint_state()
+            if now_s is None:
+                current_time = time.monotonic()
             state_avail = True
             age = current_time - state.receive_timestamp_s
-            if age <= self._physical_state_timeout_s:
+            if state.is_fresh(current_time, self._physical_state_timeout_s):
                 state_fresh = True
             else:
                 reasons.append(
@@ -171,8 +186,7 @@ class PhysicalReadinessEvaluator:
                 else:
                     reasons.extend(ident_reasons)
             else:
-                # No specific expectation configured, identity available
-                identity_match = True
+                reasons.append("Expected physical identity is not configured.")
         except Exception as err:
             reasons.append(f"Failed to read identity from provider: {err}")
 
@@ -187,6 +201,8 @@ class PhysicalReadinessEvaluator:
 
         try:
             safety = provider.read_safety_status()
+            if now_s is None:
+                current_time = time.monotonic()
             comm_healthy = safety.communication_healthy == SafetySignalState.SAFE
             vendor_fault_clear = safety.vendor_fault_clear == SafetySignalState.SAFE
             protective_stop_clear = safety.protective_stop_clear == SafetySignalState.SAFE
@@ -196,6 +212,10 @@ class PhysicalReadinessEvaluator:
 
             # Check required safety signals
             safety_status_complete = safety.is_signal_subset_safe(self._required_safety_signals)
+            safety_age = current_time - safety.receive_timestamp_s
+            if not math.isfinite(safety_age) or not 0 <= safety_age <= self._physical_state_timeout_s:
+                safety_status_complete = False
+                reasons.append("Physical safety status is stale or has a future timestamp.")
             if not safety_status_complete:
                 for sig_name in self._required_safety_signals:
                     val = getattr(safety, sig_name, SafetySignalState.UNKNOWN)

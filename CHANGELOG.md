@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased] - v1.3.0-dev
 
+### Software hardening ? 2026-10-13 (local validation)
+- Correct URDF link-frame FK, world-frame Jacobians, canonical joint mapping, and configured PyBullet motor-gain transport.
+- Add trajectory velocity feedforward to resolved-rate benchmarks, coordinated joint velocity scaling, and correct SLERP angular velocity reporting.
+- Revalidate state and transport before commands; enforce configured margins; preserve latched faults across lifecycle operations; halt and latch on dispatch failures.
+- Start command watchdog monitoring on arming by default and avoid joining its thread under the command lock. Explicit manual monitoring remains available.
+- Require explicit physical identity/limit evidence and fresh safety telemetry; reject empty or untrusted limit evidence and future/disconnected state.
+- Reject malformed controller, IK, trajectory and calibration inputs; propagate command rejections; wait for measured motion completion with a settling timeout.
+- Record actual experiment version, dirty state, source hash and frame/feedforward policy; preserve historical v1.2 reference artifacts when publishing newer results.
+- Add 60 behavioral regressions. Local validation: 407 passed, 7 ROS2-dependent skips, three synthetic smokes, 60/60 tracking trials, 2/2 obstacle runs. Fresh remote ROS2 CI remains pending.
+- Publish [hardening details and remaining limits](docs/status/2026-10-13-software-hardening.md) and [new simulation evidence](docs/experiments/2026-10-13-hardening/REPORT.md).
+
 ### Added
 - **Phase A1 — Execution Backend Boundary**: Introduced abstract `RobotBackend` contract and `TimestampedJointState` model, providing `PyBulletRobotBackend` and `MockRobotBackend` for backend-agnostic execution I/O.
 - **Phase A2 — KinematicsProvider Boundary**: Introduced abstract `KinematicsProvider` contract and `PyBulletKinematicsProvider` for forward kinematics, spatial Jacobians, SVD manipulability, and inverse kinematics.

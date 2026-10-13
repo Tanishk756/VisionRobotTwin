@@ -12,6 +12,7 @@ from robotics.robot_registry import get_robot_registry
 from robotics.robot_controller import GenericRobotController
 from robotics.inverse_kinematics import GenericIKSolver
 from robotics.kinematics import compute_fk_at_configuration, compute_jacobian
+from tests.fixtures.link_frame_reference import link_pose_from_legacy, legacy_com_position
 from tests.fixtures.kinematics_golden import (
     PANDA_GOLDEN,
     KUKA_GOLDEN,
@@ -63,7 +64,7 @@ def test_fk_home_parity(pybullet_direct_client, golden):
         ee_link_index=ctrl.ee_link_index,
     )
     
-    np.testing.assert_allclose(pos, golden["fk_pos_home"], atol=1e-7)
+    np.testing.assert_allclose(pos, link_pose_from_legacy(golden, "home")[0], atol=1e-7)
     assert sign_invariant_quaternion_distance(orn, np.array(golden["fk_orn_home"])) <= 1e-7
 
 
@@ -121,7 +122,7 @@ def test_fk_and_jacobian_mid_range_parity(pybullet_direct_client, golden):
         joint_positions=golden["q_mid"],
         ee_link_index=ctrl.ee_link_index,
     )
-    np.testing.assert_allclose(pos, golden["fk_pos_mid"], atol=1e-7)
+    np.testing.assert_allclose(pos, link_pose_from_legacy(golden, "mid")[0], atol=1e-7)
     assert sign_invariant_quaternion_distance(orn, np.array(golden["fk_orn_mid"])) <= 1e-7
     
     _, _, j_full = compute_jacobian(
@@ -182,12 +183,15 @@ def test_raw_ik_and_residual_parity(pybullet_direct_client, golden):
     
     np.testing.assert_allclose(raw_ik_q, golden["raw_ik_q"], atol=1e-6)
     
-    pos_res, _ = compute_fk_at_configuration(
+    pos_res, orn_res = compute_fk_at_configuration(
         physics_client_id=client_id,
         robot_id=robot_id,
         arm_joint_indices=ctrl.arm_joint_indices,
         joint_positions=raw_ik_q,
         ee_link_index=ctrl.ee_link_index,
     )
-    pos_err = float(np.linalg.norm(np.array(golden["ik_target_pos"]) - np.array(pos_res)))
+    # Preserve the original residual as a historical COM measurement.
+    com_pos = legacy_com_position(golden, pos_res, orn_res)
+    pos_err = float(np.linalg.norm(np.array(golden["ik_target_pos"]) - com_pos))
     assert abs(pos_err - golden["pos_residual"]) <= 1e-6
+    assert np.linalg.norm(np.array(golden["ik_target_pos"]) - pos_res) < 0.001

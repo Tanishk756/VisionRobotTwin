@@ -8,11 +8,13 @@ __pycache__/
 
 # Pytest & Coverage
 .pytest_cache/
+.test-tmp*/
 .coverage
 htmlcov/
 
 # Logs, Session Telemetry & Local Benchmark Recordings
 logs/*.log
+logs/*.txt
 demo/data/*.csv
 demo/recordings/
 /benchmarks/

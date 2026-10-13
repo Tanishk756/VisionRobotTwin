@@ -118,7 +118,10 @@ class GenericIKSolver:
             IKResult containing validated arm joint positions and convergence metrics.
         """
         t0 = time.perf_counter()
-        pos = list(np.asarray(target_position, dtype=np.float64).flatten())
+        try:
+            pos = list(np.asarray(target_position, dtype=np.float64).flatten())
+        except (TypeError, ValueError):
+            return IKResult(False, [], IKStatus.INVALID_TARGET, "Target position must be numeric")
         if len(pos) != 3 or not np.all(np.isfinite(pos)):
             return IKResult(
                 success=False,
@@ -139,15 +142,17 @@ class GenericIKSolver:
                 solve_time_ms=(time.perf_counter() - t0) * 1000.0,
             )
 
-        if target_orientation is None:
-            orn = list(self.default_ee_orientation)
-        else:
-            orn = list(np.asarray(target_orientation, dtype=np.float64).flatten())
-            q_norm = float(np.linalg.norm(orn))
-            if q_norm > 1e-6:
-                orn = [float(x / q_norm) for x in orn]
-            else:
-                orn = list(self.default_ee_orientation)
+        try:
+            orn_arr = np.asarray(
+                self.default_ee_orientation if target_orientation is None else target_orientation,
+                dtype=np.float64,
+            )
+            q_norm = float(np.linalg.norm(orn_arr))
+            if orn_arr.shape != (4,) or not np.all(np.isfinite(orn_arr)) or q_norm <= 1e-9:
+                raise ValueError("Invalid quaternion")
+            orn = list(orn_arr / q_norm)
+        except (TypeError, ValueError):
+            return IKResult(False, [], IKStatus.INVALID_TARGET, "Orientation must be a finite nonzero quaternion")
 
         try:
             raw_joint_poses = self.provider.solve_ik_raw(
@@ -191,6 +196,12 @@ class GenericIKSolver:
 
             # 3. State-Preserving Forward Kinematics (FK) Residual Measurement via Provider
             fk_pos, fk_orn = self.provider.compute_fk(arm_poses)
+            fk_pos = np.asarray(fk_pos, dtype=np.float64)
+            fk_orn = np.asarray(fk_orn, dtype=np.float64)
+            if (fk_pos.shape != (3,) or fk_orn.shape != (4,)
+                    or not np.all(np.isfinite(fk_pos)) or not np.all(np.isfinite(fk_orn))
+                    or np.linalg.norm(fk_orn) <= 1e-9):
+                raise ValueError("Kinematics provider returned an invalid pose")
 
             target_pos_arr = np.array(pos, dtype=np.float64)
             residual_pos_m = float(np.linalg.norm(target_pos_arr - fk_pos))

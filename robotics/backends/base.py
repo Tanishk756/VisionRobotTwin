@@ -104,7 +104,14 @@ class TimestampedJointState:
     sequence_id: int = 0
 
     def __post_init__(self) -> None:
+        # Frozen dataclasses must also own immutable copies of caller sequences.
+        for name in ("joint_names", "positions", "velocities", "efforts"):
+            values = getattr(self, name)
+            if values is not None:
+                object.__setattr__(self, name, tuple(values))
         num_joints = len(self.joint_names)
+        if not num_joints or len(set(self.joint_names)) != num_joints or any(not isinstance(n, str) or not n.strip() for n in self.joint_names):
+            raise ValueError("Joint names must be non-empty and unique")
         if len(self.positions) != num_joints:
             raise ValueError(
                 f"Length mismatch: {num_joints} joint_names vs {len(self.positions)} positions"
@@ -155,7 +162,8 @@ class TimestampedJointState:
 
     def is_fresh(self, current_time_s: float, timeout_s: float) -> bool:
         """Evaluates whether the telemetry is fresh within the configured timeout window."""
-        return self.age_s(current_time_s) <= timeout_s
+        age = current_time_s - self.receive_timestamp_s
+        return math.isfinite(age) and math.isfinite(timeout_s) and 0 <= age <= timeout_s
 
 
 class RobotBackend(ABC):

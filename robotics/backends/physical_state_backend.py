@@ -55,6 +55,8 @@ class PhysicalRobotStateBackend(RobotBackend):
     ) -> None:
         self._provider = provider
         self._model = resolved_model
+        if not math.isfinite(state_timeout_s) or state_timeout_s <= 0:
+            raise ValueError("state_timeout_s must be positive and finite")
         self._state_timeout_s = state_timeout_s
         self._time_source = time_source or time.monotonic
 
@@ -87,7 +89,9 @@ class PhysicalRobotStateBackend(RobotBackend):
             BackendStateStaleError: If telemetry age exceeds state_timeout_s.
             BackendError: If joint names, DoF, or numerical values are invalid.
         """
-        now_mono = self._time_source()
+        if not self._provider.is_connected():
+            self._last_error = "Provider is disconnected"
+            raise BackendStateUnavailableError(self._last_error)
         try:
             state = self._provider.read_joint_state()
         except Exception as err:
@@ -95,8 +99,9 @@ class PhysicalRobotStateBackend(RobotBackend):
             raise BackendStateUnavailableError(f"Failed to read joint state from provider: {err}") from err
 
         # Check freshness
+        now_mono = self._time_source()
         age = now_mono - state.receive_timestamp_s
-        if age > self._state_timeout_s:
+        if not state.is_fresh(now_mono, self._state_timeout_s):
             self._last_error = f"Stale state: {age:.4f}s > {self._state_timeout_s:.4f}s"
             raise BackendStateStaleError(
                 f"Physical joint state telemetry is stale ({age:.4f}s > {self._state_timeout_s:.4f}s)."

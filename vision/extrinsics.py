@@ -83,6 +83,8 @@ class ExtrinsicCalibration:
             raise ValueError("Missing 'T_robot_camera' key in extrinsics data")
 
         t_data = data["T_robot_camera"]
+        if not isinstance(t_data, dict):
+            raise ValueError("T_robot_camera must be a dictionary")
         if "matrix_4x4" not in t_data:
             raise ValueError("Missing 'matrix_4x4' in T_robot_camera")
 
@@ -98,12 +100,18 @@ class ExtrinsicCalibration:
 
         trans = np.array(t_data.get("translation_m", mat[:3, 3]), dtype=np.float64)
         quat = np.array(t_data.get("quaternion_xyzw", rotation_matrix_to_quaternion(mat[:3, :3])), dtype=np.float64)
+        if trans.shape != (3,) or quat.shape != (4,) or not np.all(np.isfinite(trans)):
+            raise ValueError("Calibration translation/quaternion dimensions or values are invalid")
 
         # Normalize quaternion
         q_norm = np.linalg.norm(quat)
         if q_norm < 1e-6 or not np.isfinite(q_norm):
             raise ValueError("T_robot_camera quaternion is zero or invalid")
         quat = quat / q_norm
+        if not np.allclose(trans, mat[:3, 3], atol=1e-6, rtol=0):
+            raise ValueError("Calibration translation does not match matrix")
+        if not np.allclose(quaternion_to_rotation_matrix(quat), mat[:3, :3], atol=1e-3, rtol=0):
+            raise ValueError("Calibration quaternion does not match matrix")
 
         return cls(
             version=str(data.get("version", "1.2.0")),

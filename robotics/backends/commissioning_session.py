@@ -68,7 +68,7 @@ class CommissioningSessionRecord:
             for pat in _SUSPICIOUS_SECRET_PATTERNS:
                 if pat.search(self.operator_note):
                     raise ValueError(
-                        f"Potential secret or credential detected in operator_note: '{self.operator_note}'"
+                        "Potential secret or credential detected in operator_note"
                     )
 
     def to_dict(self) -> Dict[str, Any]:

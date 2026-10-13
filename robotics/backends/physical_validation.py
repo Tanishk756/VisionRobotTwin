@@ -95,6 +95,8 @@ class LimitProvenanceEngine:
 
         for src in sources:
             sources_used.append(src.source_name)
+            if not src.trusted_for_command:
+                reasons.append(f"Limit source '{src.source_name}' is not trusted for command")
 
             if not math.isfinite(src.position_lower) or not math.isfinite(src.position_upper):
                 reasons.append(
@@ -155,9 +157,11 @@ class LimitProvenanceEngine:
         sources_by_joint: Dict[str, Sequence[JointLimitSource]],
     ) -> Tuple[bool, Dict[str, ResolvedJointLimit], Tuple[str, ...]]:
         """Resolves limits for all joints of a robot manipulator."""
-        all_valid = True
+        all_valid = bool(sources_by_joint)
         resolved: Dict[str, ResolvedJointLimit] = {}
         all_reasons: List[str] = []
+        if not sources_by_joint:
+            all_reasons.append("No robot joint limit sources provided.")
 
         for j_name, j_sources in sources_by_joint.items():
             res = self.resolve_joint_limits(j_name, j_sources)

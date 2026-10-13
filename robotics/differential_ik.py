@@ -43,6 +43,10 @@ class ResolvedRateController:
         self.enable_nullspace = bool(enable_nullspace)
         self.nullspace_gain = float(nullspace_gain)
         self.singularity_threshold = float(singularity_threshold)
+        if any(not np.isfinite(v) or v <= 0 for v in (self.kp_pos, self.kp_orn, self.max_joint_vel, self.singularity_threshold)):
+            raise ValueError("Controller gains, velocity and singularity threshold must be positive and finite")
+        if not np.isfinite(self.nullspace_gain) or self.nullspace_gain < 0:
+            raise ValueError("Nullspace gain must be non-negative and finite")
 
         if kinematics_provider is not None:
             self.kinematics_provider: KinematicsProvider = kinematics_provider
@@ -71,6 +75,8 @@ class ResolvedRateController:
         target_position: Union[np.ndarray, List[float], Tuple[float, float, float]],
         target_orientation: Optional[Union[np.ndarray, List[float], Tuple[float, float, float, float]]] = None,
         dt: float = 1.0 / 240.0,
+        target_linear_velocity: Optional[np.ndarray] = None,
+        target_angular_velocity: Optional[np.ndarray] = None,
     ) -> Tuple[np.ndarray, ManipulabilityMetrics]:
         """Calculates joint velocity commands to drive end-effector toward Cartesian target.
 
@@ -78,25 +84,46 @@ class ResolvedRateController:
             target_position: Desired [x, y, z] target in robot base frame.
             target_orientation: Optional desired unit quaternion [x, y, z, w].
             dt: Control cycle delta time.
+            target_linear_velocity: Optional world-frame reference velocity (m/s).
+            target_angular_velocity: Optional world-frame reference velocity (rad/s).
 
         Returns:
             (q_dot_command, manipulability_metrics)
         """
         n = len(self.controller.arm_joint_indices)
+        if not np.isfinite(dt) or dt <= 0:
+            raise ValueError("Control dt must be positive and finite")
         target_p = np.asarray(target_position, dtype=np.float64).flatten()
+        invalid_metrics = ManipulabilityMetrics(0.0, float("inf"), 0.0, 0.0, True)
 
         # NaN / Inf validation
         if len(target_p) != 3 or not np.all(np.isfinite(target_p)):
             zero_qdot = np.zeros(n, dtype=np.float64)
-            dummy_metrics = ManipulabilityMetrics(0.0, float("inf"), 0.0, 0.0, True)
-            return zero_qdot, dummy_metrics
+            return zero_qdot, invalid_metrics
+
+        feedforward = []
+        for value in (target_linear_velocity, target_angular_velocity):
+            vector = np.zeros(3) if value is None else np.asarray(value, dtype=np.float64)
+            if vector.shape != (3,) or not np.all(np.isfinite(vector)):
+                return np.zeros(n), invalid_metrics
+            feedforward.append(vector)
+        if target_orientation is not None:
+            orientation = np.asarray(target_orientation, dtype=np.float64)
+            if orientation.shape != (4,) or not np.all(np.isfinite(orientation)) or np.linalg.norm(orientation) < 1e-9:
+                return np.zeros(n), invalid_metrics
 
         current_q = np.array(self.controller.get_current_joint_positions(), dtype=np.float64)
         current_p, current_orn = self.kinematics_provider.compute_fk(list(current_q))
+        current_orn = np.asarray(current_orn, dtype=np.float64)
+        if (np.asarray(current_p).shape != (3,) or current_orn.shape != (4,)
+                or not np.all(np.isfinite(current_p)) or not np.all(np.isfinite(current_orn))
+                or np.linalg.norm(current_orn) < 1e-9):
+            raise ValueError("Kinematics provider returned an invalid pose")
+        current_orn = current_orn / np.linalg.norm(current_orn)
 
         # 1. Position Error & Linear Velocity Feedback
         pos_error = target_p - current_p
-        v_lin = self.kp_pos * pos_error
+        v_lin = self.kp_pos * pos_error + feedforward[0]
 
         # 2. Orientation Error & Angular Velocity Feedback
         if target_orientation is not None:
@@ -124,7 +151,7 @@ class ResolvedRateController:
             v_ang = np.zeros(3, dtype=np.float64)
 
         # Form full 6-DoF spatial twist
-        spatial_twist = np.concatenate([v_lin, v_ang])  # (6,)
+        spatial_twist = np.concatenate([v_lin, v_ang + feedforward[1]])  # (6,)
 
         # 3. Compute Jacobian via KinematicsProvider
         _, _, J = self.kinematics_provider.compute_jacobian(list(current_q))
@@ -168,7 +195,9 @@ class ResolvedRateController:
                 q_dot_total[i] *= max(0.0, dist_to_high / buffer)
 
         # Absolute velocity limit clamping
-        max_vel = float(self.max_joint_vel)
-        q_dot_clamped = np.clip(q_dot_total, -max_vel, max_vel)
+        limits = np.minimum(self.controller.model.arm_max_velocities, self.max_joint_vel)
+        moving = np.abs(q_dot_total) > 1e-12
+        scale = min(1.0, float(np.min(limits[moving] / np.abs(q_dot_total[moving])))) if np.any(moving) else 1.0
+        q_dot_clamped = q_dot_total * scale
 
         return q_dot_clamped, metrics

@@ -1,6 +1,7 @@
 """Tests for GuardedRobotBackend decorator, state machine, and fail-closed authorization."""
 
 import time
+from dataclasses import replace
 from unittest.mock import MagicMock
 import pytest
 
@@ -429,11 +430,14 @@ def test_watchdog_inactive_when_armed_with_no_motion():
     """Verify watchdog does not trigger when ARMED without any dispatched motion."""
     model, mock_backend = _make_model_and_backend()
     fake_time = [100.0]
+    mock_backend.get_joint_state.side_effect = lambda: replace(
+        mock_backend.get_joint_state.return_value, receive_timestamp_s=fake_time[0]
+    )
 
     guard = GuardedRobotBackend(
         underlying_backend=mock_backend,
         resolved_model=model,
-        safety_config=CommandSafetyConfig(command_watchdog_timeout_s=0.2),
+        safety_config=CommandSafetyConfig(command_watchdog_timeout_s=0.2, watchdog_auto_start=False),
         time_source=lambda: fake_time[0],
     )
     guard.arm()
@@ -449,11 +453,14 @@ def test_watchdog_deadline_reset_and_timeout_trigger():
     """Verify watchdog deadline resets on valid command and halts on starvation."""
     model, mock_backend = _make_model_and_backend()
     fake_time = [100.0]
+    mock_backend.get_joint_state.side_effect = lambda: replace(
+        mock_backend.get_joint_state.return_value, receive_timestamp_s=fake_time[0]
+    )
 
     guard = GuardedRobotBackend(
         underlying_backend=mock_backend,
         resolved_model=model,
-        safety_config=CommandSafetyConfig(command_watchdog_timeout_s=0.2),
+        safety_config=CommandSafetyConfig(command_watchdog_timeout_s=0.2, watchdog_auto_start=False),
         time_source=lambda: fake_time[0],
     )
     guard.arm()
@@ -495,11 +502,14 @@ def test_watchdog_halt_failure_latches_halt_failed():
     model, mock_backend = _make_model_and_backend()
     mock_backend.halt_motion.side_effect = RuntimeError("Halt communication timeout")
     fake_time = [100.0]
+    mock_backend.get_joint_state.side_effect = lambda: replace(
+        mock_backend.get_joint_state.return_value, receive_timestamp_s=fake_time[0]
+    )
 
     guard = GuardedRobotBackend(
         underlying_backend=mock_backend,
         resolved_model=model,
-        safety_config=CommandSafetyConfig(command_watchdog_timeout_s=0.2),
+        safety_config=CommandSafetyConfig(command_watchdog_timeout_s=0.2, watchdog_auto_start=False),
         time_source=lambda: fake_time[0],
     )
     guard.arm()

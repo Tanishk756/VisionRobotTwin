@@ -9,6 +9,7 @@ Supports:
 from dataclasses import dataclass
 from typing import List, Optional, Sequence, Tuple, Union
 import numpy as np
+from scipy.spatial.transform import Rotation
 
 from utils.logger import get_logger
 
@@ -45,6 +46,12 @@ def slerp_quaternion(q0: np.ndarray, q1: np.ndarray, t: float) -> np.ndarray:
     Returns:
         Interpolated unit quaternion [x, y, z, w].
     """
+    q0 = np.asarray(q0, dtype=np.float64)
+    q1 = np.asarray(q1, dtype=np.float64)
+    if any(q.shape != (4,) or not np.all(np.isfinite(q)) or np.linalg.norm(q) < 1e-9 for q in (q0, q1)):
+        raise ValueError("SLERP requires finite nonzero quaternions")
+    if not np.isfinite(t):
+        raise ValueError("SLERP interpolation time must be finite")
     q0 = q0 / np.linalg.norm(q0)
     q1 = q1 / np.linalg.norm(q1)
 
@@ -80,11 +87,13 @@ class JointQuinticTrajectory:
         duration: float = 2.0,
     ):
         """Initializes quintic trajectory from q_start to q_goal over duration T."""
-        if duration <= 0:
+        if not np.isfinite(duration) or duration <= 0:
             raise ValueError(f"Trajectory duration must be positive, got {duration}")
 
-        self.q_start = np.asarray(q_start, dtype=np.float64).flatten()
-        self.q_goal = np.asarray(q_goal, dtype=np.float64).flatten()
+        self.q_start = np.array(q_start, dtype=np.float64).flatten()
+        self.q_goal = np.array(q_goal, dtype=np.float64).flatten()
+        if self.q_start.size == 0 or not np.all(np.isfinite(self.q_start)) or not np.all(np.isfinite(self.q_goal)):
+            raise ValueError("Trajectory endpoints must be non-empty and finite")
         self.duration = float(duration)
         self.dof = len(self.q_start)
 
@@ -106,6 +115,8 @@ class JointQuinticTrajectory:
 
     def evaluate(self, t: float) -> TrajectorySample:
         """Evaluates position, velocity, and acceleration at time t."""
+        if not np.isfinite(t):
+            raise ValueError("Trajectory time must be finite")
         t_clamped = np.clip(t, 0.0, self.duration)
 
         pos = (
@@ -147,6 +158,8 @@ class PiecewiseJointTrajectory:
     """Multi-segment quintic trajectory through a sequence of waypoints."""
 
     def __init__(self, waypoints: Sequence[np.ndarray], duration: float = 2.0):
+        if not np.isfinite(duration) or duration <= 0:
+            raise ValueError("Trajectory duration must be positive and finite")
         if len(waypoints) < 2:
             raise ValueError("Piecewise trajectory requires at least 2 waypoints")
         self.waypoints = [np.asarray(w, dtype=np.float64).flatten() for w in waypoints]
@@ -197,7 +210,7 @@ class CartesianSE3Trajectory:
         q_goal: Union[np.ndarray, List[float]],
         duration: float = 2.0,
     ):
-        if duration <= 0:
+        if not np.isfinite(duration) or duration <= 0:
             raise ValueError(f"Trajectory duration must be positive, got {duration}")
 
         self.p_start = np.asarray(p_start, dtype=np.float64).flatten()
@@ -205,6 +218,14 @@ class CartesianSE3Trajectory:
         self.p_goal = np.asarray(p_goal, dtype=np.float64).flatten()
         self.q_goal = np.asarray(q_goal, dtype=np.float64).flatten()
         self.duration = float(duration)
+        if self.p_start.shape != (3,) or self.p_goal.shape != (3,):
+            raise ValueError("Cartesian positions must have three components")
+        # Validate and own normalized endpoints.
+        self.q_start = slerp_quaternion(self.q_start, self.q_start, 0.0)
+        self.q_goal = slerp_quaternion(self.q_goal, self.q_goal, 0.0)
+        self._rotation_vector = (
+            Rotation.from_quat(self.q_goal) * Rotation.from_quat(self.q_start).inv()
+        ).as_rotvec()
 
         self.pos_traj = JointQuinticTrajectory(self.p_start, self.p_goal, duration=self.duration)
 
@@ -216,8 +237,8 @@ class CartesianSE3Trajectory:
         pos_sample = self.pos_traj.evaluate(t)
         orn_interp = slerp_quaternion(self.q_start, self.q_goal, alpha)
 
-        # Angular velocity approximation
-        ang_vel = np.zeros(3)
+        # SLERP has a constant spatial angular velocity during its active span.
+        ang_vel = self._rotation_vector / self.duration if 0 < t < self.duration else np.zeros(3)
 
         return CartesianTrajectorySample(
             time=float(t),
@@ -260,6 +281,8 @@ class TrajectoryExecutor:
         Returns:
             (sample, is_complete, progress_pct)
         """
+        if not np.isfinite(dt) or dt <= 0:
+            raise ValueError("Trajectory step must be positive and finite")
         if self.is_aborted:
             sample = self.trajectory.evaluate(self.current_time)
             return sample, True, self.progress_pct

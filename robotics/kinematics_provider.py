@@ -8,6 +8,7 @@ from abc import ABC, abstractmethod
 import threading
 from typing import List, Optional, Sequence, Tuple
 import numpy as np
+from scipy.spatial.transform import Rotation
 try:
     import pybullet as p
 except ImportError:
@@ -149,7 +150,7 @@ class PyBulletKinematicsProvider(KinematicsProvider):
             )
 
         q_arr = np.asarray(joint_positions, dtype=np.float64)
-        if not np.all(np.isfinite(q_arr)):
+        if q_arr.shape != (self.num_arm_joints,) or not np.all(np.isfinite(q_arr)):
             raise ValueError("Joint positions contain non-finite values (NaN or Inf)")
 
         with self._lock:
@@ -171,8 +172,14 @@ class PyBulletKinematicsProvider(KinematicsProvider):
                     computeForwardKinematics=True,
                     physicsClientId=self.client_id,
                 )
-                fk_pos = np.array(link_state[0], dtype=np.float64)
-                fk_orn = np.array(link_state[1], dtype=np.float64)
+                # IK targets the URDF link origin, not its inertial/COM frame.
+                # Compose in double precision; Bullet's cached link-frame fields
+                # are single precision and lose accuracy in finite differences.
+                world_com = Rotation.from_quat(link_state[1])
+                link_com = Rotation.from_quat(link_state[3])
+                world_link = world_com * link_com.inv()
+                fk_pos = np.asarray(link_state[0]) - world_link.apply(link_state[2])
+                fk_orn = world_link.as_quat()
                 return fk_pos, fk_orn
             finally:
                 for j_idx, state in zip(self.arm_joint_indices, saved_states):
@@ -204,20 +211,18 @@ class PyBulletKinematicsProvider(KinematicsProvider):
             )
 
         q_arr = np.asarray(joint_positions, dtype=np.float64)
-        if not np.all(np.isfinite(q_arr)):
+        if q_arr.shape != (self.num_arm_joints,) or not np.all(np.isfinite(q_arr)):
             raise ValueError("Joint positions contain non-finite values (NaN or Inf)")
 
         with self._lock:
             movable = self._movable_joint_indices or self._discover_movable_joints()
             num_movable = len(movable)
 
-            if len(joint_positions) < num_movable:
-                pad_len = num_movable - len(joint_positions)
-                q_full = list(joint_positions) + [0.0] * pad_len
-                zeros_full = [0.0] * num_movable
-            else:
-                q_full = list(joint_positions[:num_movable])
-                zeros_full = [0.0] * num_movable
+            columns = [movable.index(j) for j in self.arm_joint_indices]
+            q_full = [s[0] for s in p.getJointStates(self.robot_id, movable, physicsClientId=self.client_id)]
+            for column, value in zip(columns, q_arr):
+                q_full[column] = float(value)
+            zeros_full = [0.0] * num_movable
 
             j_trans, j_rot = p.calculateJacobian(
                 bodyUniqueId=self.robot_id,
@@ -229,8 +234,13 @@ class PyBulletKinematicsProvider(KinematicsProvider):
                 physicsClientId=self.client_id,
             )
 
-            j_linear = np.array(j_trans, dtype=np.float64)[:, : self.num_arm_joints]
-            j_angular = np.array(j_rot, dtype=np.float64)[:, : self.num_arm_joints]
+            # Bullet expresses the Jacobian in the base frame; FK and targets
+            # are world-frame quantities. Rotate both twist components.
+            base_orn = p.getBasePositionAndOrientation(self.robot_id, physicsClientId=self.client_id)[1]
+            base_inertial_orn = p.getDynamicsInfo(self.robot_id, -1, physicsClientId=self.client_id)[4]
+            world_base = (Rotation.from_quat(base_orn) * Rotation.from_quat(base_inertial_orn).inv()).as_matrix()
+            j_linear = world_base @ np.array(j_trans, dtype=np.float64)[:, columns]
+            j_angular = world_base @ np.array(j_rot, dtype=np.float64)[:, columns]
             j_full = np.vstack([j_linear, j_angular])
 
             return j_linear, j_angular, j_full
@@ -280,8 +290,9 @@ class PyBulletKinematicsProvider(KinematicsProvider):
             if not np.all(np.isfinite(orn_arr)):
                 raise ValueError("Target orientation contains non-finite values (NaN or Inf)")
             norm = np.linalg.norm(orn_arr)
-            if norm > 1e-9:
-                orn_arr = orn_arr / norm
+            if norm <= 1e-9:
+                raise ValueError("Target orientation must be a nonzero quaternion")
+            orn_arr = orn_arr / norm
             target_orn_tuple = tuple(float(x) for x in orn_arr)
 
         with self._lock:
@@ -306,11 +317,20 @@ class PyBulletKinematicsProvider(KinematicsProvider):
                 and joint_ranges is not None
                 and rest_poses is not None
             ):
-                pad_len = max(0, num_movable - len(lower_limits))
-                full_lower = list(lower_limits) + [0.0] * pad_len
-                full_upper = list(upper_limits) + [0.04] * pad_len
-                full_ranges = list(joint_ranges) + [0.04] * pad_len
-                full_rests = list(rest_poses) + [0.04] * pad_len
+                for values in (lower_limits, upper_limits, joint_ranges, rest_poses):
+                    if len(values) != self.num_arm_joints or not np.all(np.isfinite(values)):
+                        raise ValueError("IK limit/rest arrays must be finite and match arm DoF")
+                infos = [p.getJointInfo(self.robot_id, j, physicsClientId=self.client_id) for j in movable]
+                full_lower = [float(info[8]) for info in infos]
+                full_upper = [float(info[9]) for info in infos]
+                full_ranges = [high - low for low, high in zip(full_lower, full_upper)]
+                full_rests = [float(np.clip(0.04, low, high)) for low, high in zip(full_lower, full_upper)]
+                for i, joint in enumerate(self.arm_joint_indices):
+                    column = movable.index(joint)
+                    full_lower[column] = float(lower_limits[i])
+                    full_upper[column] = float(upper_limits[i])
+                    full_ranges[column] = float(joint_ranges[i])
+                    full_rests[column] = float(rest_poses[i])
 
                 kwargs["lowerLimits"] = full_lower
                 kwargs["upperLimits"] = full_upper
@@ -318,8 +338,12 @@ class PyBulletKinematicsProvider(KinematicsProvider):
                 kwargs["restPoses"] = full_rests
 
             if joint_damping is not None:
-                pad_len = max(0, num_movable - len(joint_damping))
-                kwargs["jointDamping"] = list(joint_damping) + [0.01] * pad_len
+                if len(joint_damping) != self.num_arm_joints or not np.all(np.isfinite(joint_damping)) or any(d < 0 for d in joint_damping):
+                    raise ValueError("IK damping must be finite, non-negative and match arm DoF")
+                damping = [0.01] * num_movable
+                for joint, value in zip(self.arm_joint_indices, joint_damping):
+                    damping[movable.index(joint)] = float(value)
+                kwargs["jointDamping"] = damping
 
             ik_raw_full = p.calculateInverseKinematics(**kwargs)
-            return tuple(float(x) for x in ik_raw_full[: self.num_arm_joints])
+            return tuple(float(ik_raw_full[movable.index(j)]) for j in self.arm_joint_indices)

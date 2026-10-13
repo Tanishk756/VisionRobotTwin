@@ -93,19 +93,22 @@ class CommandSafetyConfig:
     max_position_step_by_joint: Optional[Tuple[float, ...]] = None
     require_velocity_feedback_for_velocity_commands: bool = False
     watchdog_enabled: bool = True
+    watchdog_auto_start: bool = True
     audit_history_limit: int = 100
 
     def __post_init__(self) -> None:
-        if self.state_timeout_s <= 0.0:
+        if not math.isfinite(self.state_timeout_s) or self.state_timeout_s <= 0.0:
             raise ValueError(f"state_timeout_s must be positive, got {self.state_timeout_s}")
-        if self.command_watchdog_timeout_s <= 0.0:
+        if not math.isfinite(self.command_watchdog_timeout_s) or self.command_watchdog_timeout_s <= 0.0:
             raise ValueError(f"command_watchdog_timeout_s must be positive, got {self.command_watchdog_timeout_s}")
         if not (0.0 < self.velocity_limit_scale <= 1.0):
             raise ValueError(f"velocity_limit_scale must be in (0, 1.0], got {self.velocity_limit_scale}")
         if self.max_position_step_by_joint is not None:
-            if any(step <= 0.0 for step in self.max_position_step_by_joint):
+            if any(not math.isfinite(step) or step <= 0.0 for step in self.max_position_step_by_joint):
                 raise ValueError(f"All values in max_position_step_by_joint must be positive: {self.max_position_step_by_joint}")
-        if self.audit_history_limit <= 0:
+        if not math.isfinite(self.position_limit_margin_rad) or self.position_limit_margin_rad < 0:
+            raise ValueError("position_limit_margin_rad must be finite and non-negative")
+        if not isinstance(self.audit_history_limit, int) or self.audit_history_limit <= 0:
             raise ValueError(f"audit_history_limit must be positive, got {self.audit_history_limit}")
 
 
@@ -178,6 +181,13 @@ class GuardedRobotBackend(RobotBackend):
         self._backend = underlying_backend
         self._model = resolved_model
         self._config = safety_config or CommandSafetyConfig()
+        if not resolved_model.arm_joints:
+            raise ValueError("Command guard requires at least one arm joint")
+        if self._config.max_position_step_by_joint is not None and len(self._config.max_position_step_by_joint) != resolved_model.dof:
+            raise ValueError("Position step limits must match model DoF")
+        for joint in resolved_model.arm_joints:
+            if joint.lower_limit + self._config.position_limit_margin_rad > joint.upper_limit - self._config.position_limit_margin_rad:
+                raise ValueError(f"Position margin leaves no valid interval for {joint.name}")
         self._readiness_probe = readiness_probe
         self._time_source = time_source or time.monotonic
 
@@ -280,7 +290,7 @@ class GuardedRobotBackend(RobotBackend):
             now_mono = self._time_source()
 
             age = now_mono - state.receive_timestamp_s
-            if age <= self._config.state_timeout_s:
+            if math.isfinite(age) and 0.0 <= age <= self._config.state_timeout_s:
                 state_fresh = True
             else:
                 reasons.append(f"Joint state telemetry is stale ({age:.4f}s > {self._config.state_timeout_s:.4f}s).")
@@ -294,6 +304,10 @@ class GuardedRobotBackend(RobotBackend):
             else:
                 model_match = True
 
+            if not all(math.isfinite(q) for q in state.positions):
+                state_avail = False
+                reasons.append("Joint state positions are non-finite.")
+
         except Exception as err:
             state_avail = False
             state_fresh = False
@@ -301,7 +315,7 @@ class GuardedRobotBackend(RobotBackend):
             reasons.append(f"Failed to acquire joint state from underlying backend: {err}")
 
         caps = self._backend.transport_capabilities
-        cmd_mode_supp = caps.position_commands or caps.velocity_commands
+        cmd_mode_supp = not caps.read_only and (caps.position_commands or caps.velocity_commands)
         if not cmd_mode_supp:
             reasons.append("Underlying backend does not support position or velocity commanding.")
 
@@ -366,6 +380,8 @@ class GuardedRobotBackend(RobotBackend):
                 raise BackendError(f"Command preflight verification failed: {reasons_str}")
 
             self._guard_state = SafetyGuardState.ARMED
+            if self._config.watchdog_enabled and self._config.watchdog_auto_start:
+                self.start_watchdog_monitor(min(0.02, self._config.command_watchdog_timeout_s / 4))
 
     def disarm(self) -> None:
         """Revokes command authorization, performing software halt first if motion occurred."""
@@ -377,7 +393,8 @@ class GuardedRobotBackend(RobotBackend):
                     raise BackendError(f"Disarm software stop failed: {err}") from err
 
             self._motion_session_active = False
-            self._guard_state = SafetyGuardState.DISARMED
+            if self._guard_state != SafetyGuardState.FAULT_LATCHED:
+                self._guard_state = SafetyGuardState.DISARMED
 
     def reset_fault(self) -> None:
         """Clears FAULT_LATCHED state after verifying readiness prerequisites are healthy.
@@ -449,10 +466,65 @@ class GuardedRobotBackend(RobotBackend):
                 except Exception as err:
                     raise BackendError(f"Disconnect halted: active motion stop failed: {err}") from err
 
-            self.stop_watchdog_monitor()
-            self._guard_state = SafetyGuardState.DISARMED
+            self._watchdog_stop_event.set()
+            if self._guard_state != SafetyGuardState.FAULT_LATCHED:
+                self._guard_state = SafetyGuardState.DISARMED
             self._motion_session_active = False
             self._backend.disconnect()
+        # Never join a monitor while holding the lock it needs to finish.
+        self.stop_watchdog_monitor()
+
+    def _validate_command_state(self, mode: str) -> TimestampedJointState:
+        """Recheck local transport and telemetry immediately before every command."""
+        code = CommandSafetyFaultCode.STATE_UNAVAILABLE
+        try:
+            if not self._backend.is_connected() or self._backend.health_status() not in (
+                BackendHealthStatus.HEALTHY, BackendHealthStatus.DEGRADED
+            ):
+                code = CommandSafetyFaultCode.BACKEND_UNHEALTHY
+                raise BackendError("Command transport is disconnected or unhealthy")
+            caps = self._backend.transport_capabilities
+            if caps.read_only or not getattr(caps, f"{mode}_commands"):
+                code = CommandSafetyFaultCode.COMMAND_TRANSPORT_UNAVAILABLE
+                raise BackendError(f"Backend does not support {mode} commands")
+            state = self._backend.get_joint_state()
+            code = CommandSafetyFaultCode.MODEL_MISMATCH
+            if state.joint_names != self._model.arm_joint_names or len(state.positions) != self._model.dof:
+                raise BackendError("Command telemetry does not match model joints")
+            code = CommandSafetyFaultCode.STATE_INVALID
+            if not all(math.isfinite(q) for q in state.positions):
+                raise BackendError("Command telemetry contains non-finite positions")
+            code = CommandSafetyFaultCode.STATE_STALE
+            age = self._time_source() - state.receive_timestamp_s
+            if not math.isfinite(age) or not 0.0 <= age <= self._config.state_timeout_s:
+                raise BackendError("Command telemetry is stale or has a future timestamp")
+            return state
+        except Exception as err:
+            operation = "command_joint_positions" if mode == "position" else "command_joint_velocities"
+            self._record_audit(operation, False, reason=str(err), command_mode=mode)
+            self._latch_fault(code, str(err))
+            raise CommandSafetyViolationError(str(err)) from err
+
+    def _dispatch_command(self, mode: str, targets: Sequence[float], effort_limit: Optional[float] = None) -> bool:
+        operation = "command_joint_positions" if mode == "position" else "command_joint_velocities"
+        try:
+            if mode == "position":
+                result = self._backend.command_joint_positions(targets)
+            else:
+                result = self._backend.command_joint_velocities(targets, effort_limit=effort_limit)
+            if not result:
+                raise BackendError("Underlying backend dispatch returned False")
+        except Exception as err:
+            # A failed transport may already have partially dispatched a command.
+            self._motion_session_active = True
+            self._record_audit(operation, False, reason=str(err), command_mode=mode)
+            self._latch_fault(CommandSafetyFaultCode.COMMAND_DISPATCH_FAILED, str(err))
+            raise BackendError(f"Command dispatch failed: {err}") from err
+        self._accepted_command_sequence += 1
+        self._last_accepted_command_s = self._time_source()
+        self._motion_session_active = True
+        self._record_audit(operation, True, max_abs_value=max(abs(v) for v in targets), command_mode=mode)
+        return True
 
     def command_joint_positions(self, target_positions: Sequence[float]) -> bool:
         """Dispatches target joint positions following safety envelope and authorization validation."""
@@ -494,7 +566,8 @@ class GuardedRobotBackend(RobotBackend):
             # 2. Joint limits validation
             tol = 1e-9
             for i, (val, joint) in enumerate(zip(target_positions, self._model.arm_joints)):
-                if val < joint.lower_limit - tol or val > joint.upper_limit + tol:
+                margin = self._config.position_limit_margin_rad
+                if val < joint.lower_limit + margin - tol or val > joint.upper_limit - margin + tol:
                     msg = f"Position limit violation: Target position {val:.4f} at joint {joint.name} violates limits [{joint.lower_limit:.4f}, {joint.upper_limit:.4f}]"
                     self._record_audit(
                         "command_joint_positions",
@@ -510,7 +583,7 @@ class GuardedRobotBackend(RobotBackend):
                     raise CommandSafetyViolationError(msg)
 
             # 3. Position step jump validation
-            state = self._backend.get_joint_state()
+            state = self._validate_command_state("position")
             if self._config.max_position_step_by_joint is not None:
                 step_limits = self._config.max_position_step_by_joint
                 for i, (target_q, meas_q, max_step) in enumerate(zip(target_positions, state.positions, step_limits)):
@@ -531,26 +604,7 @@ class GuardedRobotBackend(RobotBackend):
                         raise CommandSafetyViolationError(msg)
 
             # 4. Dispatch to underlying backend
-            res = self._backend.command_joint_positions(target_positions)
-            if res:
-                self._accepted_command_sequence += 1
-                self._last_accepted_command_s = self._time_source()
-                self._motion_session_active = True
-                self._record_audit(
-                    "command_joint_positions",
-                    accepted=True,
-                    max_abs_value=max(abs(v) for v in target_positions),
-                    command_mode="position",
-                )
-                return True
-            else:
-                self._record_audit(
-                    "command_joint_positions",
-                    accepted=False,
-                    reason="Underlying backend dispatch returned False",
-                    command_mode="position",
-                )
-                return False
+            return self._dispatch_command("position", target_positions)
 
     def command_joint_velocities(
         self,
@@ -613,7 +667,7 @@ class GuardedRobotBackend(RobotBackend):
                     raise CommandSafetyViolationError(msg)
 
             # State check
-            state = self._backend.get_joint_state()
+            state = self._validate_command_state("velocity")
             if self._config.require_velocity_feedback_for_velocity_commands:
                 if state.velocities is None or len(state.velocities) != expected_dof or not all(math.isfinite(v) for v in state.velocities):
                     msg = "State telemetry is missing valid velocity feedback required by configuration."
@@ -624,26 +678,14 @@ class GuardedRobotBackend(RobotBackend):
                     )
                     raise CommandSafetyViolationError(msg)
 
-            res = self._backend.command_joint_velocities(target_velocities, effort_limit=effort_limit)
-            if res:
-                self._accepted_command_sequence += 1
-                self._last_accepted_command_s = self._time_source()
-                self._motion_session_active = True
-                self._record_audit(
-                    "command_joint_velocities",
-                    accepted=True,
-                    max_abs_value=max(abs(v) for v in target_velocities),
-                    command_mode="velocity",
-                )
-                return True
-            else:
-                self._record_audit(
-                    "command_joint_velocities",
-                    accepted=False,
-                    reason="Underlying backend dispatch returned False",
-                    command_mode="velocity",
-                )
-                return False
+            if effort_limit is not None:
+                if not math.isfinite(effort_limit) or effort_limit <= 0:
+                    self._latch_fault(CommandSafetyFaultCode.VELOCITY_LIMIT_VIOLATION, "Effort limit must be positive and finite")
+                    raise CommandSafetyViolationError("Effort limit must be positive and finite")
+                if not self.transport_capabilities.effort_limit_override:
+                    from robotics.backends.base import UnsupportedBackendOperationError
+                    raise UnsupportedBackendOperationError("Backend does not support effort limit overrides")
+            return self._dispatch_command("velocity", target_velocities, effort_limit)
 
     def check_watchdog(self, now_s: Optional[float] = None) -> bool:
         """Evaluates watchdog status and triggers software stop if deadline exceeded.
@@ -689,6 +731,8 @@ class GuardedRobotBackend(RobotBackend):
 
     def start_watchdog_monitor(self, poll_interval_s: float = 0.02) -> None:
         """Starts a background monitor thread that periodically checks the watchdog."""
+        if not math.isfinite(poll_interval_s) or poll_interval_s <= 0:
+            raise ValueError("Watchdog poll interval must be positive and finite")
         with self._command_lock:
             if self._watchdog_thread is not None and self._watchdog_thread.is_alive():
                 return
@@ -706,12 +750,13 @@ class GuardedRobotBackend(RobotBackend):
         self._watchdog_stop_event.set()
         if self._watchdog_thread is not None and self._watchdog_thread.is_alive():
             self._watchdog_thread.join(timeout=1.0)
+            if self._watchdog_thread.is_alive():
+                raise BackendError("Watchdog monitor did not stop")
             self._watchdog_thread = None
 
     def _watchdog_monitor_loop(self, poll_interval_s: float) -> None:
         while not self._watchdog_stop_event.is_set():
-            if self.check_watchdog():
-                break
+            self.check_watchdog()
             self._watchdog_stop_event.wait(timeout=poll_interval_s)
 
     def _latch_fault(self, code: CommandSafetyFaultCode, detail: str, trigger_halt: bool = True) -> None:
@@ -726,6 +771,10 @@ class GuardedRobotBackend(RobotBackend):
         if trigger_halt and self._motion_session_active:
             try:
                 self._backend.halt_motion()
-            except Exception:
-                pass
+            except Exception as err:
+                self._active_fault = CommandSafetyFault(
+                    code=CommandSafetyFaultCode.SOFTWARE_STOP_FAILED,
+                    monotonic_timestamp_s=self._time_source(),
+                    detail=f"{detail}; software halt failed: {err}",
+                )
         self._motion_session_active = False

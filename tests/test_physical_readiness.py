@@ -143,6 +143,7 @@ class TestPhysicalReadinessEvaluation:
             provider=provider,
             resolved_model=model,
             expected_identity=expected_ident,
+            limits_resolved=True,
             now_s=100.10,
         )
 

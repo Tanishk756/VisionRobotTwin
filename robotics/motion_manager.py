@@ -42,6 +42,8 @@ class MotionManager:
         scene_type: str = "default",
         default_trajectory_duration: float = 2.0,
         collision_provider: Optional[CollisionProvider] = None,
+        completion_tolerance_rad: float = 0.01,
+        settling_timeout_s: float = 5.0,
     ):
         if collision_checker is not None and collision_provider is not None:
             if collision_checker is not collision_provider:
@@ -55,6 +57,14 @@ class MotionManager:
         self.trajectory_mode = trajectory_mode
         self.scene_type = scene_type
         self.default_duration = default_trajectory_duration
+        if trajectory_mode not in ("direct", "quintic"):
+            raise ValueError("Trajectory mode must be direct or quintic")
+        if any(not np.isfinite(v) or v <= 0 for v in (default_trajectory_duration, completion_tolerance_rad, settling_timeout_s)):
+            raise ValueError("Motion duration, tolerance and timeout must be positive and finite")
+        self.completion_tolerance_rad = completion_tolerance_rad
+        self.settling_timeout_s = settling_timeout_s
+        self._settling_elapsed_s = 0.0
+        self.last_error: Optional[str] = None
 
         lows, highs, _, _ = self.controller.get_joint_limits()
         if self.collision_provider is not None:
@@ -105,16 +115,20 @@ class MotionManager:
         Returns:
             True if planning succeeded and trajectory was queued, False otherwise.
         """
+        self.reset()
+        traj_duration = duration if duration is not None else self.default_duration
+        if not np.isfinite(traj_duration) or traj_duration <= 0:
+            self._fail("Motion duration must be positive and finite")
+            return False
         # 1. Solve IK
         ik_res = self.ik_solver.solve(target_position, target_orientation)
         if not ik_res.success:
             logger.warning(f"MotionManager IK solve failed: {ik_res.status_message}")
-            self.state = MotionState.FAILED
+            self._fail(ik_res.status_message)
             return False
 
         goal_q = np.array(ik_res.joint_positions, dtype=np.float64)
         current_q = np.array(self.controller.get_current_joint_positions(), dtype=np.float64)
-        traj_duration = duration if duration is not None else self.default_duration
 
         # 2. Check direct linear joint path
         if self.collision_provider is not None:
@@ -143,7 +157,7 @@ class MotionManager:
         self.state = MotionState.PLANNING
         if self.planner is None:
             logger.error("No planner configured to handle blocked path.")
-            self.state = MotionState.FAILED
+            self._fail("No planner configured to handle blocked path")
             return False
 
         plan_res = self.planner.plan(current_q, goal_q)
@@ -151,7 +165,7 @@ class MotionManager:
 
         if not plan_res.success or len(plan_res.path) < 2:
             logger.warning(f"RRT motion planning failed: {plan_res.reason}")
-            self.state = MotionState.FAILED
+            self._fail(plan_res.reason)
             return False
 
         # 4. Shortcut path
@@ -182,29 +196,62 @@ class MotionManager:
         Returns:
             (is_complete, progress_pct)
         """
+        if not np.isfinite(dt) or dt <= 0:
+            raise ValueError("Motion step must be positive and finite")
+        try:
+            return self._step(dt)
+        except Exception as err:
+            self._fail(f"Motion execution failed: {err}")
+            return False, 0.0
+
+    def _step(self, dt: float) -> Tuple[bool, float]:
         if self.state == MotionState.EXECUTING and self.active_executor is not None:
             sample, is_done, pct = self.active_executor.step(dt)
             self.controller.set_arm_joint_positions(
                 list(sample.position), dt=dt, enforce_velocity_limits=True
             )
             if is_done:
-                self.state = MotionState.COMPLETE
+                is_done = self._check_arrival(sample.position, dt)
             return is_done, pct
 
         elif self.state == MotionState.DIRECT and self._target_joint_positions is not None:
             self.controller.set_arm_joint_positions(
                 self._target_joint_positions, dt=dt, enforce_velocity_limits=True
             )
-            self.state = MotionState.COMPLETE
-            return True, 100.0
+            complete = self._check_arrival(self._target_joint_positions, dt)
+            return complete, 100.0 if complete else 0.0
 
-        elif self.state in (MotionState.HOLD, MotionState.FAILED):
+        elif self.state == MotionState.HOLD:
             # Maintain current position
             curr_q = self.controller.get_current_joint_positions()
             self.controller.set_arm_joint_positions(curr_q, dt=dt, enforce_velocity_limits=True)
             return True, 0.0
 
+        if self.state == MotionState.FAILED:
+            return False, 0.0
+
         return True, 0.0
+
+    def _check_arrival(self, goal: Sequence[float], dt: float) -> bool:
+        measured = np.asarray(self.controller.get_current_joint_positions())
+        if np.max(np.abs(measured - goal)) <= self.completion_tolerance_rad:
+            self.state = MotionState.COMPLETE
+            return True
+        self._settling_elapsed_s += dt
+        if self._settling_elapsed_s >= self.settling_timeout_s:
+            self._fail("Robot did not reach the commanded joint target before settling timeout")
+        return False
+
+    def _fail(self, detail: str) -> None:
+        self.state = MotionState.FAILED
+        self.last_error = detail
+        if self.active_executor is not None:
+            self.active_executor.abort()
+        try:
+            self.controller.backend.halt_motion()
+        except Exception as err:
+            self.last_error += f"; software halt failed: {err}"
+        logger.warning(self.last_error)
 
     def hold(self) -> None:
         """Places motion manager into safe HOLD state."""
@@ -218,3 +265,6 @@ class MotionManager:
         self.active_trajectory = None
         self.active_executor = None
         self._target_joint_positions = None
+        self._settling_elapsed_s = 0.0
+        self.last_error = None
+        self.last_planning_result = None
