@@ -145,3 +145,7 @@ Physical robot selection, read-only hardware commissioning, measured camera
 calibration, dynamic-obstacle runtime monitoring/replanning, and contact-based grasping
 remain outstanding. Remote workflows separately validate each pushed checkpoint. All guards remain
 non-safety-rated software.
+
+## Post-commit verification
+
+Commit `0b144c2` passed [ROS2 Humble CI](https://github.com/Tanishk756/VisionRobotTwin/actions/runs/38522132839) with **445 regression tests and 4 controller-level tests**, plus the seeded robustness smoke. [Windows Python 3.11 and 3.12 validation](https://github.com/Tanishk756/VisionRobotTwin/actions/runs/38522132826) also passed. A subsequent workflow-maintenance change replaces deprecated Node.js 20 actions with official Node.js 24 releases; GitHub Actions records its own validation separately.

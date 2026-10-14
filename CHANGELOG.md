@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased] - v1.3.0-dev
 
+### CI maintenance ? 2026-10-14
+- Update checkout, Python setup and artifact upload actions to verified Node.js 24 releases, removing the Node.js 20 deprecation annotations.
+
 ### Repository cleanup ? 2026-10-14
 - Remove obsolete execution plans and the internal Markdown inventory audit from the public tree; retain useful engineering specifications under `docs/design/`.
 - Repair documentation links and exclude local tooling/archive directories. Preserve authorship, regression tests, benchmark provenance and historical reference datasets.

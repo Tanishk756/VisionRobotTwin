@@ -61,7 +61,7 @@ The v1.3 development milestones are integrated into `main`; the application rema
 
 **Latest local validation (14 October 2026):** 435 passed, 7 ROS2-dependent skips; 84/84 seeded robustness outcomes (36 tracking successes, 48 expected fault stops); 6/6 obstacle executions with a 10 mm environment-clearance requirement; three synthetic smokes passed. This checkpoint includes the clearance and robustness additions.
 
-**Verified remote baseline:** the pushed hardening commit `d09bfe4` passed [ROS2 Humble CI](https://github.com/Tanishk756/VisionRobotTwin/actions/runs/38427452767) with 417 regression tests plus 4 controller-level tests. Commit-level validation is available in the repository Actions workflows.
+**Verified remote validation:** robustness and clearance commit `0b144c2` passed [ROS2 Humble CI](https://github.com/Tanishk756/VisionRobotTwin/actions/runs/38522132839) with 445 regression tests plus 4 controller-level tests, and [Windows Python 3.11/3.12 CI](https://github.com/Tanishk756/VisionRobotTwin/actions/runs/38522132826). Subsequent commit-level results are available in Actions.
 
 Run the seeded suite with `python tools/run_robustness_experiments.py --planning`. Enable explicit planning margins with `python main.py --robot panda --synthetic --scene obstacles --clearance-mm 10`. Legacy runtime margins default to zero; manual target streaming is not dynamically stopped by this planning policy.
 
