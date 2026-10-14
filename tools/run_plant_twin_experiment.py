@@ -36,7 +36,7 @@ def run(config, output):
     if output.exists() and any(output.iterdir()):
         raise ValueError("Output directory must be empty to preserve experiment provenance")
     output.mkdir(parents=True, exist_ok=True)
-    records, estimates = [], []
+    records, estimates, predictions = [], [], []
     estimator = ConstantVelocityEstimator(measurement_std_m=max(config.obstacle_noise_std_m, 1e-6))
     home = np.array(get_robot_registry().get_robot_spec(config.robot).home_joint_positions)
     target = home.copy()
@@ -53,7 +53,13 @@ def run(config, output):
                 estimates.append(asdict(estimate))
                 velocity = np.clip(2 * (target - np.array(view.observation.joint_positions)),
                                    -0.2, 0.2)
-            harness.submit_velocity(velocity)
+                if view.time_s - view.observation.capture_time_s >= config.telemetry_watchdog_s:
+                    velocity[:] = 0
+            if view.execution_fault is None:
+                harness.submit_velocity(velocity)
+            if view.observation is not None:
+                predictions.append({"requested_time_s": view.time_s,
+                                    "states": [asdict(state) for state in harness.predict()]})
             records.append(asdict(harness.step()))
         # Terminal state is evaluated without an extra physics integration.
         records.append(asdict(harness.evaluate()))
@@ -62,6 +68,7 @@ def run(config, output):
     (output / "trace.jsonl").write_text(trace, encoding="utf-8")
     (output / "events.json").write_text(json.dumps(safe_json(events), indent=2, allow_nan=False), encoding="utf-8")
     (output / "estimates.json").write_text(json.dumps(safe_json(estimates), indent=2, allow_nan=False), encoding="utf-8")
+    (output / "predictions.json").write_text(json.dumps(safe_json(predictions), indent=2, allow_nan=False), encoding="utf-8")
     contact = [record["in_collision"] for record in records]
     episodes = sum(active and (i == 0 or not contact[i-1]) for i, active in enumerate(contact))
     summary = {"purpose": "infrastructure smoke, unfiltered proportional reaching",
@@ -69,6 +76,8 @@ def run(config, output):
                "minimum_obstacle_clearance_m": min(r["obstacle_clearance_m"] for r in records),
                "delivered_observations": sum(e["kind"] == "observation_delivered" for e in events),
                "dropped_observations": sum(e["kind"] == "observation_dropped" for e in events),
+               "expired_commands": sum(e["kind"] == "command_expired" for e in events),
+               "execution_faults": [e for e in events if e["kind"] == "execution_fault"],
                "trace_sha256": hashlib.sha256(trace.encode()).hexdigest()}
     (output / "summary.json").write_text(json.dumps(safe_json(summary), indent=2, allow_nan=False), encoding="utf-8")
     def git(*args):

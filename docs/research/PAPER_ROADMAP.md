@@ -9,6 +9,9 @@ Implementation update: [proposal](PROPOSAL.md), [gap audit](RELATED_WORK.md),
 [claim register](CLAIMS.md), and the [first plant/twin testbed](TESTBED.md)
 are available. G0 remains open; the testbed is an initial infrastructure slice,
 not completion of all WP1/WP2 tasks or a novel predictive safety method.
+The testbed now also includes command expiry, latched telemetry/command
+watchdogs, queue cancellation on reset, and a nominal command-history/FK
+prediction API. Dynamic rollout validation and robust prediction remain pending.
 
 ## 1. Research objective and intended contribution
 

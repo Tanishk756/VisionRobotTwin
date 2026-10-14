@@ -43,3 +43,9 @@ class EventQueue:
 
     def __len__(self):
         return len(self._events)
+
+    def clear(self):
+        """Cancel pending events without changing the monotonic clock."""
+        count = len(self._events)
+        self._events.clear()
+        return count

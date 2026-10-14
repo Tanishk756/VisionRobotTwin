@@ -16,6 +16,7 @@ from robotics.research.contracts import Observation, ScenarioConfig, TrialRecord
 from robotics.research.transport import EventQueue
 from robotics.simulator import PyBulletSimulator
 from robotics.robot_registry import get_robot_registry
+from robotics.research.prediction import CommandIntent, predict_joint_motion
 
 
 @dataclass(frozen=True)
@@ -24,6 +25,8 @@ class ControllerView:
     observation: Observation | None
     dof: int
     joint_velocity_limits_rad_s: tuple
+    command_history: tuple = ()
+    execution_fault: str | None = None
 
 
 class PlantTwinHarness:
@@ -37,6 +40,12 @@ class PlantTwinHarness:
         self._command_sequence = 0
         self._applied_sequence = -1
         self._latest = None
+        self._active_command = None
+        self._last_application_s = None
+        self._first_submission_s = None
+        self._received_sequence = -1
+        self._fault = None
+        self._history = []
         self._observations = EventQueue()
         self._commands = EventQueue()
         # Transport streams cannot consume/change the sensing-noise stream.
@@ -84,20 +93,111 @@ class PlantTwinHarness:
     def controller_view(self):
         self._require_open()
         return ControllerView(self.time_s, self._latest, self._twin.resolved_model.dof,
-                              self._twin.resolved_model.arm_max_velocities)
+                              self._twin.resolved_model.arm_max_velocities,
+                              tuple(self._history), self._fault)
+
+    def _fresh_telemetry(self):
+        return self._latest is not None and self.time_s - self._latest.capture_time_s < self.config.telemetry_watchdog_s
+
+    def _latch_stop(self, reason):
+        if self._fault is not None:
+            return
+        self._fault = reason
+        cancelled = self._commands.clear()
+        self._active_command = None
+        # The supervisor's stop request is controller-visible information;
+        # it is not confirmation that the physical plant has stopped.
+        stop = VelocityCommand(self._command_sequence, self.time_s,
+                               (0.0,) * self._twin.resolved_model.dof)
+        self._command_sequence += 1
+        self._received_sequence = stop.sequence
+        self._history.append(CommandIntent(stop, self.time_s, self.time_s, self.time_s))
+        try:
+            self._plant.controller.backend.halt_motion()
+        except Exception as err:
+            self._fault = "halt_failed"
+            self.events.append({"kind": "execution_fault", "reason": self._fault,
+                                "time_s": self.time_s, "cancelled_commands": cancelled})
+            raise RuntimeError("Research plant software halt failed") from err
+        self.events.append({"kind": "execution_fault", "reason": reason,
+                            "time_s": self.time_s, "cancelled_commands": cancelled})
+
+    def reset_execution_fault(self):
+        """Explicit reset requires fresh telemetry; canceled commands stay canceled."""
+        self._require_open()
+        if not self._fresh_telemetry():
+            raise RuntimeError("Cannot reset without fresh delivered telemetry")
+        try:
+            self._plant.controller.backend.halt_motion()
+        except Exception as err:
+            self._fault = "halt_failed"
+            self._commands.clear()
+            self._active_command = None
+            self.events.append({"kind": "execution_fault", "reason": "halt_failed", "time_s": self.time_s})
+            raise RuntimeError("Research reset software halt failed") from err
+        cancelled = self._commands.clear()
+        self._active_command = None
+        self._last_application_s = None
+        self._first_submission_s = None
+        stop = VelocityCommand(self._command_sequence, self.time_s,
+                               (0.0,) * self._twin.resolved_model.dof)
+        self._command_sequence += 1
+        self._received_sequence = stop.sequence
+        self._history.append(CommandIntent(stop, self.time_s, self.time_s, self.time_s))
+        self._fault = None
+        self.events.append({"kind": "execution_reset", "time_s": self.time_s,
+                            "cancelled_commands": cancelled})
+
+    def predict(self, horizon_s=0.1, step_s=0.02):
+        """Nominal arm prediction/FK using only controller-visible information.
+
+        Arrival times use configured delay bounds, not sampled transport outcomes.
+        No plant query occurs. FK candidates preserve the observed twin state.
+        """
+        self._require_open()
+        if self._fault == "halt_failed":
+            raise RuntimeError("Prediction unavailable after an unconfirmed halt")
+        model = self._twin.resolved_model
+        states = predict_joint_motion(self._latest, tuple(self._history), self.time_s,
+                                      horizon_s, step_s, model.arm_lower_limits, model.arm_upper_limits)
+        result = []
+        for state in states:
+            position, orientation = self._twin.kinematics_provider.compute_fk(state.joint_positions)
+            result.append(replace(state, end_effector_position_m=tuple(position),
+                                  end_effector_orientation_xyzw=tuple(orientation)))
+        return tuple(result)
 
     def submit_velocity(self, values):
         self._require_open()
-        command = VelocityCommand(self._command_sequence, self.time_s, values)
+        if self._fault is not None:
+            raise RuntimeError(f"Execution fault is latched: {self._fault}")
+        command = VelocityCommand(self._command_sequence, self.time_s, values,
+                                  self.time_s + self.config.command_lifetime_s)
         limits = self._twin.resolved_model.arm_max_velocities
         if len(command.velocities_rad_s) != len(limits) or any(abs(v) > limit for v, limit in zip(command.velocities_rad_s, limits)):
             raise ValueError("Command exceeds model dimensions or velocity limits")
+        if any(command.velocities_rad_s) and not self._fresh_telemetry():
+            if self._latest is not None:
+                self._latch_stop("telemetry_timeout")
+            raise RuntimeError("Movement requires fresh delivered telemetry")
         delay = max(0.0, self.config.command_delay_s + self._command_rng.uniform(
             -self.config.command_jitter_s, self.config.command_jitter_s))
         self._commands.schedule(self.time_s + delay, command)
+        first_delivery_deadline = None
+        if self._first_submission_s is None:
+            self._first_submission_s = self.time_s
+            first_delivery_deadline = self.time_s + self.config.command_watchdog_s
+        def quantize(value):
+            return math.ceil(value * self.config.physics_hz - 1e-12) / self.config.physics_hz
+        base = self.config.command_delay_s
+        jitter = self.config.command_jitter_s
+        self._history.append(CommandIntent(command, quantize(self.time_s + base),
+            quantize(self.time_s + max(0, base - jitter)), quantize(self.time_s + base + jitter),
+            quantize(self.time_s + base) + self.config.command_watchdog_s, first_delivery_deadline))
         self.events.append({"kind": "command_submitted", "sequence": command.sequence,
                             "time_s": self.time_s, "scheduled_time_s": self.time_s + delay,
-                            "velocities_rad_s": command.velocities_rad_s})
+                            "velocities_rad_s": command.velocities_rad_s,
+                            "valid_until_s": command.valid_until_s})
         self._command_sequence += 1
         return command.sequence
 
@@ -132,7 +232,8 @@ class PlantTwinHarness:
             self._capture(obstacle)
         for delivery in self._observations.drain(self.time_s):
             observation = replace(delivery.payload, delivery_time_s=delivery.actual_time_s)
-            stale = self._latest is not None and observation.sequence <= self._latest.sequence
+            stale = self._latest is not None and (observation.sequence <= self._latest.sequence
+                    or observation.capture_time_s <= self._latest.capture_time_s)
             self.events.append({"kind": "observation_stale" if stale else "observation_delivered",
                                 "sequence": observation.sequence, "time_s": self.time_s,
                                 "scheduled_time_s": delivery.scheduled_time_s})
@@ -145,16 +246,40 @@ class PlantTwinHarness:
                 p.resetJointState(self._twin.robot_id, index, value, physicsClientId=self._twin.client_id)
             p.resetBasePositionAndOrientation(self._twin_obstacle, observation.obstacle_position_m,
                                               (0, 0, 0, 1), physicsClientId=self._twin.client_id)
+        if self._latest is None:
+            if self.time_s >= self.config.startup_timeout_s:
+                self._latch_stop("startup_telemetry_timeout")
+        elif not self._fresh_telemetry():
+            self._latch_stop("telemetry_timeout")
         for delivery in self._commands.drain(self.time_s):
             command = delivery.payload
-            stale = command.sequence <= self._applied_sequence
-            self.events.append({"kind": "command_stale" if stale else "command_applied",
+            stale = command.sequence <= self._received_sequence
+            expired = command.valid_until_s is not None and self.time_s >= command.valid_until_s
+            self._received_sequence = max(self._received_sequence, command.sequence)
+            kind = "command_stale" if stale else "command_expired" if expired else "command_applied"
+            if self._fault is not None:
+                kind = "command_blocked"
+            self.events.append({"kind": kind,
                                 "sequence": command.sequence, "time_s": self.time_s,
                                 "scheduled_time_s": delivery.scheduled_time_s})
-            if not stale:
-                if not self._plant.controller.backend.command_joint_velocities(command.velocities_rad_s):
-                    raise RuntimeError("Simulated plant rejected velocity command")
+            if kind == "command_applied":
+                try:
+                    if not self._plant.controller.backend.command_joint_velocities(command.velocities_rad_s):
+                        raise RuntimeError("Simulated plant rejected velocity command")
+                except Exception:
+                    self._latch_stop("command_dispatch_failed")
+                    raise
                 self._applied_sequence = command.sequence
+                self._active_command = command
+                self._last_application_s = self.time_s
+        if self._fault is None and self._active_command is not None:
+            if self._active_command.valid_until_s is not None and self.time_s >= self._active_command.valid_until_s:
+                self._latch_stop("active_command_expired")
+            elif self.time_s - self._last_application_s >= self.config.command_watchdog_s:
+                self._latch_stop("command_watchdog_timeout")
+        elif self._fault is None and self._first_submission_s is not None:
+            if self.time_s - self._first_submission_s >= self.config.command_watchdog_s:
+                self._latch_stop("command_watchdog_timeout")
         record = self.evaluate()
         # Only the plant advances dynamically. Twin queries cannot step the plant.
         p.stepSimulation(physicsClientId=self._plant.client_id)
@@ -179,7 +304,7 @@ class PlantTwinHarness:
                            self._latest.sequence if self._latest else None,
                            self.time_s - self._latest.capture_time_s if self._latest else None,
                            self._applied_sequence if self._applied_sequence >= 0 else None,
-                           result.in_collision, clearance)
+                           result.in_collision, clearance, self._fault)
 
     def close(self):
         if not self._closed:

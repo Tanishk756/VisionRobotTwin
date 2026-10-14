@@ -36,7 +36,8 @@ flowchart LR
 ```
 
 `controller_view()` exposes simulation time, the latest delivered observation,
-DoF, and nominal velocity limits. `submit_velocity()` validates and queues a
+DoF, nominal velocity limits, immutable submitted-command history and execution
+fault status. `submit_velocity()` validates and queues a deadline-bearing
 command. Neither gives the controller plant truth. The experiment coordinator
 owns the full harness; private attributes are not a security boundary.
 
@@ -45,13 +46,60 @@ a noisy observation, delivers due observations, applies due commands, evaluates
 the pre-integration state, and advances plant physics to t+dt. The obstacle is
 updated to t+dt for terminal evaluation. Deliveries are quantized to physics
 boundaries, with scheduled and actual timestamps recorded. Reordered obsolete
-observations and commands are discarded by sequence ID. Queued commands cannot
-be canceled in this first version.
+observations and commands are discarded by sequence ID. Expired deliveries
+are rejected. Stop and reset cancel queued commands, including obsolete commands
+that would otherwise arrive after reset.
 
 The twin does not advance dynamically: its joints and obstacle are synchronized
 only when an observation is delivered. Its initial home and obstacle origin are
-common known priors, not live plant information. A future predictive filter
-will need a controlled interface for twin rollouts and command history.
+common known priors, not live plant information.
+
+## Execution deadlines and supervision
+
+Defaults are 150 ms command lifetime, 150 ms command watchdog, 300 ms maximum
+telemetry age, and 300 ms initial telemetry timeout. Lifetime is measured from
+command creation, including time in transport. Telemetry freshness is measured
+from capture rather than receipt. Nonzero commands require a fresh delivered
+observation; zero commands can be submitted while awaiting initial telemetry.
+
+The watchdog checks after delivering observations and due commands, so a valid
+replacement delivered at an old command's deadline refreshes execution without
+an unnecessary stop. It detects missing first deliveries, subsequent command
+starvation, active command expiry, missing startup telemetry and stale telemetry.
+Faults latch; continued observations cannot automatically resume motion.
+Explicit `reset_execution_fault()` requires fresh delivered telemetry and a
+software halt request. It cancels pending commands and leaves the plant commanded
+to zero velocity until new commands arrive. Reset does not establish geometric
+collision clearance; collision filtering remains a separate research task.
+
+This models a local supervisory stop outside the delayed command queue. It is
+an idealized stop request, not a confirmed physical stop or a modeled emergency
+communication channel. Motor response still follows plant physics. Halt failures
+are visible and invalidate prediction until a successful explicit reset.
+
+## Twin prediction API
+
+`predict(horizon_s=0.1, step_s=0.02)` returns timestamped nominal joint positions,
+joint-limit violation flags and end-effector poses. It starts from the last
+delivered joint observation at its capture time and integrates piecewise-constant
+submitted velocities through the current time and requested horizon. Command
+expiry, nominal command-watchdog deadlines and visible supervisor stop requests
+are represented. Forecast expiry/starvation latches zero motion until a visible
+supervisor marker supersedes that forecast; a late intent cannot restart it. Rejected/canceled earlier intentions cannot override a newer
+stop in the nominal history. Joint positions are not silently clipped to limits.
+
+History records nominal, earliest and latest application times from configured
+transport parameters, quantized to physics ticks. Prediction does not inspect
+sampled plant transport delays or evaluator state. The returned trajectory uses
+nominal timing; arrival bounds are metadata, not a propagated robust tube.
+Prediction queries leave both the observed twin and the plant unchanged.
+
+This is kinematic velocity extrapolation, not a motor-dynamics rollout, stopping
+distance guarantee, calibrated error bound or novel safety filter. It assumes
+instantaneous nominal velocity tracking. It does not anticipate future sensor
+arrivals or future telemetry-watchdog resets. The separate obstacle estimator
+continues to supply obstacle forecasts; arm prediction does not infer obstacle
+truth. Python-private attributes remain an API convention.
 
 Joint and obstacle observation noise, dropout, transport jitter, and command
 transport use seeded streams. Command scheduling cannot consume the sensor
@@ -81,8 +129,10 @@ validation yet. Benign smoke runs without contacts establish no safety claim.
 - `events.json`: captured/dropped/delivered/stale observations and submitted/
   applied/stale commands, values, and requested/actual delivery times.
 - `estimates.json`: obstacle position/velocity estimates and covariance.
+- `predictions.json`: nominal arm trajectories/FK requested at each controller
+  time after an observation is available.
 - `summary.json`: event counts, sampled contact episodes, minimum clearance,
-  and exact trace hash.
+  expiry/fault events and exact trace hash.
 - `manifest.json`: configuration, dependency versions, environment, dirty-tree
   status, source file hashes and limitations.
 
@@ -94,8 +144,10 @@ for short development trials, not large-scale evaluation.
 
 ## Remaining before G1 / comparative research
 
-Add versioned scenario loading, explicit command expiry and stale-telemetry
-fallback, independent stopping behavior, a rollout/query interface, image-based
-observations, calibrated uncertainty, stronger evaluator convergence checks,
+Add versioned scenario loading, identified stopping/dynamics models, an
+observation-only collision query interface, image-based observations, calibrated
+uncertainty, stronger evaluator convergence checks,
 and a verified literature baseline. The first infrastructure tests do not close
 G0 or establish the complete G1 research benchmark.
+
+Current validation: [execution deadlines and prediction milestone](../status/2026-10-14-watchdogs-and-prediction.md).

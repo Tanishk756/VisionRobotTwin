@@ -8,6 +8,8 @@ Last updated: 2026-10-14. [Milestone evidence](../status/2026-10-14-research-fou
 | Independent plant/twin clients isolate physics state | Verified within test scope | `tests/test_plant_twin_research.py`: client isolation and non-mutating queries |
 | Observations update the twin only after delivery | Verified within test scope | `tests/test_plant_twin_research.py`: delayed delivery and stale rejection |
 | Identical scenario/seed replay produces equivalent traces | Verified in current environment | `tests/test_plant_twin_research.py`: exact repeated trace/event comparison |
+| Deadline-bearing commands and watchdog faults prevent obsolete dispatch | Verified within simulation test scope | `tests/test_research_watchdog_prediction.py`: expiry, starvation, missing startup telemetry, cancellation and reset |
+| Nominal prediction uses delivered observations and intention history without plant truth | Verified within test scope | `tests/test_research_watchdog_prediction.py`: analytical integration, changed hidden state, FK preservation and nominal timing |
 | Candidate filter is novel | Unestablished | G0 review and technical distinction from closest methods |
 | Candidate filter improves safety/progress | Untested | Tuned baselines, held-out trials, uncertainty analysis |
 | Uncertainty estimates are calibrated | Untested | Disjoint calibration and coverage experiments |
@@ -16,3 +18,5 @@ Last updated: 2026-10-14. [Milestone evidence](../status/2026-10-14-research-fou
 
 Software regression tests establish implementation behavior, not novelty,
 statistical superiority, continuous collision freedom, or physical safety.
+Nominal prediction is kinematic and does not establish a dynamics or braking
+model. Arrival bounds are recorded but not propagated as a safety tube.

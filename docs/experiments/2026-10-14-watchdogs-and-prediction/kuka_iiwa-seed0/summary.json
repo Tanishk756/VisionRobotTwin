@@ -1,0 +1,12 @@
+{
+  "purpose": "infrastructure smoke, unfiltered proportional reaching",
+  "records": 121,
+  "contact_samples": 0,
+  "contact_episodes": 0,
+  "minimum_obstacle_clearance_m": 0.3113124113049605,
+  "delivered_observations": 11,
+  "dropped_observations": 2,
+  "expired_commands": 0,
+  "execution_faults": [],
+  "trace_sha256": "d364612a51f0c868da9bc4f67a99da2098a8135f8e704e20047a85b9d48ab328"
+}

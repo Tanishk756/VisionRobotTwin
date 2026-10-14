@@ -47,12 +47,17 @@ class VelocityCommand:
     sequence: int
     created_time_s: float
     velocities_rad_s: tuple
+    valid_until_s: float | None = None
 
     def __post_init__(self):
         if type(self.sequence) is not int or self.sequence < 0:
             raise ValueError("sequence must be a nonnegative integer")
         nonnegative("created_time_s", self.created_time_s)
         object.__setattr__(self, "velocities_rad_s", vector("velocities", self.velocities_rad_s))
+        if self.valid_until_s is not None:
+            nonnegative("valid_until_s", self.valid_until_s)
+            if self.valid_until_s <= self.created_time_s:
+                raise ValueError("Command validity must end after creation")
 
 
 @dataclass(frozen=True)
@@ -74,6 +79,10 @@ class ScenarioConfig:
     obstacle_origin_m: tuple = (0.45, -0.3, 0.35)
     obstacle_velocity_m_s: tuple = (0.0, 0.2, 0.0)
     obstacle_radius_m: float = 0.05
+    command_lifetime_s: float = 0.15
+    command_watchdog_s: float = 0.15
+    telemetry_watchdog_s: float = 0.3
+    startup_timeout_s: float = 0.3
 
     def __post_init__(self):
         for name in ("seed", "physics_hz", "sensor_stride"):
@@ -81,6 +90,8 @@ class ScenarioConfig:
             if type(value) is not int or value < (0 if name == "seed" else 1):
                 raise ValueError(f"Invalid integer {name}")
         for name in ("duration_s", "plant_mass_scale", "plant_velocity_gain", "obstacle_radius_m"):
+            nonnegative(name, getattr(self, name), positive=True)
+        for name in ("command_lifetime_s", "command_watchdog_s", "telemetry_watchdog_s", "startup_timeout_s"):
             nonnegative(name, getattr(self, name), positive=True)
         for name in ("observation_delay_s", "observation_jitter_s", "command_delay_s",
                      "command_jitter_s", "joint_noise_std_rad", "obstacle_noise_std_m"):
@@ -103,3 +114,4 @@ class TrialRecord:
     applied_command_sequence: int | None
     in_collision: bool
     obstacle_clearance_m: float
+    execution_fault: str | None = None

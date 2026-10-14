@@ -99,16 +99,17 @@ def test_clients_isolate_truth_and_observations_arrive_later(robot):
 
 def test_delayed_commands_stale_commands_and_dropout():
     config = ScenarioConfig(command_delay_s=0.02, command_jitter_s=0,
-                            dropout_probability=1, observation_jitter_s=0)
+                            dropout_probability=0, observation_delay_s=0, observation_jitter_s=0)
     with PlantTwinHarness(config) as harness:
         velocity = [0.1] + [0] * (harness.controller_view().dof - 1)
+        harness.step()  # movement requires an initial delivered observation
         harness.submit_velocity(velocity)
         for _ in range(5):
             assert harness.step().applied_command_sequence is None
         record = harness.step()
         assert record.applied_command_sequence == 0
         assert record.time_s >= 0.02
-        assert harness.controller_view().observation is None
+        assert harness.controller_view().observation is not None
         # A reordered earlier command must never overwrite the newer command.
         harness._commands.schedule(harness.time_s, VelocityCommand(0, 0, velocity))
         harness.step()
@@ -151,7 +152,8 @@ def test_replay_same_seed_and_different_seed():
         with PlantTwinHarness(ScenarioConfig(seed=seed)) as harness:
             result = []
             for _ in range(30):
-                harness.submit_velocity([0.05] + [0] * (harness.controller_view().dof - 1))
+                speed = 0.05 if harness.controller_view().observation is not None else 0
+                harness.submit_velocity([speed] + [0] * (harness.controller_view().dof - 1))
                 result.append(asdict(harness.step()))
             return result, harness.events
     first, events = trace(3)

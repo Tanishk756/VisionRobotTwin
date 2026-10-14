@@ -1,0 +1,19 @@
+{
+  "purpose": "infrastructure smoke, unfiltered proportional reaching",
+  "records": 121,
+  "contact_samples": 0,
+  "contact_episodes": 0,
+  "minimum_obstacle_clearance_m": 0.18650564167185613,
+  "delivered_observations": 0,
+  "dropped_observations": 15,
+  "expired_commands": 0,
+  "execution_faults": [
+    {
+      "kind": "execution_fault",
+      "reason": "startup_telemetry_timeout",
+      "time_s": 0.3,
+      "cancelled_commands": 11
+    }
+  ],
+  "trace_sha256": "4a9cc2396d962ea71a56b3c485bae2212939ff7765270440a8e61a2fb0549195"
+}
