@@ -60,6 +60,10 @@ python main.py --robot xarm6_gripper --synthetic --controller resolved-rate
 
 Validation results: [xArm6 and execution monitor report](docs/status/2026-10-14-xarm6-and-execution-monitor.md).
 
+Research development: [paper contribution roadmap and task plan](docs/research/PAPER_ROADMAP.md).
+
+Initial research work: [proposal](docs/research/PROPOSAL.md), [related-work audit](docs/research/RELATED_WORK.md), and [independent plant/twin testbed](docs/research/TESTBED.md).
+
 Press **G** to close or **O** to open a supported gripper. Runtime arm commands
 are checked against sampled collision paths; velocity commands use a 100 ms
 lookahead. Each simulation physics step checks measured clearance before and
