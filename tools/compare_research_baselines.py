@@ -14,11 +14,13 @@ from robotics.robot_registry import list_available_robots
 from tools.run_plant_twin_experiment import run, safe_json
 
 
-def compare(scenario_paths, robots, seeds, output):
+def compare(scenario_paths, robots, seeds, output, modes=("none", "fixed-horizon"), horizon_s=0.1, margin_m=0.02):
     scenarios = [load_scenario(path) for path in scenario_paths]
-    if not scenarios or not robots or not seeds:
+    if not scenarios or not robots or not seeds or not modes:
         raise ValueError("Scenarios, robots and seeds are required")
-    for items in ([s.scenario_id for s in scenarios], robots, seeds):
+    if any(mode not in ("none", "fixed-horizon", "motion-aware") for mode in modes):
+        raise ValueError("Unknown comparator")
+    for items in ([s.scenario_id for s in scenarios], robots, seeds, modes):
         if len(set(items)) != len(items):
             raise ValueError("Duplicate comparison cases are not allowed")
     output = Path(output)
@@ -31,16 +33,16 @@ def compare(scenario_paths, robots, seeds, output):
             for seed in seeds:
                 config = replace(scenario.config, robot=robot, seed=seed)
                 resolved = replace(scenario, config=config)
-                for mode in ("none", "fixed-horizon"):
+                for mode in modes:
                     case = f"{robot}-{scenario.scenario_id}-seed{seed}-{mode}"
                     print(f"Running {case}", flush=True)
                     try:
-                        result = run(config, output / case, resolved, mode)
+                        result = run(config, output / case, resolved, mode, horizon_s=horizon_s, margin_m=margin_m)
                         rows.append({"case": case, "robot": robot, "scenario": scenario.scenario_id,
                                      "split": scenario.split, "seed": seed, **result})
                     except Exception as err:
                         errors.append({"case": case, "error": f"{type(err).__name__}: {err}"})
-    index = {"expected_trials": len(robots) * len(scenarios) * len(seeds) * 2,
+    index = {"expected_trials": len(robots) * len(scenarios) * len(seeds) * len(modes),
              "completed_trials": len(rows), "errors": errors, "trials": rows,
              "note": "Engineering comparator; development outcomes include failures and are not publication evidence."}
     (output / "comparison.json").write_text(json.dumps(safe_json(index), indent=2, allow_nan=False), encoding="utf-8")
@@ -60,9 +62,12 @@ def main():
                         default=sorted((ROOT / "config/research_scenarios").glob("*-v1.json")))
     parser.add_argument("--robots", nargs="+", choices=list_available_robots(), default=["panda", "kuka_iiwa", "xarm6"])
     parser.add_argument("--seeds", nargs="+", type=int, default=[0])
+    parser.add_argument("--modes", nargs="+", choices=["none", "fixed-horizon", "motion-aware"], default=["none", "fixed-horizon"])
+    parser.add_argument("--horizon", type=float, default=0.1)
+    parser.add_argument("--margin", type=float, default=0.02)
     parser.add_argument("--output-dir", type=Path, required=True)
     args = parser.parse_args()
-    index = compare(args.scenarios, args.robots, args.seeds, args.output_dir)
+    index = compare(args.scenarios, args.robots, args.seeds, args.output_dir, args.modes, args.horizon, args.margin)
     print(f"Completed {index['completed_trials']}/{index['expected_trials']}; errors={len(index['errors'])}")
     return 1 if index["errors"] else 0
 

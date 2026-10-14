@@ -154,7 +154,7 @@ def test_scenario_runner_manifest_and_baseline_logs(tmp_path):
 
 def test_comparison_records_both_methods_and_failures(tmp_path, monkeypatch):
     from tools import compare_research_baselines as module
-    def trial(config, output, scenario, mode):
+    def trial(config, output, scenario, mode, **kwargs):
         if mode == "fixed-horizon":
             raise RuntimeError("deliberate test failure")
         return {"baseline": mode, "task_completed": False, "contact_episodes": 1}

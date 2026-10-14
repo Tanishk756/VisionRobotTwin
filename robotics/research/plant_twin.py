@@ -12,7 +12,7 @@ import numpy as np
 import pybullet as p
 
 from config.settings import AppConfig
-from robotics.research.contracts import Observation, ScenarioConfig, TrialRecord, VelocityCommand, nonnegative
+from robotics.research.contracts import Observation, ScenarioConfig, TrialRecord, VelocityCommand, nonnegative, vector
 from robotics.research.transport import EventQueue
 from robotics.simulator import PyBulletSimulator
 from robotics.robot_registry import get_robot_registry
@@ -118,8 +118,9 @@ class PlantTwinHarness:
             quantize(self.time_s + base) + self.config.command_watchdog_s, first_delivery_deadline)
 
     def check_candidate_motion(self, velocities, horizon_s=0.1, step_s=0.02,
-                               environment_margin_m=0.02, self_margin_m=0.0):
-        """Whole-arm sampled query against the last observed obstacle, frozen.
+                               environment_margin_m=0.02, self_margin_m=0.0,
+                               obstacle_estimate=None):
+        """Whole-arm sampled query against frozen or estimated obstacle motion.
 
         Include submitted commands in flight and a hypothetical new command.
         Neither query transport RNG nor reveal scenario trajectory/plant truth.
@@ -128,6 +129,16 @@ class PlantTwinHarness:
         self._require_open()
         if self._fault is not None or not self._fresh_telemetry():
             raise RuntimeError("Collision query requires fresh telemetry and no execution fault")
+        if obstacle_estimate is not None:
+            # Accept a numeric estimate, never a callback into future plant truth.
+            nonnegative("estimate time", obstacle_estimate.time_s)
+            nonnegative("estimate age", obstacle_estimate.observation_age_s)
+            if (abs(obstacle_estimate.time_s - self.time_s) > 1e-9
+                    or abs(obstacle_estimate.time_s - obstacle_estimate.observation_age_s
+                           - self._latest.capture_time_s) > 1e-9):
+                raise ValueError("Obstacle estimate must refer to now and the latest delivered capture")
+            estimate_position = np.array(vector("estimated obstacle position", obstacle_estimate.position_m, 3))
+            estimate_velocity = np.array(vector("estimated obstacle velocity", obstacle_estimate.velocity_m_s, 3))
         for margin in (environment_margin_m, self_margin_m):
             nonnegative("clearance margin", margin)
             if margin > 0.5:
@@ -144,12 +155,24 @@ class PlantTwinHarness:
         min_env = min_self = math.inf
         clear = True
         limit = False
-        for state in states:
-            result = self._twin.collision_provider.check_collision(state.joint_positions)
-            min_env = min(min_env, result.min_env_clearance_m)
-            min_self = min(min_self, result.min_self_clearance_m)
-            limit |= state.joint_limit_violation
-            clear &= not result.in_collision
+        with self._twin._model_query_lock:
+            saved_pose = p.getBasePositionAndOrientation(self._twin_obstacle, physicsClientId=self._twin.client_id)
+            saved_velocity = p.getBaseVelocity(self._twin_obstacle, physicsClientId=self._twin.client_id)
+            try:
+                for state in states:
+                    if obstacle_estimate is not None:
+                        candidate = estimate_position + (state.time_s - obstacle_estimate.time_s) * estimate_velocity
+                        p.resetBasePositionAndOrientation(self._twin_obstacle, candidate, saved_pose[1],
+                                                          physicsClientId=self._twin.client_id)
+                    result = self._twin.collision_provider.check_collision(state.joint_positions)
+                    min_env = min(min_env, result.min_env_clearance_m)
+                    min_self = min(min_self, result.min_self_clearance_m)
+                    limit |= state.joint_limit_violation
+                    clear &= not result.in_collision
+            finally:
+                p.resetBasePositionAndOrientation(self._twin_obstacle, *saved_pose, physicsClientId=self._twin.client_id)
+                p.resetBaseVelocity(self._twin_obstacle, *saved_velocity, physicsClientId=self._twin.client_id)
+                p.performCollisionDetection(physicsClientId=self._twin.client_id)
         return MotionClearance(bool(clear and not limit and min_env >= environment_margin_m
                                     and min_self >= self_margin_m), min_env, min_self, limit, len(states))
 

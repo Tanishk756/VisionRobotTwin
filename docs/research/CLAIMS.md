@@ -12,6 +12,7 @@ Last updated: 2026-10-14. [Milestone evidence](../status/2026-10-14-research-fou
 | Nominal prediction uses delivered observations and intention history without plant truth | Verified within test scope | `tests/test_research_watchdog_prediction.py`: analytical integration, changed hidden state, FK preservation and nominal timing |
 | Versioned scenarios and observation-only whole-arm queries execute reproducibly | Verified within development/test scope | `tests/test_research_scenarios_baseline.py` and [24-trial report](../experiments/2026-10-14-fixed-horizon-baseline/REPORT.md) |
 | Fixed-horizon stop comparator has tested HOLD recovery and latched faults | Verified within implementation test scope | `tests/test_research_scenarios_baseline.py`; this does not establish collision avoidance |
+| Deterministic motion-aware comparator uses delivered means without covariance constraints | Verified within implementation/development scope | `tests/test_motion_aware_baseline.py`; [36-trial report](../experiments/2026-10-14-motion-aware-baseline/REPORT.md) shows no aggregate improvement over the frozen baseline |
 | Candidate filter is novel | Unestablished | G0 review and technical distinction from closest methods |
 | Candidate filter improves safety/progress | Untested | Tuned baselines, held-out trials, uncertainty analysis |
 | Uncertainty estimates are calibrated | Not established; undercoverage measured under motion/delay shift | [First diagnostic](UNCERTAINTY_CALIBRATION.md): disjoint fit/validation cases; nominal 95% coverage below target |

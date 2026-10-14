@@ -25,6 +25,11 @@ python tools/run_plant_twin_experiment.py --scenario config/research_scenarios/c
 observation-delay overrides are reflected in the resolved manifest. Invalid
 overrides, such as a duration shorter than an occlusion interval, are rejected.
 
+A [deterministic motion-aware comparator](MOTION_AWARE_BASELINE.md) is also
+available with `--baseline motion-aware`. The comparison CLI accepts
+`--modes none fixed-horizon motion-aware`, plus shared `--horizon`/`--margin`
+settings. Its default remains the original two methods for reproducibility.
+
 ## Scenario schema version 1
 
 Definitions live in `config/research_scenarios/` and specify schema version,

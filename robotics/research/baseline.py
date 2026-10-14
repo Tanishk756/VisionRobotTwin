@@ -2,6 +2,7 @@
 from dataclasses import dataclass
 
 from robotics.research.contracts import nonnegative, vector
+from robotics.research.estimation import ConstantVelocityEstimator
 
 
 @dataclass(frozen=True)
@@ -71,3 +72,34 @@ class FixedHorizonStopBaseline:
                 return BaselineDecision(zero, self.state, "awaiting_clear_observations", True, clearance)
         self.state = "TRACK"
         return BaselineDecision(nominal, self.state, "sampled_path_clear", False, clearance)
+
+
+class MotionAwareStopBaseline(FixedHorizonStopBaseline):
+    """Same stop/recovery policy, with deterministic constant-velocity forecasts.
+
+    Only position/velocity means enter collision queries. Uncalibrated covariance
+    is deliberately unused; this is an engineering comparator, not a new method.
+    """
+    def __init__(self, measurement_std_m=0.003, **kwargs):
+        nonnegative("measurement_std_m", measurement_std_m, positive=True)
+        self.measurement_std_m = measurement_std_m
+        super().__init__(**kwargs)
+
+    def reset(self):
+        super().reset()
+        self.estimator = ConstantVelocityEstimator(measurement_std_m=self.measurement_std_m)
+        self.last_estimate = None
+
+    def select(self, view, nominal, query):
+        if view.observation is not None and view.execution_fault is None and self.state != "FAULT":
+            try:
+                self.estimator.update(view.observation)
+                self.last_estimate = self.estimator.predict(view.time_s)
+            except Exception as err:
+                self.state = "FAULT"
+                return BaselineDecision((0.0,) * view.dof, self.state, f"estimation_failed: {err}", True)
+        def moving_query(values, **kwargs):
+            if self.last_estimate is None:
+                raise RuntimeError("No delivered obstacle estimate")
+            return query(values, obstacle_estimate=self.last_estimate, **kwargs)
+        return super().select(view, nominal, moving_query)

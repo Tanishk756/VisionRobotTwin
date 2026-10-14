@@ -19,6 +19,9 @@ uncertainty calibration and held-out evaluation remain pending.
 The first [uncertainty calibration diagnostic](UNCERTAINTY_CALIBRATION.md) now
 measures fitting/validation coverage and exposes undercoverage under motion/delay
 shift. Reliable calibrated uncertainty is not established and remains an open task.
+The [deterministic motion-aware comparator](MOTION_AWARE_BASELINE.md) now
+forecasts the obstacle mean using delivered observations, without covariance
+safety claims. Parameter tuning, ablations and published baselines remain pending.
 
 ## 1. Research objective and intended contribution
 

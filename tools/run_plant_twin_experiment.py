@@ -20,7 +20,7 @@ from robotics.research.contracts import ScenarioConfig
 from robotics.research.estimation import ConstantVelocityEstimator
 from robotics.research.plant_twin import PlantTwinHarness
 from robotics.robot_registry import get_robot_registry, list_available_robots
-from robotics.research.baseline import FixedHorizonStopBaseline
+from robotics.research.baseline import FixedHorizonStopBaseline, MotionAwareStopBaseline
 from robotics.research.scenarios import load_scenario, scenario_snapshot
 
 
@@ -35,15 +35,17 @@ def safe_json(value):
 
 
 def run(config, output, scenario=None, baseline="none", horizon_s=0.1, margin_m=0.02):
-    if baseline not in ("none", "fixed-horizon"):
+    if baseline not in ("none", "fixed-horizon", "motion-aware"):
         raise ValueError("Unknown engineering comparator")
     output = Path(output)
     if output.exists() and any(output.iterdir()):
         raise ValueError("Output directory must be empty to preserve experiment provenance")
     output.mkdir(parents=True, exist_ok=True)
     records, estimates, predictions, decisions = [], [], [], []
-    policy = FixedHorizonStopBaseline(horizon_s=horizon_s, margin_m=margin_m,
-                                     telemetry_timeout_s=config.telemetry_watchdog_s)
+    policy_options = dict(horizon_s=horizon_s, margin_m=margin_m,
+                          telemetry_timeout_s=config.telemetry_watchdog_s)
+    policy = (MotionAwareStopBaseline(measurement_std_m=max(config.obstacle_noise_std_m, 1e-6), **policy_options)
+              if baseline == "motion-aware" else FixedHorizonStopBaseline(**policy_options))
     estimator = ConstantVelocityEstimator(measurement_std_m=max(config.obstacle_noise_std_m, 1e-6))
     home = np.array(get_robot_registry().get_robot_spec(config.robot).home_joint_positions)
     target = home.copy()
@@ -63,10 +65,12 @@ def run(config, output, scenario=None, baseline="none", horizon_s=0.1, margin_m=
                     velocity[:] = 0
             if tick % control_stride == 0:
                 started = time.perf_counter()
-                if baseline == "fixed-horizon":
+                if baseline in ("fixed-horizon", "motion-aware"):
                     decision = policy.select(view, velocity, harness.check_candidate_motion)
                     velocity = decision.velocities_rad_s
                     decision_data = asdict(decision)
+                    if baseline == "motion-aware":
+                        decision_data["obstacle_estimate"] = asdict(policy.last_estimate) if policy.last_estimate else None
                 else:
                     decision_data = {"state": "FAULT" if view.execution_fault else "TRACK" if view.observation else "WAIT",
                                      "intervened": False, "reason": "unfiltered_nominal",
@@ -133,8 +137,10 @@ def run(config, output, scenario=None, baseline="none", horizon_s=0.1, margin_m=
                 "comparator": {"name": baseline, "horizon_s": horizon_s, "margin_m": margin_m,
                                "control_stride": control_stride, "recovery_observations": 3,
                                "recovery_margin_m": 0.005, "minimum_hold_s": 0.1},
+                "obstacle_prediction": ("constant-velocity mean, propagated from capture to now and horizon; covariance unused"
+                                        if baseline == "motion-aware" else "last delivered obstacle position held fixed"),
                 "limitations": ["pose-level sensing", "uncalibrated estimator",
-                                "discrete collision evaluation", "frozen observed obstacle in baseline",
+                                "discrete collision evaluation", "nominal arm/obstacle models without braking guarantees",
                                 "engineering comparator, no novel safety filter or physical robot"]}
     (output / "manifest.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")
     return summary
@@ -147,7 +153,7 @@ def main():
     parser.add_argument("--duration", type=float)
     parser.add_argument("--observation-delay", type=float)
     parser.add_argument("--scenario", type=Path)
-    parser.add_argument("--baseline", choices=["none", "fixed-horizon"], default="none")
+    parser.add_argument("--baseline", choices=["none", "fixed-horizon", "motion-aware"], default="none")
     parser.add_argument("--horizon", type=float, default=0.1)
     parser.add_argument("--margin", type=float, default=0.02)
     parser.add_argument("--output-dir", type=Path, required=True)

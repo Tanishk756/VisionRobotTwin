@@ -68,6 +68,8 @@ Development experiments: [versioned scenarios and fixed-horizon comparison](docs
 
 Estimator diagnostics: [uncertainty calibration protocol and limitations](docs/research/UNCERTAINTY_CALIBRATION.md).
 
+Motion prediction: [deterministic motion-aware baseline and comparisons](docs/research/MOTION_AWARE_BASELINE.md).
+
 Press **G** to close or **O** to open a supported gripper. Runtime arm commands
 are checked against sampled collision paths; velocity commands use a 100 ms
 lookahead. Each simulation physics step checks measured clearance before and
