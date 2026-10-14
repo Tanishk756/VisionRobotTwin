@@ -1,5 +1,9 @@
 # VisionRobotTwin research roadmap
 
+For the prioritized sequence after the runtime fixes, see
+[the next-session plan](NEXT_STEPS.md). Its first implementation unit is
+versioned scenario preflight and feasibility auditing.
+
 Status: proposed research plan, 2026-10-14. No novelty or publication claim is
 established by this document. Tasks below are pending unless explicitly marked
 as existing infrastructure. Venue acceptance depends on contribution, evidence,
