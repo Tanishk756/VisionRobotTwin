@@ -154,6 +154,8 @@ class RoboticStateMachine:
                 # Fallback coordinates for explicit offline demo mode
                 self.pick_target_pos = np.array([0.45, -0.20, self.config.pick_descent_height_m], dtype=np.float64)
                 self.place_target_pos = np.array([0.45, 0.20, self.config.pick_descent_height_m], dtype=np.float64)
+                if on_targets_stabilized_fn:
+                    on_targets_stabilized_fn(self.pick_target_pos, self.place_target_pos)
                 self._targets_frozen = True
             else:
                 thresh = self.config.consecutive_detection_threshold

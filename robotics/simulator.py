@@ -65,10 +65,14 @@ class PyBulletSimulator:
         self._trajectory_points: Deque[np.ndarray] = deque(maxlen=self.sim_config.trajectory_history_len)
         self._trajectory_line_ids: Deque[int] = deque()
 
-        self._initialize_pybullet()
-        self._load_environment()
-        self._setup_robot_and_kinematics()
-        self._draw_workspace_bounds()
+        try:
+            self._initialize_pybullet()
+            self._load_environment()
+            self._setup_robot_and_kinematics()
+            self._draw_workspace_bounds()
+        except Exception:
+            self.close()
+            raise
 
     def _initialize_pybullet(self) -> None:
         """Connects to PyBullet physics server."""
@@ -169,7 +173,7 @@ class PyBulletSimulator:
             self.obstacle_ids.append(obs1_id)
 
             # Obstacle 2: Cylinder pillar in left workspace
-            col_obs2 = p.createCollisionShape(p.GEOM_CYLINDER, radius=0.04, length=0.20, physicsClientId=self.client_id)
+            col_obs2 = p.createCollisionShape(p.GEOM_CYLINDER, radius=0.04, height=0.20, physicsClientId=self.client_id)
             vis_obs2 = p.createVisualShape(p.GEOM_CYLINDER, radius=0.04, length=0.20, rgbaColor=[0.25, 0.75, 0.35, 1.0], physicsClientId=self.client_id)
             obs2_id = p.createMultiBody(
                 baseMass=0.0,
@@ -471,11 +475,16 @@ class PyBulletSimulator:
             logger.error(f"Failed to capture PyBullet screenshot: {e}")
             return False
 
+    def is_connected(self) -> bool:
+        """Return whether the simulation window/server is still available."""
+        return self.client_id >= 0 and bool(p.isConnected(self.client_id))
+
     def close(self) -> None:
         """Disconnects physics client and cleans up simulator resources."""
         if self.client_id >= 0:
             try:
-                p.disconnect(physicsClientId=self.client_id)
+                if self.is_connected():
+                    p.disconnect(physicsClientId=self.client_id)
                 logger.info("PyBullet physics client disconnected.")
             except Exception as e:
                 logger.warning(f"Exception during PyBullet disconnect: {e}")

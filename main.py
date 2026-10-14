@@ -239,7 +239,11 @@ class VisionRobotTwinApp:
         self.logger.info("=" * 70)
 
         # 3. Robotics & PyBullet Digital Twin
-        self.simulator = PyBulletSimulator(self.config, headless=self.headless)
+        try:
+            self.simulator = PyBulletSimulator(self.config, headless=self.headless)
+        except Exception:
+            self.camera.release()
+            raise
         self.state_machine = RoboticStateMachine(self.config.state_machine, self.config.workspace)
         self.state_machine.set_mode(self.config.mode)
 
@@ -630,6 +634,9 @@ class VisionRobotTwinApp:
 
         try:
             while self._is_running:
+                if not self.simulator.is_connected():
+                    self.logger.info("Simulation window closed. Exiting cleanly.")
+                    break
                 now = time.perf_counter()
                 loop_dt = now - last_time
                 last_time = now
@@ -731,6 +738,11 @@ class VisionRobotTwinApp:
 
         except KeyboardInterrupt:
             self.logger.info("Keyboard interrupt received.")
+        except Exception:
+            # The GUI can close between the connection check and any physics read.
+            if self.simulator.is_connected():
+                raise
+            self.logger.info("Simulation connection closed. Exiting cleanly.")
         finally:
             self.cleanup()
 

@@ -1,5 +1,6 @@
 @echo off
 setlocal
+cd /d "%~dp0"
 
 if not exist .venv (
     echo [INFO] Virtual environment not found. Running setup.bat first ...

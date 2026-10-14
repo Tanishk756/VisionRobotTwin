@@ -56,6 +56,16 @@ jobs:
         run: |
           python main.py --robot panda --controller resolved-rate --synthetic --headless --max-frames 60
 
+      - name: Run Obstacle Scene Launch Matrix
+        shell: pwsh
+        run: |
+          foreach ($robot in @("panda", "kuka_iiwa", "xarm6", "xarm6_gripper")) {
+            foreach ($controller in @("ik", "resolved-rate")) {
+              python main.py --robot $robot --controller $controller --scene obstacles --synthetic --headless --max-frames 60
+              if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+            }
+          }
+
       - name: Run Seeded Robustness Smoke
         run: |
           python tools/run_robustness_experiments.py --robots panda --controllers resolved-rate --seeds 0 1 --output-dir experiments/ci-robustness

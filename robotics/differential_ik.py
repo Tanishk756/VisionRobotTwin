@@ -200,4 +200,15 @@ class ResolvedRateController:
         scale = min(1.0, float(np.min(limits[moving] / np.abs(q_dot_total[moving])))) if np.any(moving) else 1.0
         q_dot_clamped = q_dot_total * scale
 
+        # Respect the execution guard's prediction horizon before dispatch.
+        # Boundary damping alone can still predict beyond a limit at high gain.
+        horizon = max(dt, float(getattr(self.controller.backend, "velocity_horizon_s", dt)))
+        # Keep a small interior margin so physics rounding and settling do not
+        # turn asymptotic boundary tracking into a hard-limit violation.
+        margin = np.minimum(0.005, 0.1 * self.joint_ranges)
+        lower_velocity = (self.lower_limits + margin - current_q) / horizon
+        upper_velocity = (self.upper_limits - margin - current_q) / horizon
+        q_dot_clamped = np.clip(q_dot_clamped, lower_velocity * 0.95, upper_velocity * 0.95)
+        q_dot_clamped = np.clip(q_dot_clamped, -limits, limits)
+
         return q_dot_clamped, metrics

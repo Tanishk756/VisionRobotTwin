@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased] - v1.3.0-dev
 
+### Interactive runtime fixes - 2026-10-14
+- Fix obstacle-scene startup: PyBullet cylinder collision shapes require `height`, while visual shapes use `length`.
+- Release physics and camera resources after failed simulator initialization; handle closing the simulation window during a frame and repeated cleanup cleanly.
+- Bound resolved-rate commands over the execution guard horizon and retain a 5 mrad interior joint margin to avoid numerical settling at hard limits. Collision and joint-limit faults remain enforced.
+- Reset the offline demo object at the start of each pick cycle, allowing repeated simulated pick-and-place cycles.
+- Make Windows launch/setup scripts resolve files relative to their own directory.
+- Add scene/lifecycle/controller regressions, a two-cycle physical demo test, and CI obstacle-scene launch checks for all four robot profiles and both controllers.
+
 ### CI maintenance ? 2026-10-14
 - Update checkout, Python setup and artifact upload actions to verified Node.js 24 releases, removing the Node.js 20 deprecation annotations.
 
