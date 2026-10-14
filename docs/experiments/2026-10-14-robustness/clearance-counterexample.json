@@ -1,0 +1,36 @@
+{
+  "policy": {
+    "environment_clearance_m": 0.01,
+    "planning_buffer_m": 0.0,
+    "sampling_resolution_rad": 0.05
+  },
+  "original_source_provenance": {
+    "working_tree_dirty": true,
+    "actual_head_commit_sha": "d09bfe4e13e7b2ead7d1314a67cfe408e109664b",
+    "runtime_source_sha256": "33cbe83aa26660102a47ba049e9ed0e50548744026aa04945ac0d9298f891653",
+    "pose_frame": "world_urdf_link",
+    "resolved_rate_feedforward": true
+  },
+  "failed_executions": [
+    {
+      "robot_name": "panda",
+      "direct_path_free": false,
+      "rrt_planning_success": true,
+      "planning_time_ms": 517.3006999975769,
+      "raw_waypoints_count": 36,
+      "smoothed_waypoints_count": 12,
+      "raw_joint_path_length_rad": 1.6519142748403475,
+      "smoothed_joint_path_length_rad": 1.263721142715833,
+      "min_collision_clearance_m": 0.009986239700423978,
+      "execution_success": false,
+      "execution_final_pos_error_mm": 318.03962606634747,
+      "planning_execution_position_tolerance_mm": 25.0,
+      "details": "Direct: BLOCKED, RRT: SUCCESS, Exec: FAILED",
+      "environment_clearance_m": 0.01,
+      "self_clearance_m": 0.0,
+      "min_env_clearance_m": 0.009986239700423978,
+      "min_self_clearance_m": 0.01983117776702243,
+      "seed": 1
+    }
+  ]
+}

@@ -11,7 +11,7 @@ import numpy as np
 
 from robotics.robot_controller import GenericRobotController
 from robotics.inverse_kinematics import GenericIKSolver, IKStatus
-from robotics.collision_provider import CollisionProvider
+from robotics.collision_provider import CollisionProvider, ClearanceCollisionProvider
 from robotics.planning import RRTConnectPlanner, shortcut_path, is_joint_path_collision_free, PlanningResult
 from robotics.trajectory import JointQuinticTrajectory, TrajectoryExecutor
 from utils.logger import get_logger
@@ -44,6 +44,7 @@ class MotionManager:
         collision_provider: Optional[CollisionProvider] = None,
         completion_tolerance_rad: float = 0.01,
         settling_timeout_s: float = 5.0,
+        planning_clearance_buffer_m: float = 0.005,
     ):
         if collision_checker is not None and collision_provider is not None:
             if collision_checker is not collision_provider:
@@ -54,6 +55,17 @@ class MotionManager:
         self.ik_solver = ik_solver
         self.collision_provider = effective_provider
         self.checker = effective_provider
+        if not np.isfinite(planning_clearance_buffer_m) or planning_clearance_buffer_m < 0:
+            raise ValueError("Planning clearance buffer must be finite and non-negative")
+        environment_margin = getattr(effective_provider, "environment_clearance_m", 0.0)
+        self_margin = getattr(effective_provider, "self_clearance_m", 0.0)
+        self.planning_collision_provider = effective_provider
+        self.planning_resolution_rad = 0.05
+        if environment_margin > 0 or self_margin > 0:
+            self.planning_collision_provider = ClearanceCollisionProvider(effective_provider,
+                environment_margin + (planning_clearance_buffer_m if environment_margin > 0 else 0),
+                self_margin + (planning_clearance_buffer_m if self_margin > 0 else 0))
+            self.planning_resolution_rad = 0.02
         self.trajectory_mode = trajectory_mode
         self.scene_type = scene_type
         self.default_duration = default_trajectory_duration
@@ -71,10 +83,11 @@ class MotionManager:
             self.planner = RRTConnectPlanner(
                 lower_limits=lows,
                 upper_limits=highs,
-                collision_checker=self.collision_provider,
+                collision_checker=self.planning_collision_provider,
                 arm_joint_indices=self.controller.arm_joint_indices,
                 step_size_rad=0.10,
                 max_iterations=400,
+                collision_resolution_rad=self.planning_resolution_rad,
             )
         else:
             self.planner = None
@@ -135,7 +148,8 @@ class MotionManager:
             is_free, _ = is_joint_path_collision_free(
                 current_q,
                 goal_q,
-                self.collision_provider,
+                self.planning_collision_provider,
+                resolution_rad=self.planning_resolution_rad,
                 arm_joint_indices=self.controller.arm_joint_indices,
             )
         else:
@@ -171,9 +185,10 @@ class MotionManager:
         # 4. Shortcut path
         smoothed = shortcut_path(
             plan_res.path,
-            self.collision_provider,
+            self.planning_collision_provider,
             arm_joint_indices=self.controller.arm_joint_indices,
             max_attempts=30,
+            step_size_rad=self.planning_resolution_rad,
         )
 
         # 5. Build trajectory

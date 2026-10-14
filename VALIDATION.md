@@ -1,6 +1,6 @@
 # Systems Validation Matrix & Technical Audit Report
 
-**Current local validation, 13 October 2026:** 407 passed, 7 skipped; three synthetic smokes exited 0; 60/60 tracking trials and both obstacle planning runs passed. See the [current hardening report](docs/status/2026-10-13-software-hardening.md) for scope, source provenance, and remaining limitations. The v1.2 sections below are historical release evidence; they do not describe current test totals or claim fresh remote CI.
+**Current local validation, 14 October 2026:** 435 passed, 7 skipped; three synthetic smokes exited 0; 84/84 seeded robustness outcomes and 6/6 clearance planning/execution runs passed. See the [current report](docs/status/2026-10-14-robustness-and-clearance.md) for scope, provenance, and limits. The hardening baseline passed remote ROS2 CI; consult the repository Actions workflows for subsequent commit-level results. The v1.2 sections below remain historical release evidence.
 
 ## VisionRobotTwin (v1.2.0 Multi-Robot Robotics Stack)
 

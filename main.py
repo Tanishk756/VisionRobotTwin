@@ -47,6 +47,8 @@ def parse_arguments() -> argparse.Namespace:
     parser.add_argument("--controller", type=str, choices=["ik", "resolved-rate"], default="ik", help="Motion controller algorithm")
     parser.add_argument("--trajectory-mode", type=str, choices=["direct", "quintic"], default="quintic", help="Trajectory generation mode")
     parser.add_argument("--scene", type=str, choices=["standard", "obstacles"], default="standard", help="Simulation obstacle scene configuration")
+    parser.add_argument("--clearance-mm", type=float, default=0.0, help="Minimum environment clearance for collision-aware planning (mm)")
+    parser.add_argument("--self-clearance-mm", type=float, default=0.0, help="Minimum non-exempt self-link clearance for planning (mm)")
     parser.add_argument("--camera", type=int, default=0, help="Camera device index")
     parser.add_argument("--width", type=int, default=1280, help="Camera width resolution")
     parser.add_argument("--height", type=int, default=720, help="Camera height resolution")
@@ -561,6 +563,8 @@ class VisionRobotTwinApp:
                 col_state = "SELF_COLLISION"
             elif col_res.env_collision:
                 col_state = "ENV_COLLISION"
+            elif col_res.clearance_violation:
+                col_state = "CLEARANCE_VIOLATION"
 
         singularity_state = "WARNING" if (m_metrics and m_metrics.near_singularity) else "NORMAL"
         planner_state = self.simulator.motion_manager.state_name
@@ -900,6 +904,10 @@ def main() -> int:
     config.controller_type = args.controller
     config.trajectory_mode = args.trajectory_mode
     config.scene_type = args.scene
+    if not np.isfinite(args.clearance_mm) or args.clearance_mm < 0 or not np.isfinite(args.self_clearance_mm) or args.self_clearance_mm < 0:
+        raise ValueError("Clearance margins must be finite and non-negative")
+    config.environment_clearance_m = args.clearance_mm / 1000.0
+    config.self_clearance_m = args.self_clearance_mm / 1000.0
     config.camera.camera_index = args.camera
     config.camera.width = args.width
     config.camera.height = args.height

@@ -59,9 +59,15 @@ The v1.3 development milestones are integrated into `main`; the application rema
 - **Vendor-Neutral Read-Only Physical Commissioning Framework (Phase B4.1 Complete)**: Pure observation framework (`PhysicalRobotIdentity`, three-state safety schema, `PhysicalReadinessEvaluator`, read-only `PhysicalRobotStateBackend`, limit intersection provenance, soak session collector).
 - **Physical Manipulator Target**: `UNRESOLVED` — No physical manipulator connection, no vendor SDK, no physical motion, and zero physical commands sent. Physical commissioning and Phase B4.2 remain blocked pending physical hardware selection.
 
-**Latest local validation (13 October 2026):** 407 passed, 7 ROS2-dependent skips on Windows/Python 3.12; three synthetic smokes passed; 60/60 tracking trials and both obstacle planning runs passed. Corrections include link/world-frame kinematics, motor-gain transport, trajectory feedforward, per-command state checks, fault persistence, automatic watchdog monitoring, and explicit physical-readiness evidence. These results apply to local uncommitted changes; ROS2 CI has not been rerun for them.
+**Latest local validation (14 October 2026):** 435 passed, 7 ROS2-dependent skips; 84/84 seeded robustness outcomes (36 tracking successes, 48 expected fault stops); 6/6 obstacle executions with a 10 mm environment-clearance requirement; three synthetic smokes passed. This checkpoint includes the clearance and robustness additions.
 
-See the **[current hardening report](docs/status/2026-10-13-software-hardening.md)** and **[new benchmark package](docs/experiments/2026-10-13-hardening/REPORT.md)**. The [16 September milestone summary](docs/status/2026-09-16-v1.3-development-summary.md) preserves the earlier phase history.
+**Verified remote baseline:** the pushed hardening commit `d09bfe4` passed [ROS2 Humble CI](https://github.com/Tanishk756/VisionRobotTwin/actions/runs/38427452767) with 417 regression tests plus 4 controller-level tests. Commit-level validation is available in the repository Actions workflows.
+
+Run the seeded suite with `python tools/run_robustness_experiments.py --planning`. Enable explicit planning margins with `python main.py --robot panda --synthetic --scene obstacles --clearance-mm 10`. Legacy runtime margins default to zero; manual target streaming is not dynamically stopped by this planning policy.
+
+See the **[current robustness and clearance report](docs/status/2026-10-14-robustness-and-clearance.md)** and **[seeded experiment package](docs/experiments/2026-10-14-robustness/REPORT.md)** for measurements and limitations.
+
+See the **[13 October hardening report](docs/status/2026-10-13-software-hardening.md)** and **[new benchmark package](docs/experiments/2026-10-13-hardening/REPORT.md)**. The [16 September milestone summary](docs/status/2026-09-16-v1.3-development-summary.md) preserves the earlier phase history.
 
 ---
 
@@ -212,7 +218,7 @@ VisionRobotTwin strictly distinguishes between automated unit verification, simu
 
 | Validation Tier | Environment | Status | Description |
 | :--- | :--- | :---: | :--- |
-| **Automated Software Validation** | Local Windows / Python 3.12 | **407 passed, 7 skipped** | Current local suite; ROS2 and multi-Python CI still require rerunning for these changes. |
+| **Automated Software Validation** | Local Windows / Python 3.12 | **435 passed, 7 skipped** | Current local suite; new edits still need remote CI. The pushed hardening baseline passed ROS2 and Windows CI. |
 | **PyBullet Reference Experiments** | 240 Hz Physics Twin | **`AVAILABLE`** | Reproducible multi-robot & multi-controller benchmark suite in PyBullet. |
 | **Basic Physical Webcam Smoke** | Monocular Webcam Teleoperation | **`USER-CONFIRMED / PASS`** | Operator-verified ArUco marker teleoperation smoke test (v1.1 baseline). |
 | **Physical Calibrated Camera Benchmark** | Chessboard Metric Rig | **`NOT YET MEASURED`** | Optical calibration metrics pending physical lab capture. |
@@ -244,7 +250,7 @@ pytest -v
 | `test_calibration_quality.py` | Camera Calibration Heuristics & Diagnostics | **PASS** |
 | `test_extrinsics_math.py` | World-Anchor Extrinsic Calibration Math | **PASS** |
 | `test_transforms.py` | SE(3) Lie Group Matrix & Quaternion Conversions | **PASS** |
-| **Total Automated Tests** | **Current local suite, including backend, safety, physical-framework and hardening tests** | **407 passed, 7 skipped** |
+| **Total Automated Tests** | **Current local suite, including backend, safety, physical-framework and hardening tests** | **435 passed, 7 skipped** |
 
 ---
 

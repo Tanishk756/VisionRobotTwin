@@ -53,6 +53,10 @@ def is_joint_path_collision_free(
     """
     start = np.asarray(q_start, dtype=np.float64).flatten()
     goal = np.asarray(q_goal, dtype=np.float64).flatten()
+    if start.size == 0 or start.shape != goal.shape or not np.all(np.isfinite(start)) or not np.all(np.isfinite(goal)):
+        raise ValueError("Path endpoints must be finite, nonempty and have matching dimensions")
+    if not np.isfinite(resolution_rad) or resolution_rad <= 0:
+        raise ValueError("Collision resolution must be positive and finite")
 
     dist = np.linalg.norm(goal - start)
     if dist < 1e-6:
@@ -104,6 +108,14 @@ class RRTConnectPlanner:
         self.max_iterations = int(max_iterations)
         self.collision_resolution = float(collision_resolution_rad)
         self.rng = np.random.RandomState(random_seed)
+        if (self.lower_limits.ndim != 1 or self.dof == 0 or self.upper_limits.shape != self.lower_limits.shape
+                or not np.all(np.isfinite(self.lower_limits)) or not np.all(np.isfinite(self.upper_limits))
+                or np.any(self.lower_limits > self.upper_limits)):
+            raise ValueError("Planner joint limits must be finite ordered vectors of matching size")
+        if not np.isfinite(self.step_size) or self.step_size <= 0 or not np.isfinite(self.collision_resolution) or self.collision_resolution <= 0:
+            raise ValueError("Planner step and collision resolution must be positive and finite")
+        if not 0 <= self.goal_bias <= 1 or self.max_iterations <= 0:
+            raise ValueError("Planner goal bias must be in [0, 1] and iterations positive")
 
     def _sample_random_config(self, goal: np.ndarray) -> np.ndarray:
         """Samples random configuration within joint limits with optional goal bias."""
@@ -180,6 +192,11 @@ class RRTConnectPlanner:
         start_time = time.perf_counter()
         start = np.asarray(q_start, dtype=np.float64).flatten()
         goal = np.asarray(q_goal, dtype=np.float64).flatten()
+        if (start.shape != (self.dof,) or goal.shape != (self.dof,)
+                or not np.all(np.isfinite(start)) or not np.all(np.isfinite(goal))):
+            return PlanningResult(False, reason="Invalid endpoint dimensions or values")
+        if np.any(start < self.lower_limits) or np.any(start > self.upper_limits) or np.any(goal < self.lower_limits) or np.any(goal > self.upper_limits):
+            return PlanningResult(False, reason="Endpoint outside joint limits")
 
         # 1. Validate start and goal limits and collisions
         col_start = self.checker.check_collision(start)

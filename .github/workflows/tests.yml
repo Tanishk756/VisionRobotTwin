@@ -55,3 +55,15 @@ jobs:
       - name: Run Bounded Headless Synthetic Smoke (Panda Resolved-Rate)
         run: |
           python main.py --robot panda --controller resolved-rate --synthetic --headless --max-frames 60
+
+      - name: Run Seeded Robustness Smoke
+        run: |
+          python tools/run_robustness_experiments.py --robots panda --controllers resolved-rate --seeds 0 1 --output-dir experiments/ci-robustness
+
+      - name: Upload Robustness Evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: robustness-windows-py${{ matrix.python-version }}
+          path: experiments/ci-robustness/
+          if-no-files-found: ignore

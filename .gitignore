@@ -35,3 +35,10 @@ calibration/*.png
 Thumbs.db
 Desktop.ini
 .DS_Store
+
+# Local tooling and archived execution notes
+/.local-archive/
+/.agents/
+/.codex/
+/.gemini/
+/docs/superpowers/

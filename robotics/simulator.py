@@ -252,6 +252,8 @@ class PyBulletSimulator:
             allowed_link_pairs=allowed_mount_pairs,
             allowed_self_link_pairs=self.robot_spec.allowed_self_collision_pairs,
             query_lock=self._model_query_lock,
+            environment_clearance_m=self.config.environment_clearance_m,
+            self_clearance_m=self.config.self_clearance_m,
         )
         self.collision_checker = self.collision_provider
 

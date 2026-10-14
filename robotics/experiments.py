@@ -1273,6 +1273,11 @@ class PlanningExperimentResult:
     execution_final_pos_error_mm: float
     planning_execution_position_tolerance_mm: float = PLANNING_EXECUTION_POSITION_TOLERANCE_MM
     details: str = ""
+    environment_clearance_m: float = 0.0
+    self_clearance_m: float = 0.0
+    min_env_clearance_m: float = float("inf")
+    min_self_clearance_m: float = float("inf")
+    planning_clearance_buffer_m: float = 0.0
 
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
@@ -1284,6 +1289,9 @@ def execute_obstacle_reach_experiment(
     gui: bool = False,
     seed: int = 42,
     planning_execution_position_tolerance_mm: float = PLANNING_EXECUTION_POSITION_TOLERANCE_MM,
+    environment_clearance_m: float = 0.0,
+    self_clearance_m: float = 0.0,
+    planning_clearance_buffer_m: float = 0.005,
 ) -> PlanningExperimentResult:
     """Evaluates collision-aware motion planning around a tall scene obstacle.
 
@@ -1293,6 +1301,8 @@ def execute_obstacle_reach_experiment(
     - Path shortcutting and waypoint reduction.
     - Execution without collision in PyBullet with final endpoint position error <= tolerance.
     """
+    if not np.isfinite(planning_clearance_buffer_m) or planning_clearance_buffer_m < 0:
+        raise ValueError("Planning clearance buffer must be finite and non-negative")
     np.random.seed(seed)
     cid = p.connect(p.GUI if gui else p.DIRECT)
     p.setAdditionalSearchPath(pybullet_data.getDataPath())
@@ -1350,7 +1360,18 @@ def execute_obstacle_reach_experiment(
         obstacle_ids=[obs_id],
         allowed_link_pairs=allowed_mount,
         allowed_self_link_pairs=spec.allowed_self_collision_pairs,
+        environment_clearance_m=environment_clearance_m,
+        self_clearance_m=self_clearance_m,
     )
+    # Plan with additional headroom for discretization and motor tracking error.
+    # Actual execution is evaluated against the requested margin, not the buffer.
+    planning_checker = CollisionChecker(
+        physics_client_id=cid, robot_id=rid, table_id=table_id, obstacle_ids=[obs_id],
+        allowed_link_pairs=allowed_mount, allowed_self_link_pairs=spec.allowed_self_collision_pairs,
+        environment_clearance_m=environment_clearance_m + (planning_clearance_buffer_m if environment_clearance_m > 0 else 0),
+        self_clearance_m=self_clearance_m + (planning_clearance_buffer_m if self_clearance_m > 0 else 0),
+    )
+    resolution = 0.02 if environment_clearance_m > 0 or self_clearance_m > 0 else 0.05
 
     try:
         # Solve start and goal on opposite sides of obstacle
@@ -1372,18 +1393,19 @@ def execute_obstacle_reach_experiment(
 
         # 2. Direct Path Evaluation (straight-line joint interpolation)
         direct_is_free, _ = is_joint_path_collision_free(
-            q_start, q_goal, col_checker, arm_joint_indices=ctrl.arm_joint_indices
+            q_start, q_goal, planning_checker, resolution_rad=resolution, arm_joint_indices=ctrl.arm_joint_indices
         )
 
         # 3. RRT-Connect Planning
         planner = RRTConnectPlanner(
             lower_limits=lows,
             upper_limits=highs,
-            collision_checker=col_checker,
+            collision_checker=planning_checker,
             arm_joint_indices=ctrl.arm_joint_indices,
             step_size_rad=0.05,
             max_iterations=1000,
             random_seed=seed,
+            collision_resolution_rad=resolution,
         )
 
         plan_res = planner.plan(q_start, q_goal)
@@ -1395,7 +1417,7 @@ def execute_obstacle_reach_experiment(
 
         # Shortcut path
         if rrt_success:
-            smoothed_path = shortcut_path(plan_res.path, col_checker, ctrl.arm_joint_indices, max_attempts=30, random_seed=seed)
+            smoothed_path = shortcut_path(plan_res.path, planning_checker, ctrl.arm_joint_indices, max_attempts=30, random_seed=seed, step_size_rad=resolution)
         else:
             smoothed_path = []
 
@@ -1404,6 +1426,8 @@ def execute_obstacle_reach_experiment(
 
         # 4. Trajectory Execution & Verification
         min_clearance = float("inf")
+        min_env_clearance = float("inf")
+        min_self_clearance = float("inf")
         exec_success = False
         final_err_mm = float("inf")
 
@@ -1420,15 +1444,26 @@ def execute_obstacle_reach_experiment(
                 p.stepSimulation(physicsClientId=cid)
 
                 c_query = col_checker.check_collision()
+                min_env_clearance = min(min_env_clearance, c_query.min_env_clearance_m)
+                min_self_clearance = min(min_self_clearance, c_query.min_self_clearance_m)
+                min_clearance = min(min_clearance, c_query.min_env_clearance_m)
                 if c_query.in_collision:
                     no_col = False
-                if c_query.min_env_clearance_m < min_clearance:
-                    min_clearance = c_query.min_env_clearance_m
+                    ctrl.backend.halt_motion()
+                    break
 
             # Settle to goal
-            for _ in range(30):
+            for _ in range(30 if no_col else 0):
                 ctrl.set_arm_joint_positions(q_goal, dt=dt, enforce_velocity_limits=False)
                 p.stepSimulation(physicsClientId=cid)
+                c_query = col_checker.check_collision()
+                min_env_clearance = min(min_env_clearance, c_query.min_env_clearance_m)
+                min_self_clearance = min(min_self_clearance, c_query.min_self_clearance_m)
+                min_clearance = min(min_clearance, c_query.min_env_clearance_m)
+                if c_query.in_collision:
+                    no_col = False
+                    ctrl.backend.halt_motion()
+                    break
 
             ee_pos, _ = ctrl.get_end_effector_pose()
             final_err_mm = float(np.linalg.norm(np.array(ee_pos) - np.array(goal_target_pos)) * 1000.0)
@@ -1447,6 +1482,11 @@ def execute_obstacle_reach_experiment(
             execution_success=exec_success,
             execution_final_pos_error_mm=final_err_mm,
             planning_execution_position_tolerance_mm=planning_execution_position_tolerance_mm,
+            environment_clearance_m=environment_clearance_m,
+            self_clearance_m=self_clearance_m,
+            min_env_clearance_m=min_env_clearance,
+            min_self_clearance_m=min_self_clearance,
+            planning_clearance_buffer_m=planning_clearance_buffer_m if environment_clearance_m > 0 or self_clearance_m > 0 else 0.0,
             details=f"Direct: {'FREE' if direct_is_free else 'BLOCKED'}, RRT: {'SUCCESS' if rrt_success else 'FAILED'}, Exec: {'SUCCESS' if exec_success else 'FAILED'}",
         )
 

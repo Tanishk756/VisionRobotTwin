@@ -193,6 +193,8 @@ class AppConfig:
     controller_type: str = "ik"  # 'ik' or 'resolved-rate'
     trajectory_mode: str = "quintic"  # 'direct' or 'quintic'
     scene_type: str = "standard"  # 'standard' or 'obstacles'
+    environment_clearance_m: float = 0.0  # Explicit simulation policy; zero preserves reference behavior
+    self_clearance_m: float = 0.0
     mode: str = "manual"  # 'manual' or 'auto'
     control_mode: str = "6dof"  # '6dof' (position + orientation) or '3dof' (position only)
     debug: bool = False

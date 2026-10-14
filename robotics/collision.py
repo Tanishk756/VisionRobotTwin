@@ -34,6 +34,8 @@ class CollisionChecker(PyBulletCollisionProvider):
         allowed_self_link_pairs: Optional[List[Tuple[int, int]]] = None,
         arm_joint_indices: Optional[Sequence[int]] = None,
         query_lock: Optional[threading.RLock] = None,
+        environment_clearance_m: float = 0.0,
+        self_clearance_m: float = 0.0,
     ):
         """Initializes collision checker.
 
@@ -58,6 +60,8 @@ class CollisionChecker(PyBulletCollisionProvider):
             allowed_link_pairs=allowed_link_pairs,
             allowed_self_link_pairs=allowed_self_link_pairs,
             query_lock=query_lock,
+            environment_clearance_m=environment_clearance_m,
+            self_clearance_m=self_clearance_m,
         )
 
 

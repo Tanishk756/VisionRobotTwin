@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased] - v1.3.0-dev
 
+### Repository cleanup ? 2026-10-14
+- Remove obsolete execution plans and the internal Markdown inventory audit from the public tree; retain useful engineering specifications under `docs/design/`.
+- Repair documentation links and exclude local tooling/archive directories. Preserve authorship, regression tests, benchmark provenance and historical reference datasets.
+
+### Robustness and clearance ? 2026-10-14 (local validation)
+- Verify the pushed hardening baseline passed ROS2 Humble CI: 417 regression tests and 4 controller-level tests.
+- Add seeded pose-noise, detection-loss, delayed-state, disconnect, dispatch-failure and watchdog-starvation experiments with separate tracking/expected-stop outcomes, distributions, strict JSON artifacts and source provenance.
+- Add independent environment/self-clearance margins to collision providers and runtime CLI; enforce them through direct paths, RRT-Connect and shortcutting. Use 5 mm planning headroom and finer sampling for positive margins.
+- Check measured clearance during obstacle execution and settling, stop on violation, and preserve the original failing Panda counterexample.
+- Add 28 regressions and CI robustness smoke/artifact steps. Local validation: 435 passed, 7 skips; 84/84 robustness outcomes; 6/6 clearance obstacle runs; three synthetic smokes.
+- Document that planning margins do not supply dynamic collision-stop enforcement for manual streaming, physical hardware safety, or continuous collision guarantees. See [current status](docs/status/2026-10-14-robustness-and-clearance.md).
+
 ### Software hardening ? 2026-10-13 (local validation)
 - Correct URDF link-frame FK, world-frame Jacobians, canonical joint mapping, and configured PyBullet motor-gain transport.
 - Add trajectory velocity feedforward to resolved-rate benchmarks, coordinated joint velocity scaling, and correct SLERP angular velocity reporting.

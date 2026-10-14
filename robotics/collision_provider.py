@@ -6,7 +6,8 @@ and clearance evaluation across interchangeable robot backends and simulation en
 
 from abc import ABC, abstractmethod
 from collections import deque
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
+import math
 import threading
 from typing import Dict, List, Optional, Sequence, Set, Tuple, Union
 import numpy as np
@@ -32,6 +33,7 @@ class CollisionResult:
     colliding_bodies: List[Tuple[int, int]] = field(default_factory=list)
     colliding_links: List[Tuple[int, int]] = field(default_factory=list)
     details: str = ""
+    clearance_violation: bool = False
 
 
 class CollisionProvider(ABC):
@@ -54,6 +56,23 @@ class CollisionProvider(ABC):
         pass
 
 
+class ClearanceCollisionProvider(CollisionProvider):
+    """Apply planning-only clearance headroom to any distance-aware provider."""
+    def __init__(self, provider, environment_clearance_m=0.0, self_clearance_m=0.0):
+        if any(not math.isfinite(v) or v < 0 for v in (environment_clearance_m, self_clearance_m)):
+            raise ValueError("Collision clearance margins must be finite and non-negative")
+        self.provider = provider
+        self.environment_clearance_m = environment_clearance_m
+        self.self_clearance_m = self_clearance_m
+
+    def check_collision(self, joint_positions=None):
+        result = self.provider.check_collision(joint_positions)
+        violation = (result.min_env_clearance_m < self.environment_clearance_m
+                     or result.min_self_clearance_m < self.self_clearance_m)
+        return replace(result, in_collision=result.in_collision or violation,
+                       clearance_violation=result.clearance_violation or violation)
+
+
 class PyBulletCollisionProvider(CollisionProvider):
     """PyBullet implementation of CollisionProvider.
 
@@ -72,6 +91,8 @@ class PyBulletCollisionProvider(CollisionProvider):
         allowed_link_pairs: Optional[Sequence[Tuple[int, int, int, int]]] = None,
         allowed_self_link_pairs: Optional[Sequence[Tuple[int, int]]] = None,
         query_lock: Optional[threading.RLock] = None,
+        environment_clearance_m: float = 0.0,
+        self_clearance_m: float = 0.0,
     ):
         self.client_id = int(physics_client_id)
         self.robot_id = int(robot_body_id)
@@ -82,6 +103,11 @@ class PyBulletCollisionProvider(CollisionProvider):
         self.allowed_link_pairs: Set[Tuple[int, int, int, int]] = set(allowed_link_pairs) if allowed_link_pairs else set()
         self.allowed_self_links: Set[Tuple[int, int]] = set(allowed_self_link_pairs) if allowed_self_link_pairs else set()
         self._lock = query_lock if query_lock is not None else threading.RLock()
+        for value in (environment_clearance_m, self_clearance_m):
+            if not math.isfinite(value) or value < 0:
+                raise ValueError("Collision clearance margins must be finite and non-negative")
+        self.environment_clearance_m = float(environment_clearance_m)
+        self.self_clearance_m = float(self_clearance_m)
 
         # Build adjacent / allowed self-link pairs from kinematics tree
         self.adjacent_links: Set[Tuple[int, int]] = set()
@@ -199,7 +225,7 @@ class PyBulletCollisionProvider(CollisionProvider):
         saved_positions = []
         if joint_positions is not None:
             q_arr = np.asarray(joint_positions, dtype=np.float64)
-            if not np.all(np.isfinite(q_arr)):
+            if q_arr.ndim != 1 or not np.all(np.isfinite(q_arr)):
                 raise ValueError(f"Candidate joint positions must be finite, got: {joint_positions}")
 
             if arm_joint_indices is not None:
@@ -227,14 +253,19 @@ class PyBulletCollisionProvider(CollisionProvider):
                     state = p.getJointState(self.robot_id, idx, physicsClientId=self.client_id)
                     saved_positions.append((idx, state[0], state[1]))
 
-                # Set candidate positions
-                for idx, pos in zip(active_indices, q_arr):
-                    p.resetJointState(self.robot_id, idx, float(pos), targetVelocity=0.0, physicsClientId=self.client_id)
-
-                p.performCollisionDetection(physicsClientId=self.client_id)
-                return self._evaluate_collision_state(saved_positions)
+                try:
+                    for idx, pos in zip(active_indices, q_arr):
+                        p.resetJointState(self.robot_id, idx, float(pos), targetVelocity=0.0, physicsClientId=self.client_id)
+                    p.performCollisionDetection(physicsClientId=self.client_id)
+                    return self._evaluate_collision_state([])
+                finally:
+                    # Include candidate installation in the restoration scope.
+                    for idx, pos, vel in saved_positions:
+                        p.resetJointState(self.robot_id, idx, pos, targetVelocity=vel, physicsClientId=self.client_id)
+                    p.performCollisionDetection(physicsClientId=self.client_id)
         else:
             with self._lock:
+                p.performCollisionDetection(physicsClientId=self.client_id)
                 return self._evaluate_collision_state(saved_positions)
 
     def _evaluate_collision_state(self, saved_positions: List[Tuple[int, float, float]]) -> CollisionResult:
@@ -265,7 +296,7 @@ class PyBulletCollisionProvider(CollisionProvider):
             self_closest = p.getClosestPoints(
                 bodyA=self.robot_id,
                 bodyB=self.robot_id,
-                distance=0.5,
+                distance=max(0.5, self.self_clearance_m),
                 physicsClientId=self.client_id,
             )
             for scp in self_closest:
@@ -305,7 +336,7 @@ class PyBulletCollisionProvider(CollisionProvider):
                 closest = p.getClosestPoints(
                     bodyA=self.robot_id,
                     bodyB=env_id,
-                    distance=1.0,
+                    distance=max(1.0, self.environment_clearance_m),
                     physicsClientId=self.client_id,
                 )
                 for cp in closest:
@@ -322,7 +353,9 @@ class PyBulletCollisionProvider(CollisionProvider):
                             if (link_robot, link_env) not in colliding_links:
                                 colliding_links.append((link_robot, link_env))
 
-            in_collision = has_self_collision or has_env_collision
+            clearance_violation = (min_env_dist < self.environment_clearance_m
+                                   or min_self_dist < self.self_clearance_m)
+            in_collision = has_self_collision or has_env_collision or clearance_violation
             overall_min_dist = min(min_env_dist, min_self_dist)
 
             return CollisionResult(
@@ -334,7 +367,8 @@ class PyBulletCollisionProvider(CollisionProvider):
                 min_self_clearance_m=float(min_self_dist),
                 colliding_bodies=colliding_bodies,
                 colliding_links=colliding_links,
-                details=f"Self-Col: {has_self_collision}, Env-Col: {has_env_collision}, Min Clear: {overall_min_dist:.4f}m",
+                clearance_violation=clearance_violation,
+                details=f"Self-Col: {has_self_collision}, Env-Col: {has_env_collision}, Clearance violation: {clearance_violation}, Min Clear: {overall_min_dist:.4f}m",
             )
 
         finally:

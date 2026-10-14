@@ -294,7 +294,6 @@ def test_guarded_ros2_simulation_velocity_mode_and_watchdog_halt():
         time.sleep(0.15)
         guarded.check_watchdog()
         assert guarded.guard_state == SafetyGuardState.FAULT_LATCHED
-        assert guarded.guard_state == SafetyGuardState.FAULT_LATCHED
         assert guarded.active_fault.code == CommandSafetyFaultCode.COMMAND_WATCHDOG_TIMEOUT
 
         # Check that zero-velocity halt was published by underlying halt_motion()
