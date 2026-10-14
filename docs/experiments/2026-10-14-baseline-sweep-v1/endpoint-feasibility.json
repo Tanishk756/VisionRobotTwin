@@ -1,0 +1,293 @@
+{
+  "purpose": "Post-hoc endpoint geometry only; not a dynamic trajectory feasibility proof or controller input",
+  "source_files_sha256": {
+    "tools/assess_sweep_feasibility.py": "9cb8473c8c71c36c0215d002af2fef80f3af2f108d3317b18dc19d5c3ea72876"
+  },
+  "sweep_manifest_sha256": "2adaec19f34cd6ef95b8d94e91cc346034d49d9b42f7949c91ff7782ec7d2e53",
+  "cases": [
+    {
+      "robot": "panda",
+      "scenario": "crossing-v1",
+      "target_joint_positions": [
+        0.35,
+        -0.785,
+        0.0,
+        -2.356,
+        0.0,
+        1.571,
+        0.785
+      ],
+      "target_within_joint_limits": true,
+      "initial_collision": false,
+      "target_static_geometry_free": true,
+      "target_final_geometry_free": true,
+      "static_target_min_environment_clearance_m": 0.27200113168613943,
+      "final_target_min_environment_clearance_m": 0.2591238174934279,
+      "static_target_colliding_links": [],
+      "final_target_colliding_links": []
+    },
+    {
+      "robot": "panda",
+      "scenario": "narrow-passage-v1",
+      "target_joint_positions": [
+        0.35,
+        -0.785,
+        0.0,
+        -2.356,
+        0.0,
+        1.571,
+        0.785
+      ],
+      "target_within_joint_limits": true,
+      "initial_collision": false,
+      "target_static_geometry_free": true,
+      "target_final_geometry_free": true,
+      "static_target_min_environment_clearance_m": 0.027772639620808767,
+      "final_target_min_environment_clearance_m": 0.027772639620808767,
+      "static_target_colliding_links": [],
+      "final_target_colliding_links": []
+    },
+    {
+      "robot": "panda",
+      "scenario": "occluded-crossing-v1",
+      "target_joint_positions": [
+        0.35,
+        -0.785,
+        0.0,
+        -2.356,
+        0.0,
+        1.571,
+        0.785
+      ],
+      "target_within_joint_limits": true,
+      "initial_collision": false,
+      "target_static_geometry_free": true,
+      "target_final_geometry_free": true,
+      "static_target_min_environment_clearance_m": 0.27200113168613943,
+      "final_target_min_environment_clearance_m": 0.2591238174934279,
+      "static_target_colliding_links": [],
+      "final_target_colliding_links": []
+    },
+    {
+      "robot": "panda",
+      "scenario": "sudden-approach-v1",
+      "target_joint_positions": [
+        0.35,
+        -0.785,
+        0.0,
+        -2.356,
+        0.0,
+        1.571,
+        0.785
+      ],
+      "target_within_joint_limits": true,
+      "initial_collision": false,
+      "target_static_geometry_free": true,
+      "target_final_geometry_free": true,
+      "static_target_min_environment_clearance_m": 0.27200113168613943,
+      "final_target_min_environment_clearance_m": 0.06364158511783573,
+      "static_target_colliding_links": [],
+      "final_target_colliding_links": []
+    },
+    {
+      "robot": "kuka_iiwa",
+      "scenario": "crossing-v1",
+      "target_joint_positions": [
+        0.35,
+        0.0,
+        0.0,
+        -1.5708,
+        0.0,
+        1.5708,
+        0.0
+      ],
+      "target_within_joint_limits": true,
+      "initial_collision": false,
+      "target_static_geometry_free": true,
+      "target_final_geometry_free": true,
+      "static_target_min_environment_clearance_m": 0.26834281319379805,
+      "final_target_min_environment_clearance_m": 0.26834281319379805,
+      "static_target_colliding_links": [],
+      "final_target_colliding_links": []
+    },
+    {
+      "robot": "kuka_iiwa",
+      "scenario": "narrow-passage-v1",
+      "target_joint_positions": [
+        0.35,
+        0.0,
+        0.0,
+        -1.5708,
+        0.0,
+        1.5708,
+        0.0
+      ],
+      "target_within_joint_limits": true,
+      "initial_collision": false,
+      "target_static_geometry_free": false,
+      "target_final_geometry_free": false,
+      "static_target_min_environment_clearance_m": -0.038609376199863876,
+      "final_target_min_environment_clearance_m": -0.038609376199863876,
+      "static_target_colliding_links": [
+        [
+          4,
+          -1
+        ],
+        [
+          5,
+          -1
+        ],
+        [
+          6,
+          -1
+        ]
+      ],
+      "final_target_colliding_links": [
+        [
+          4,
+          -1
+        ],
+        [
+          5,
+          -1
+        ],
+        [
+          6,
+          -1
+        ]
+      ]
+    },
+    {
+      "robot": "kuka_iiwa",
+      "scenario": "occluded-crossing-v1",
+      "target_joint_positions": [
+        0.35,
+        0.0,
+        0.0,
+        -1.5708,
+        0.0,
+        1.5708,
+        0.0
+      ],
+      "target_within_joint_limits": true,
+      "initial_collision": false,
+      "target_static_geometry_free": true,
+      "target_final_geometry_free": true,
+      "static_target_min_environment_clearance_m": 0.26834281319379805,
+      "final_target_min_environment_clearance_m": 0.26834281319379805,
+      "static_target_colliding_links": [],
+      "final_target_colliding_links": []
+    },
+    {
+      "robot": "kuka_iiwa",
+      "scenario": "sudden-approach-v1",
+      "target_joint_positions": [
+        0.35,
+        0.0,
+        0.0,
+        -1.5708,
+        0.0,
+        1.5708,
+        0.0
+      ],
+      "target_within_joint_limits": true,
+      "initial_collision": false,
+      "target_static_geometry_free": true,
+      "target_final_geometry_free": true,
+      "static_target_min_environment_clearance_m": 0.26834281319379805,
+      "final_target_min_environment_clearance_m": 0.05966183557669087,
+      "static_target_colliding_links": [],
+      "final_target_colliding_links": []
+    },
+    {
+      "robot": "xarm6",
+      "scenario": "crossing-v1",
+      "target_joint_positions": [
+        0.35,
+        -0.6,
+        -1.2,
+        0.0,
+        1.8,
+        0.0
+      ],
+      "target_within_joint_limits": true,
+      "initial_collision": false,
+      "target_static_geometry_free": true,
+      "target_final_geometry_free": true,
+      "static_target_min_environment_clearance_m": 0.14844299858808524,
+      "final_target_min_environment_clearance_m": 0.14844299858808524,
+      "static_target_colliding_links": [],
+      "final_target_colliding_links": []
+    },
+    {
+      "robot": "xarm6",
+      "scenario": "narrow-passage-v1",
+      "target_joint_positions": [
+        0.35,
+        -0.6,
+        -1.2,
+        0.0,
+        1.8,
+        0.0
+      ],
+      "target_within_joint_limits": true,
+      "initial_collision": false,
+      "target_static_geometry_free": false,
+      "target_final_geometry_free": false,
+      "static_target_min_environment_clearance_m": 0.0010375571588512392,
+      "final_target_min_environment_clearance_m": 0.0010375571588512392,
+      "static_target_colliding_links": [
+        [
+          5,
+          -1
+        ]
+      ],
+      "final_target_colliding_links": [
+        [
+          5,
+          -1
+        ]
+      ]
+    },
+    {
+      "robot": "xarm6",
+      "scenario": "occluded-crossing-v1",
+      "target_joint_positions": [
+        0.35,
+        -0.6,
+        -1.2,
+        0.0,
+        1.8,
+        0.0
+      ],
+      "target_within_joint_limits": true,
+      "initial_collision": false,
+      "target_static_geometry_free": true,
+      "target_final_geometry_free": true,
+      "static_target_min_environment_clearance_m": 0.14844299858808524,
+      "final_target_min_environment_clearance_m": 0.14844299858808524,
+      "static_target_colliding_links": [],
+      "final_target_colliding_links": []
+    },
+    {
+      "robot": "xarm6",
+      "scenario": "sudden-approach-v1",
+      "target_joint_positions": [
+        0.35,
+        -0.6,
+        -1.2,
+        0.0,
+        1.8,
+        0.0
+      ],
+      "target_within_joint_limits": true,
+      "initial_collision": false,
+      "target_static_geometry_free": true,
+      "target_final_geometry_free": true,
+      "static_target_min_environment_clearance_m": 0.14844299858808524,
+      "final_target_min_environment_clearance_m": 0.10659574096511996,
+      "static_target_colliding_links": [],
+      "final_target_colliding_links": []
+    }
+  ]
+}

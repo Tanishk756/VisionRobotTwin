@@ -28,3 +28,13 @@ Finite collision sampling, fixed obstacle observations, nominal velocity dynamic
 Full regression: 519 passed, 7 optional skips. Focused scenario/baseline checks: 21 passed.
 
 Validation details: [milestone status](../../status/2026-10-14-scenarios-and-baseline.md).
+
+## Later benchmark interpretation note (2026-10-14)
+
+A subsequent evaluator-only audit found that the KUKA and xArm narrow-passage
+exact target configurations intersect static fixtures. Original measurements,
+scenes and denominators are retained. Incomplete tasks at those exact targets
+must not be attributed solely to controller limitations, and their refused
+contacts must not be counted as demonstrated improvement in dynamic avoidance.
+The audit does not prove infeasibility of the whole target tolerance region.
+See the [multi-seed sweep and endpoint diagnosis](../2026-10-14-baseline-sweep-v1/REPORT.md).

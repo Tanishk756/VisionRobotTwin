@@ -1,0 +1,822 @@
+{
+  "groups": {
+    "fixed-horizon-h0-m0": {
+      "method": "fixed-horizon",
+      "horizon_s": 0.1,
+      "margin_m": 0.01,
+      "expected_cases": 36,
+      "recorded_cases": 36,
+      "completed_cases": 36,
+      "errors": 0,
+      "complete_pair_grid": true,
+      "collision_trials": 27,
+      "contact_episodes": 27,
+      "task_completions": 3,
+      "collision_free_completions": 3,
+      "watchdog_fault_trials": 9,
+      "initial_collision_trials": 0,
+      "observed_collision_fraction": 0.75,
+      "failure_adjusted_safe_completion_fraction": 0.08333333333333333,
+      "mean_intervention_fraction": 0.5828703703703705,
+      "mean_final_joint_error_rad": 0.4156855949769236,
+      "onsets_by_policy_state": {
+        "WAIT": 0,
+        "TRACK": 27,
+        "HOLD": 0,
+        "FAULT": 0,
+        "UNKNOWN": 0
+      },
+      "breakdowns": {
+        "robot": {
+          "kuka_iiwa": {
+            "completed_cases": 12,
+            "collision_trials": 9,
+            "safe_completions": 0,
+            "mean_intervention_fraction": 0.7083333333333334
+          },
+          "panda": {
+            "completed_cases": 12,
+            "collision_trials": 9,
+            "safe_completions": 3,
+            "mean_intervention_fraction": 0.45555555555555566
+          },
+          "xarm6": {
+            "completed_cases": 12,
+            "collision_trials": 9,
+            "safe_completions": 0,
+            "mean_intervention_fraction": 0.5847222222222221
+          }
+        },
+        "scenario": {
+          "crossing-v1": {
+            "completed_cases": 9,
+            "collision_trials": 9,
+            "safe_completions": 0,
+            "mean_intervention_fraction": 0.6759259259259259
+          },
+          "narrow-passage-v1": {
+            "completed_cases": 9,
+            "collision_trials": 0,
+            "safe_completions": 3,
+            "mean_intervention_fraction": 0.5111111111111111
+          },
+          "occluded-crossing-v1": {
+            "completed_cases": 9,
+            "collision_trials": 9,
+            "safe_completions": 0,
+            "mean_intervention_fraction": 0.7481481481481481
+          },
+          "sudden-approach-v1": {
+            "completed_cases": 9,
+            "collision_trials": 9,
+            "safe_completions": 0,
+            "mean_intervention_fraction": 0.3962962962962963
+          }
+        }
+      }
+    },
+    "fixed-horizon-h0-m1": {
+      "method": "fixed-horizon",
+      "horizon_s": 0.1,
+      "margin_m": 0.03,
+      "expected_cases": 36,
+      "recorded_cases": 36,
+      "completed_cases": 36,
+      "errors": 0,
+      "complete_pair_grid": true,
+      "collision_trials": 27,
+      "contact_episodes": 27,
+      "task_completions": 0,
+      "collision_free_completions": 0,
+      "watchdog_fault_trials": 9,
+      "initial_collision_trials": 0,
+      "observed_collision_fraction": 0.75,
+      "failure_adjusted_safe_completion_fraction": 0.0,
+      "mean_intervention_fraction": 0.6763888888888888,
+      "mean_final_joint_error_rad": 0.44368663614229786,
+      "onsets_by_policy_state": {
+        "WAIT": 0,
+        "TRACK": 17,
+        "HOLD": 10,
+        "FAULT": 0,
+        "UNKNOWN": 0
+      },
+      "breakdowns": {
+        "robot": {
+          "kuka_iiwa": {
+            "completed_cases": 12,
+            "collision_trials": 9,
+            "safe_completions": 0,
+            "mean_intervention_fraction": 0.7361111111111112
+          },
+          "panda": {
+            "completed_cases": 12,
+            "collision_trials": 9,
+            "safe_completions": 0,
+            "mean_intervention_fraction": 0.5611111111111111
+          },
+          "xarm6": {
+            "completed_cases": 12,
+            "collision_trials": 9,
+            "safe_completions": 0,
+            "mean_intervention_fraction": 0.7319444444444444
+          }
+        },
+        "scenario": {
+          "crossing-v1": {
+            "completed_cases": 9,
+            "collision_trials": 9,
+            "safe_completions": 0,
+            "mean_intervention_fraction": 0.7148148148148148
+          },
+          "narrow-passage-v1": {
+            "completed_cases": 9,
+            "collision_trials": 0,
+            "safe_completions": 0,
+            "mean_intervention_fraction": 0.7814814814814814
+          },
+          "occluded-crossing-v1": {
+            "completed_cases": 9,
+            "collision_trials": 9,
+            "safe_completions": 0,
+            "mean_intervention_fraction": 0.7740740740740741
+          },
+          "sudden-approach-v1": {
+            "completed_cases": 9,
+            "collision_trials": 9,
+            "safe_completions": 0,
+            "mean_intervention_fraction": 0.4351851851851852
+          }
+        }
+      }
+    },
+    "fixed-horizon-h1-m0": {
+      "method": "fixed-horizon",
+      "horizon_s": 0.2,
+      "margin_m": 0.01,
+      "expected_cases": 36,
+      "recorded_cases": 36,
+      "completed_cases": 36,
+      "errors": 0,
+      "complete_pair_grid": true,
+      "collision_trials": 27,
+      "contact_episodes": 27,
+      "task_completions": 3,
+      "collision_free_completions": 3,
+      "watchdog_fault_trials": 9,
+      "initial_collision_trials": 0,
+      "observed_collision_fraction": 0.75,
+      "failure_adjusted_safe_completion_fraction": 0.08333333333333333,
+      "mean_intervention_fraction": 0.5898148148148148,
+      "mean_final_joint_error_rad": 0.416940031748231,
+      "onsets_by_policy_state": {
+        "WAIT": 0,
+        "TRACK": 27,
+        "HOLD": 0,
+        "FAULT": 0,
+        "UNKNOWN": 0
+      },
+      "breakdowns": {
+        "robot": {
+          "kuka_iiwa": {
+            "completed_cases": 12,
+            "collision_trials": 9,
+            "safe_completions": 0,
+            "mean_intervention_fraction": 0.7166666666666667
+          },
+          "panda": {
+            "completed_cases": 12,
+            "collision_trials": 9,
+            "safe_completions": 3,
+            "mean_intervention_fraction": 0.45694444444444454
+          },
+          "xarm6": {
+            "completed_cases": 12,
+            "collision_trials": 9,
+            "safe_completions": 0,
+            "mean_intervention_fraction": 0.5958333333333333
+          }
+        },
+        "scenario": {
+          "crossing-v1": {
+            "completed_cases": 9,
+            "collision_trials": 9,
+            "safe_completions": 0,
+            "mean_intervention_fraction": 0.6814814814814816
+          },
+          "narrow-passage-v1": {
+            "completed_cases": 9,
+            "collision_trials": 0,
+            "safe_completions": 3,
+            "mean_intervention_fraction": 0.5259259259259259
+          },
+          "occluded-crossing-v1": {
+            "completed_cases": 9,
+            "collision_trials": 9,
+            "safe_completions": 0,
+            "mean_intervention_fraction": 0.7537037037037037
+          },
+          "sudden-approach-v1": {
+            "completed_cases": 9,
+            "collision_trials": 9,
+            "safe_completions": 0,
+            "mean_intervention_fraction": 0.39814814814814814
+          }
+        }
+      }
+    },
+    "fixed-horizon-h1-m1": {
+      "method": "fixed-horizon",
+      "horizon_s": 0.2,
+      "margin_m": 0.03,
+      "expected_cases": 36,
+      "recorded_cases": 36,
+      "completed_cases": 36,
+      "errors": 0,
+      "complete_pair_grid": true,
+      "collision_trials": 27,
+      "contact_episodes": 27,
+      "task_completions": 0,
+      "collision_free_completions": 0,
+      "watchdog_fault_trials": 9,
+      "initial_collision_trials": 0,
+      "observed_collision_fraction": 0.75,
+      "failure_adjusted_safe_completion_fraction": 0.0,
+      "mean_intervention_fraction": 0.6791666666666667,
+      "mean_final_joint_error_rad": 0.44461232935848194,
+      "onsets_by_policy_state": {
+        "WAIT": 0,
+        "TRACK": 17,
+        "HOLD": 10,
+        "FAULT": 0,
+        "UNKNOWN": 0
+      },
+      "breakdowns": {
+        "robot": {
+          "kuka_iiwa": {
+            "completed_cases": 12,
+            "collision_trials": 9,
+            "safe_completions": 0,
+            "mean_intervention_fraction": 0.7361111111111112
+          },
+          "panda": {
+            "completed_cases": 12,
+            "collision_trials": 9,
+            "safe_completions": 0,
+            "mean_intervention_fraction": 0.5694444444444444
+          },
+          "xarm6": {
+            "completed_cases": 12,
+            "collision_trials": 9,
+            "safe_completions": 0,
+            "mean_intervention_fraction": 0.7319444444444444
+          }
+        },
+        "scenario": {
+          "crossing-v1": {
+            "completed_cases": 9,
+            "collision_trials": 9,
+            "safe_completions": 0,
+            "mean_intervention_fraction": 0.7166666666666667
+          },
+          "narrow-passage-v1": {
+            "completed_cases": 9,
+            "collision_trials": 0,
+            "safe_completions": 0,
+            "mean_intervention_fraction": 0.7870370370370371
+          },
+          "occluded-crossing-v1": {
+            "completed_cases": 9,
+            "collision_trials": 9,
+            "safe_completions": 0,
+            "mean_intervention_fraction": 0.7759259259259259
+          },
+          "sudden-approach-v1": {
+            "completed_cases": 9,
+            "collision_trials": 9,
+            "safe_completions": 0,
+            "mean_intervention_fraction": 0.437037037037037
+          }
+        }
+      }
+    },
+    "motion-aware-h0-m0": {
+      "method": "motion-aware",
+      "horizon_s": 0.1,
+      "margin_m": 0.01,
+      "expected_cases": 36,
+      "recorded_cases": 36,
+      "completed_cases": 36,
+      "errors": 0,
+      "complete_pair_grid": true,
+      "collision_trials": 27,
+      "contact_episodes": 27,
+      "task_completions": 3,
+      "collision_free_completions": 3,
+      "watchdog_fault_trials": 9,
+      "initial_collision_trials": 0,
+      "observed_collision_fraction": 0.75,
+      "failure_adjusted_safe_completion_fraction": 0.08333333333333333,
+      "mean_intervention_fraction": 0.6296296296296297,
+      "mean_final_joint_error_rad": 0.4202517064472083,
+      "onsets_by_policy_state": {
+        "WAIT": 0,
+        "TRACK": 0,
+        "HOLD": 27,
+        "FAULT": 0,
+        "UNKNOWN": 0
+      },
+      "breakdowns": {
+        "robot": {
+          "kuka_iiwa": {
+            "completed_cases": 12,
+            "collision_trials": 9,
+            "safe_completions": 0,
+            "mean_intervention_fraction": 0.7624999999999998
+          },
+          "panda": {
+            "completed_cases": 12,
+            "collision_trials": 9,
+            "safe_completions": 3,
+            "mean_intervention_fraction": 0.4916666666666667
+          },
+          "xarm6": {
+            "completed_cases": 12,
+            "collision_trials": 9,
+            "safe_completions": 0,
+            "mean_intervention_fraction": 0.6347222222222223
+          }
+        },
+        "scenario": {
+          "crossing-v1": {
+            "completed_cases": 9,
+            "collision_trials": 9,
+            "safe_completions": 0,
+            "mean_intervention_fraction": 0.7444444444444445
+          },
+          "narrow-passage-v1": {
+            "completed_cases": 9,
+            "collision_trials": 0,
+            "safe_completions": 3,
+            "mean_intervention_fraction": 0.5111111111111111
+          },
+          "occluded-crossing-v1": {
+            "completed_cases": 9,
+            "collision_trials": 9,
+            "safe_completions": 0,
+            "mean_intervention_fraction": 0.8351851851851851
+          },
+          "sudden-approach-v1": {
+            "completed_cases": 9,
+            "collision_trials": 9,
+            "safe_completions": 0,
+            "mean_intervention_fraction": 0.4277777777777778
+          }
+        }
+      }
+    },
+    "motion-aware-h0-m1": {
+      "method": "motion-aware",
+      "horizon_s": 0.1,
+      "margin_m": 0.03,
+      "expected_cases": 36,
+      "recorded_cases": 36,
+      "completed_cases": 36,
+      "errors": 0,
+      "complete_pair_grid": true,
+      "collision_trials": 27,
+      "contact_episodes": 27,
+      "task_completions": 0,
+      "collision_free_completions": 0,
+      "watchdog_fault_trials": 9,
+      "initial_collision_trials": 0,
+      "observed_collision_fraction": 0.75,
+      "failure_adjusted_safe_completion_fraction": 0.0,
+      "mean_intervention_fraction": 0.7226851851851852,
+      "mean_final_joint_error_rad": 0.45277697490037827,
+      "onsets_by_policy_state": {
+        "WAIT": 0,
+        "TRACK": 0,
+        "HOLD": 27,
+        "FAULT": 0,
+        "UNKNOWN": 0
+      },
+      "breakdowns": {
+        "robot": {
+          "kuka_iiwa": {
+            "completed_cases": 12,
+            "collision_trials": 9,
+            "safe_completions": 0,
+            "mean_intervention_fraction": 0.7847222222222222
+          },
+          "panda": {
+            "completed_cases": 12,
+            "collision_trials": 9,
+            "safe_completions": 0,
+            "mean_intervention_fraction": 0.5986111111111111
+          },
+          "xarm6": {
+            "completed_cases": 12,
+            "collision_trials": 9,
+            "safe_completions": 0,
+            "mean_intervention_fraction": 0.7847222222222223
+          }
+        },
+        "scenario": {
+          "crossing-v1": {
+            "completed_cases": 9,
+            "collision_trials": 9,
+            "safe_completions": 0,
+            "mean_intervention_fraction": 0.7944444444444444
+          },
+          "narrow-passage-v1": {
+            "completed_cases": 9,
+            "collision_trials": 0,
+            "safe_completions": 0,
+            "mean_intervention_fraction": 0.7814814814814814
+          },
+          "occluded-crossing-v1": {
+            "completed_cases": 9,
+            "collision_trials": 9,
+            "safe_completions": 0,
+            "mean_intervention_fraction": 0.8666666666666667
+          },
+          "sudden-approach-v1": {
+            "completed_cases": 9,
+            "collision_trials": 9,
+            "safe_completions": 0,
+            "mean_intervention_fraction": 0.44814814814814813
+          }
+        }
+      }
+    },
+    "motion-aware-h1-m0": {
+      "method": "motion-aware",
+      "horizon_s": 0.2,
+      "margin_m": 0.01,
+      "expected_cases": 36,
+      "recorded_cases": 36,
+      "completed_cases": 36,
+      "errors": 0,
+      "complete_pair_grid": true,
+      "collision_trials": 27,
+      "contact_episodes": 27,
+      "task_completions": 3,
+      "collision_free_completions": 3,
+      "watchdog_fault_trials": 9,
+      "initial_collision_trials": 0,
+      "observed_collision_fraction": 0.75,
+      "failure_adjusted_safe_completion_fraction": 0.08333333333333333,
+      "mean_intervention_fraction": 0.6638888888888889,
+      "mean_final_joint_error_rad": 0.4434834928814422,
+      "onsets_by_policy_state": {
+        "WAIT": 0,
+        "TRACK": 0,
+        "HOLD": 27,
+        "FAULT": 0,
+        "UNKNOWN": 0
+      },
+      "breakdowns": {
+        "robot": {
+          "kuka_iiwa": {
+            "completed_cases": 12,
+            "collision_trials": 9,
+            "safe_completions": 0,
+            "mean_intervention_fraction": 0.7958333333333333
+          },
+          "panda": {
+            "completed_cases": 12,
+            "collision_trials": 9,
+            "safe_completions": 3,
+            "mean_intervention_fraction": 0.5208333333333334
+          },
+          "xarm6": {
+            "completed_cases": 12,
+            "collision_trials": 9,
+            "safe_completions": 0,
+            "mean_intervention_fraction": 0.6750000000000002
+          }
+        },
+        "scenario": {
+          "crossing-v1": {
+            "completed_cases": 9,
+            "collision_trials": 9,
+            "safe_completions": 0,
+            "mean_intervention_fraction": 0.7962962962962963
+          },
+          "narrow-passage-v1": {
+            "completed_cases": 9,
+            "collision_trials": 0,
+            "safe_completions": 3,
+            "mean_intervention_fraction": 0.5259259259259259
+          },
+          "occluded-crossing-v1": {
+            "completed_cases": 9,
+            "collision_trials": 9,
+            "safe_completions": 0,
+            "mean_intervention_fraction": 0.8851851851851852
+          },
+          "sudden-approach-v1": {
+            "completed_cases": 9,
+            "collision_trials": 9,
+            "safe_completions": 0,
+            "mean_intervention_fraction": 0.44814814814814813
+          }
+        }
+      }
+    },
+    "motion-aware-h1-m1": {
+      "method": "motion-aware",
+      "horizon_s": 0.2,
+      "margin_m": 0.03,
+      "expected_cases": 36,
+      "recorded_cases": 36,
+      "completed_cases": 36,
+      "errors": 0,
+      "complete_pair_grid": true,
+      "collision_trials": 27,
+      "contact_episodes": 27,
+      "task_completions": 0,
+      "collision_free_completions": 0,
+      "watchdog_fault_trials": 9,
+      "initial_collision_trials": 0,
+      "observed_collision_fraction": 0.75,
+      "failure_adjusted_safe_completion_fraction": 0.0,
+      "mean_intervention_fraction": 0.7550925925925925,
+      "mean_final_joint_error_rad": 0.47468627040844,
+      "onsets_by_policy_state": {
+        "WAIT": 0,
+        "TRACK": 0,
+        "HOLD": 27,
+        "FAULT": 0,
+        "UNKNOWN": 0
+      },
+      "breakdowns": {
+        "robot": {
+          "kuka_iiwa": {
+            "completed_cases": 12,
+            "collision_trials": 9,
+            "safe_completions": 0,
+            "mean_intervention_fraction": 0.8194444444444443
+          },
+          "panda": {
+            "completed_cases": 12,
+            "collision_trials": 9,
+            "safe_completions": 0,
+            "mean_intervention_fraction": 0.638888888888889
+          },
+          "xarm6": {
+            "completed_cases": 12,
+            "collision_trials": 9,
+            "safe_completions": 0,
+            "mean_intervention_fraction": 0.8069444444444444
+          }
+        },
+        "scenario": {
+          "crossing-v1": {
+            "completed_cases": 9,
+            "collision_trials": 9,
+            "safe_completions": 0,
+            "mean_intervention_fraction": 0.8555555555555555
+          },
+          "narrow-passage-v1": {
+            "completed_cases": 9,
+            "collision_trials": 0,
+            "safe_completions": 0,
+            "mean_intervention_fraction": 0.7870370370370371
+          },
+          "occluded-crossing-v1": {
+            "completed_cases": 9,
+            "collision_trials": 9,
+            "safe_completions": 0,
+            "mean_intervention_fraction": 0.9222222222222223
+          },
+          "sudden-approach-v1": {
+            "completed_cases": 9,
+            "collision_trials": 9,
+            "safe_completions": 0,
+            "mean_intervention_fraction": 0.4555555555555555
+          }
+        }
+      }
+    },
+    "nominal": {
+      "method": "none",
+      "horizon_s": 0.1,
+      "margin_m": 0.02,
+      "expected_cases": 36,
+      "recorded_cases": 36,
+      "completed_cases": 36,
+      "errors": 0,
+      "complete_pair_grid": true,
+      "collision_trials": 33,
+      "contact_episodes": 33,
+      "task_completions": 12,
+      "collision_free_completions": 3,
+      "watchdog_fault_trials": 9,
+      "initial_collision_trials": 0,
+      "observed_collision_fraction": 0.9166666666666666,
+      "failure_adjusted_safe_completion_fraction": 0.08333333333333333,
+      "mean_intervention_fraction": 0.0,
+      "mean_final_joint_error_rad": 0.3486694716329418,
+      "onsets_by_policy_state": {
+        "WAIT": 0,
+        "TRACK": 33,
+        "HOLD": 0,
+        "FAULT": 0,
+        "UNKNOWN": 0
+      },
+      "breakdowns": {
+        "robot": {
+          "kuka_iiwa": {
+            "completed_cases": 12,
+            "collision_trials": 12,
+            "safe_completions": 0,
+            "mean_intervention_fraction": 0.0
+          },
+          "panda": {
+            "completed_cases": 12,
+            "collision_trials": 9,
+            "safe_completions": 3,
+            "mean_intervention_fraction": 0.0
+          },
+          "xarm6": {
+            "completed_cases": 12,
+            "collision_trials": 12,
+            "safe_completions": 0,
+            "mean_intervention_fraction": 0.0
+          }
+        },
+        "scenario": {
+          "crossing-v1": {
+            "completed_cases": 9,
+            "collision_trials": 9,
+            "safe_completions": 0,
+            "mean_intervention_fraction": 0.0
+          },
+          "narrow-passage-v1": {
+            "completed_cases": 9,
+            "collision_trials": 6,
+            "safe_completions": 3,
+            "mean_intervention_fraction": 0.0
+          },
+          "occluded-crossing-v1": {
+            "completed_cases": 9,
+            "collision_trials": 9,
+            "safe_completions": 0,
+            "mean_intervention_fraction": 0.0
+          },
+          "sudden-approach-v1": {
+            "completed_cases": 9,
+            "collision_trials": 9,
+            "safe_completions": 0,
+            "mean_intervention_fraction": 0.0
+          }
+        }
+      }
+    }
+  },
+  "paired_vs_nominal": {
+    "fixed-horizon-h0-m0": {
+      "seed_clusters": 3,
+      "collision_fraction_delta_vs_nominal": {
+        "mean": -0.16666666666666666,
+        "seed_cluster_95_interval": [
+          -0.16666666666666666,
+          -0.16666666666666666
+        ]
+      },
+      "safe_completion_fraction_delta_vs_nominal": {
+        "mean": 0.0,
+        "seed_cluster_95_interval": [
+          0.0,
+          0.0
+        ]
+      }
+    },
+    "fixed-horizon-h0-m1": {
+      "seed_clusters": 3,
+      "collision_fraction_delta_vs_nominal": {
+        "mean": -0.16666666666666666,
+        "seed_cluster_95_interval": [
+          -0.16666666666666666,
+          -0.16666666666666666
+        ]
+      },
+      "safe_completion_fraction_delta_vs_nominal": {
+        "mean": -0.08333333333333333,
+        "seed_cluster_95_interval": [
+          -0.08333333333333333,
+          -0.08333333333333333
+        ]
+      }
+    },
+    "fixed-horizon-h1-m0": {
+      "seed_clusters": 3,
+      "collision_fraction_delta_vs_nominal": {
+        "mean": -0.16666666666666666,
+        "seed_cluster_95_interval": [
+          -0.16666666666666666,
+          -0.16666666666666666
+        ]
+      },
+      "safe_completion_fraction_delta_vs_nominal": {
+        "mean": 0.0,
+        "seed_cluster_95_interval": [
+          0.0,
+          0.0
+        ]
+      }
+    },
+    "fixed-horizon-h1-m1": {
+      "seed_clusters": 3,
+      "collision_fraction_delta_vs_nominal": {
+        "mean": -0.16666666666666666,
+        "seed_cluster_95_interval": [
+          -0.16666666666666666,
+          -0.16666666666666666
+        ]
+      },
+      "safe_completion_fraction_delta_vs_nominal": {
+        "mean": -0.08333333333333333,
+        "seed_cluster_95_interval": [
+          -0.08333333333333333,
+          -0.08333333333333333
+        ]
+      }
+    },
+    "motion-aware-h0-m0": {
+      "seed_clusters": 3,
+      "collision_fraction_delta_vs_nominal": {
+        "mean": -0.16666666666666666,
+        "seed_cluster_95_interval": [
+          -0.16666666666666666,
+          -0.16666666666666666
+        ]
+      },
+      "safe_completion_fraction_delta_vs_nominal": {
+        "mean": 0.0,
+        "seed_cluster_95_interval": [
+          0.0,
+          0.0
+        ]
+      }
+    },
+    "motion-aware-h0-m1": {
+      "seed_clusters": 3,
+      "collision_fraction_delta_vs_nominal": {
+        "mean": -0.16666666666666666,
+        "seed_cluster_95_interval": [
+          -0.16666666666666666,
+          -0.16666666666666666
+        ]
+      },
+      "safe_completion_fraction_delta_vs_nominal": {
+        "mean": -0.08333333333333333,
+        "seed_cluster_95_interval": [
+          -0.08333333333333333,
+          -0.08333333333333333
+        ]
+      }
+    },
+    "motion-aware-h1-m0": {
+      "seed_clusters": 3,
+      "collision_fraction_delta_vs_nominal": {
+        "mean": -0.16666666666666666,
+        "seed_cluster_95_interval": [
+          -0.16666666666666666,
+          -0.16666666666666666
+        ]
+      },
+      "safe_completion_fraction_delta_vs_nominal": {
+        "mean": 0.0,
+        "seed_cluster_95_interval": [
+          0.0,
+          0.0
+        ]
+      }
+    },
+    "motion-aware-h1-m1": {
+      "seed_clusters": 3,
+      "collision_fraction_delta_vs_nominal": {
+        "mean": -0.16666666666666666,
+        "seed_cluster_95_interval": [
+          -0.16666666666666666,
+          -0.16666666666666666
+        ]
+      },
+      "safe_completion_fraction_delta_vs_nominal": {
+        "mean": -0.08333333333333333,
+        "seed_cluster_95_interval": [
+          -0.08333333333333333,
+          -0.08333333333333333
+        ]
+      }
+    }
+  },
+  "exploratory_pareto_cells": [
+    "fixed-horizon-h0-m0",
+    "nominal"
+  ],
+  "note": "Development-only; incomplete cells excluded from pairing/Pareto. Seed bootstrap is descriptive, especially with few seeds. No best-test setting or statistical superiority is claimed."
+}

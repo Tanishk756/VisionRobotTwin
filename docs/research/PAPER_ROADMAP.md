@@ -21,7 +21,10 @@ measures fitting/validation coverage and exposes undercoverage under motion/dela
 shift. Reliable calibrated uncertainty is not established and remains an open task.
 The [deterministic motion-aware comparator](MOTION_AWARE_BASELINE.md) now
 forecasts the obstacle mean using delivered observations, without covariance
-safety claims. Parameter tuning, ablations and published baselines remain pending.
+safety claims. The first [multi-seed development sweep](BASELINE_SWEEP.md) is complete. It
+identified two static-contact exact targets in v1 and no dynamic avoidance benefit
+after flagging them. Scenario successor/preflight work, controlled ablations,
+strong published baselines and held-out tuning validation remain pending.
 
 ## 1. Research objective and intended contribution
 

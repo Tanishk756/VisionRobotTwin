@@ -23,3 +23,13 @@ Run `python tools/compare_research_baselines.py --modes none fixed-horizon motio
 All 36 retained manifests have a single source snapshot and record dirty source based on commit 65ae625. They embed resolved scenarios, seeds, controller parameters and source hashes. Raw traces/events/estimates/predictions/decisions remain locally under ignored `experiments/motion-aware-development/`; summaries retain raw-trace hashes. Use `decisions.json` for the actual motion-aware policy estimate, which may differ from the separate logging estimator.
 
 Next: development parameter sweeps and additional paired seeds, stronger stopping/avoidance behavior, and a suitable published comparator. Neither formal safety, a new research contribution nor hardware validity is established.
+
+## Later benchmark interpretation note (2026-10-14)
+
+A subsequent evaluator-only audit found that the KUKA and xArm narrow-passage
+exact target configurations intersect static fixtures. Original measurements,
+scenes and denominators are retained. Incomplete tasks at those exact targets
+must not be attributed solely to controller limitations, and their refused
+contacts must not be counted as demonstrated improvement in dynamic avoidance.
+The audit does not prove infeasibility of the whole target tolerance region.
+See the [multi-seed sweep and endpoint diagnosis](../2026-10-14-baseline-sweep-v1/REPORT.md).

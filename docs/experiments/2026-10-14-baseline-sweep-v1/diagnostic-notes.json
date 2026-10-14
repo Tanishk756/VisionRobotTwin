@@ -1,0 +1,61 @@
+{
+  "blocked_exact_targets": [
+    [
+      "kuka_iiwa",
+      "narrow-passage-v1"
+    ],
+    [
+      "xarm6",
+      "narrow-passage-v1"
+    ]
+  ],
+  "endpoint_free_subgroup": {
+    "fixed-horizon-h0-m0": {
+      "trials": 30,
+      "contact_trials": 27,
+      "safe_completions": 3
+    },
+    "fixed-horizon-h0-m1": {
+      "trials": 30,
+      "contact_trials": 27,
+      "safe_completions": 0
+    },
+    "fixed-horizon-h1-m0": {
+      "trials": 30,
+      "contact_trials": 27,
+      "safe_completions": 3
+    },
+    "fixed-horizon-h1-m1": {
+      "trials": 30,
+      "contact_trials": 27,
+      "safe_completions": 0
+    },
+    "motion-aware-h0-m0": {
+      "trials": 30,
+      "contact_trials": 27,
+      "safe_completions": 3
+    },
+    "motion-aware-h0-m1": {
+      "trials": 30,
+      "contact_trials": 27,
+      "safe_completions": 0
+    },
+    "motion-aware-h1-m0": {
+      "trials": 30,
+      "contact_trials": 27,
+      "safe_completions": 3
+    },
+    "motion-aware-h1-m1": {
+      "trials": 30,
+      "contact_trials": 27,
+      "safe_completions": 0
+    },
+    "nominal": {
+      "trials": 30,
+      "contact_trials": 27,
+      "safe_completions": 3
+    }
+  },
+  "interpretation": "Post-hoc exact-endpoint geometry diagnostic; original denominators retained. Does not prove dynamic path feasibility or infeasibility of goal tolerance regions.",
+  "policy_query_or_estimator_failure_trials": []
+}

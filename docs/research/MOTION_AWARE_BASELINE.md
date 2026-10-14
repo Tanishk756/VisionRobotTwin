@@ -82,3 +82,6 @@ motion/age/filtering ablations, stopping-model identification and a compatible
 published comparator. A defensible novel method still requires the open G0 review.
 
 [Recorded development results](../experiments/2026-10-14-motion-aware-baseline/REPORT.md).
+
+The next [paired horizon/margin sweep](BASELINE_SWEEP.md) varies development
+settings with the same robot/scenario/seed pairs and preserves failures.
