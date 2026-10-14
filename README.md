@@ -64,6 +64,8 @@ Research development: [paper contribution roadmap and task plan](docs/research/P
 
 Initial research work: [proposal](docs/research/PROPOSAL.md), [related-work audit](docs/research/RELATED_WORK.md), and [independent plant/twin testbed](docs/research/TESTBED.md).
 
+Development experiments: [versioned scenarios and fixed-horizon comparison](docs/research/BASELINE_SCENARIOS.md).
+
 Press **G** to close or **O** to open a supported gripper. Runtime arm commands
 are checked against sampled collision paths; velocity commands use a 100 ms
 lookahead. Each simulation physics step checks measured clearance before and

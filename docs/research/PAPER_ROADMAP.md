@@ -12,6 +12,10 @@ not completion of all WP1/WP2 tasks or a novel predictive safety method.
 The testbed now also includes command expiry, latched telemetry/command
 watchdogs, queue cancellation on reset, and a nominal command-history/FK
 prediction API. Dynamic rollout validation and robust prediction remain pending.
+Versioned development scenarios, observation-only whole-arm candidate queries,
+and the first fixed-horizon comparator are implemented; see
+[the baseline guide](BASELINE_SCENARIOS.md). Published-method reproduction,
+uncertainty calibration and held-out evaluation remain pending.
 
 ## 1. Research objective and intended contribution
 

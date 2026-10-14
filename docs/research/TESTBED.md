@@ -144,8 +144,9 @@ for short development trials, not large-scale evaluation.
 
 ## Remaining before G1 / comparative research
 
-Add versioned scenario loading, identified stopping/dynamics models, an
-observation-only collision query interface, image-based observations, calibrated
+Versioned scenarios, an observation-only whole-arm collision query and a first
+fixed-horizon comparator are now available; see [scenario/baseline guide](BASELINE_SCENARIOS.md).
+Add identified stopping/dynamics models, image-based observations, calibrated
 uncertainty, stronger evaluator convergence checks,
 and a verified literature baseline. The first infrastructure tests do not close
 G0 or establish the complete G1 research benchmark.

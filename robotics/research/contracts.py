@@ -115,3 +115,4 @@ class TrialRecord:
     in_collision: bool
     obstacle_clearance_m: float
     execution_fault: str | None = None
+    environment_clearance_m: float = float("inf")

@@ -1,0 +1,32 @@
+{
+  "purpose": "development engineering comparator",
+  "baseline": "fixed-horizon",
+  "scenario_id": "occluded-crossing-v1",
+  "records": 481,
+  "contact_samples": 198,
+  "contact_episodes": 1,
+  "initial_in_collision": false,
+  "minimum_obstacle_clearance_m": -0.03503625591795023,
+  "delivered_observations": 40,
+  "dropped_observations": 6,
+  "expired_commands": 0,
+  "execution_faults": [
+    {
+      "kind": "execution_fault",
+      "reason": "telemetry_timeout",
+      "time_s": 0.9333333333333333,
+      "cancelled_commands": 2
+    }
+  ],
+  "occluded_observations": 12,
+  "minimum_environment_clearance_m": -0.03503625591795023,
+  "intervention_fraction": 0.8,
+  "final_joint_error_rad": 0.27656168929070113,
+  "completion_time_s": null,
+  "task_completed": false,
+  "collision_free_task_completed": false,
+  "decision_time_p95_ms": 11.317720003717112,
+  "control_period_s": 0.03333333333333333,
+  "control_deadline_misses": 0,
+  "trace_sha256": "767bd86c37addb78b4114d01388feab66c64f572c5d0906da23b10b6bcce660e"
+}

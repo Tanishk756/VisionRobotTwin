@@ -12,7 +12,7 @@ import numpy as np
 import pybullet as p
 
 from config.settings import AppConfig
-from robotics.research.contracts import Observation, ScenarioConfig, TrialRecord, VelocityCommand
+from robotics.research.contracts import Observation, ScenarioConfig, TrialRecord, VelocityCommand, nonnegative
 from robotics.research.transport import EventQueue
 from robotics.simulator import PyBulletSimulator
 from robotics.robot_registry import get_robot_registry
@@ -29,10 +29,23 @@ class ControllerView:
     execution_fault: str | None = None
 
 
+@dataclass(frozen=True)
+class MotionClearance:
+    clear: bool
+    minimum_environment_clearance_m: float
+    minimum_self_clearance_m: float
+    joint_limit_violation: bool
+    samples_checked: int
+
+
 class PlantTwinHarness:
-    def __init__(self, config: ScenarioConfig):
+    def __init__(self, config: ScenarioConfig, scenario=None):
         get_robot_registry().get_robot_spec(config.robot)
         self.config = config
+        if scenario is not None and scenario.config != config:
+            raise ValueError("Resolved scenario and harness configuration must agree")
+        self._scenario = scenario
+        self._anchor = np.zeros(3)
         self._plant = self._twin = None
         self._closed = False
         self._tick = 0
@@ -55,6 +68,8 @@ class PlantTwinHarness:
         try:
             self._plant = self._make_world(config.plant_velocity_gain)
             self._twin = self._make_world(1.0)
+            if scenario is not None and scenario.frame == "nominal_home_ee":
+                self._anchor = self._twin.kinematics_provider.compute_fk(self._twin.robot_spec.home_joint_positions)[0]
             for link in range(-1, p.getNumJoints(self._plant.robot_id, physicsClientId=self._plant.client_id)):
                 mass = p.getDynamicsInfo(self._plant.robot_id, link, physicsClientId=self._plant.client_id)[0]
                 if mass > 0:
@@ -62,6 +77,10 @@ class PlantTwinHarness:
                                      physicsClientId=self._plant.client_id)
             self._plant_obstacle = self._make_obstacle(self._plant)
             self._twin_obstacle = self._make_obstacle(self._twin)
+            if scenario is not None:
+                for world in (self._plant, self._twin):
+                    for x, y, z, radius in scenario.fixtures:
+                        self._make_sphere(world, np.array((x, y, z)) + self._anchor, radius)
         except Exception:
             self.close()
             raise
@@ -74,13 +93,65 @@ class PlantTwinHarness:
         return PyBulletSimulator(app, headless=True)
 
     def _make_obstacle(self, world):
-        shape = p.createCollisionShape(p.GEOM_SPHERE, radius=self.config.obstacle_radius_m,
+        return self._make_sphere(world, self._obstacle_position(0), self.config.obstacle_radius_m)
+
+    def _make_sphere(self, world, position, radius):
+        shape = p.createCollisionShape(p.GEOM_SPHERE, radius=radius,
                                        physicsClientId=world.client_id)
         body = p.createMultiBody(baseMass=0, baseCollisionShapeIndex=shape,
-                                 basePosition=self.config.obstacle_origin_m,
+                                 basePosition=position,
                                  physicsClientId=world.client_id)
         world.collision_provider.obstacle_ids.append(body)
         return body
+
+    def _obstacle_position(self, time_s):
+        if self._scenario is not None:
+            return self._scenario.position(time_s, self._anchor)
+        return np.array(self.config.obstacle_origin_m) + time_s * np.array(self.config.obstacle_velocity_m_s)
+
+    def _nominal_intent(self, command, first_delivery_deadline=None):
+        def quantize(value):
+            return math.ceil(value * self.config.physics_hz - 1e-12) / self.config.physics_hz
+        base, jitter = self.config.command_delay_s, self.config.command_jitter_s
+        return CommandIntent(command, quantize(self.time_s + base),
+            quantize(self.time_s + max(0, base - jitter)), quantize(self.time_s + base + jitter),
+            quantize(self.time_s + base) + self.config.command_watchdog_s, first_delivery_deadline)
+
+    def check_candidate_motion(self, velocities, horizon_s=0.1, step_s=0.02,
+                               environment_margin_m=0.02, self_margin_m=0.0):
+        """Whole-arm sampled query against the last observed obstacle, frozen.
+
+        Include submitted commands in flight and a hypothetical new command.
+        Neither query transport RNG nor reveal scenario trajectory/plant truth.
+        Margins are capped at the provider's guaranteed 0.5 m query radius.
+        """
+        self._require_open()
+        if self._fault is not None or not self._fresh_telemetry():
+            raise RuntimeError("Collision query requires fresh telemetry and no execution fault")
+        for margin in (environment_margin_m, self_margin_m):
+            nonnegative("clearance margin", margin)
+            if margin > 0.5:
+                raise ValueError("Research query margin exceeds 0.5 m")
+        command = VelocityCommand(self._command_sequence, self.time_s, velocities,
+                                  self.time_s + self.config.command_lifetime_s)
+        model = self._twin.resolved_model
+        if len(command.velocities_rad_s) != model.dof or any(abs(v) > limit for v, limit in zip(command.velocities_rad_s, model.arm_max_velocities)):
+            raise ValueError("Candidate exceeds model velocity dimensions/limits")
+        first = self.time_s + self.config.command_watchdog_s if self._first_submission_s is None else None
+        intents = (*self._history, self._nominal_intent(command, first))
+        states = predict_joint_motion(self._latest, intents, self.time_s, horizon_s, step_s,
+                                      model.arm_lower_limits, model.arm_upper_limits)
+        min_env = min_self = math.inf
+        clear = True
+        limit = False
+        for state in states:
+            result = self._twin.collision_provider.check_collision(state.joint_positions)
+            min_env = min(min_env, result.min_env_clearance_m)
+            min_self = min(min_self, result.min_self_clearance_m)
+            limit |= state.joint_limit_violation
+            clear &= not result.in_collision
+        return MotionClearance(bool(clear and not limit and min_env >= environment_margin_m
+                                    and min_self >= self_margin_m), min_env, min_self, limit, len(states))
 
     @property
     def time_s(self):
@@ -187,13 +258,7 @@ class PlantTwinHarness:
         if self._first_submission_s is None:
             self._first_submission_s = self.time_s
             first_delivery_deadline = self.time_s + self.config.command_watchdog_s
-        def quantize(value):
-            return math.ceil(value * self.config.physics_hz - 1e-12) / self.config.physics_hz
-        base = self.config.command_delay_s
-        jitter = self.config.command_jitter_s
-        self._history.append(CommandIntent(command, quantize(self.time_s + base),
-            quantize(self.time_s + max(0, base - jitter)), quantize(self.time_s + base + jitter),
-            quantize(self.time_s + base) + self.config.command_watchdog_s, first_delivery_deadline))
+        self._history.append(self._nominal_intent(command, first_delivery_deadline))
         self.events.append({"kind": "command_submitted", "sequence": command.sequence,
                             "time_s": self.time_s, "scheduled_time_s": self.time_s + delay,
                             "velocities_rad_s": command.velocities_rad_s,
@@ -204,6 +269,9 @@ class PlantTwinHarness:
     def _capture(self, obstacle_position):
         sequence = self._observation_sequence
         self._observation_sequence += 1
+        if self._scenario is not None and self._scenario.occluded(self.time_s):
+            self.events.append({"kind": "observation_occluded", "sequence": sequence, "time_s": self.time_s})
+            return
         if self._observation_rng.random() < self.config.dropout_probability:
             self.events.append({"kind": "observation_dropped", "sequence": sequence, "time_s": self.time_s})
             return
@@ -226,7 +294,7 @@ class PlantTwinHarness:
         step evaluates the state resulting from this integration.
         """
         self._require_open()
-        obstacle = np.array(self.config.obstacle_origin_m) + self.time_s * np.array(self.config.obstacle_velocity_m_s)
+        obstacle = self._obstacle_position(self.time_s)
         p.resetBasePositionAndOrientation(self._plant_obstacle, obstacle, (0, 0, 0, 1), physicsClientId=self._plant.client_id)
         if self._tick % self.config.sensor_stride == 0:
             self._capture(obstacle)
@@ -284,7 +352,7 @@ class PlantTwinHarness:
         # Only the plant advances dynamically. Twin queries cannot step the plant.
         p.stepSimulation(physicsClientId=self._plant.client_id)
         self._tick += 1
-        next_position = np.array(self.config.obstacle_origin_m) + self.time_s * np.array(self.config.obstacle_velocity_m_s)
+        next_position = self._obstacle_position(self.time_s)
         p.resetBasePositionAndOrientation(self._plant_obstacle, next_position, (0, 0, 0, 1),
                                           physicsClientId=self._plant.client_id)
         return record
@@ -304,7 +372,7 @@ class PlantTwinHarness:
                            self._latest.sequence if self._latest else None,
                            self.time_s - self._latest.capture_time_s if self._latest else None,
                            self._applied_sequence if self._applied_sequence >= 0 else None,
-                           result.in_collision, clearance, self._fault)
+                           result.in_collision, clearance, self._fault, result.min_env_clearance_m)
 
     def close(self):
         if not self._closed:

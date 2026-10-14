@@ -1,0 +1,173 @@
+{
+  "config": {
+    "robot": "xarm6",
+    "seed": 0,
+    "physics_hz": 240,
+    "sensor_stride": 8,
+    "duration_s": 2.0,
+    "observation_delay_s": 0.08,
+    "observation_jitter_s": 0.02,
+    "command_delay_s": 0.04,
+    "command_jitter_s": 0.01,
+    "dropout_probability": 0.1,
+    "joint_noise_std_rad": 0.001,
+    "obstacle_noise_std_m": 0.003,
+    "plant_mass_scale": 1.2,
+    "plant_velocity_gain": 0.8,
+    "obstacle_origin_m": [
+      0.45,
+      -0.3,
+      0.35
+    ],
+    "obstacle_velocity_m_s": [
+      0.0,
+      0.2,
+      0.0
+    ],
+    "obstacle_radius_m": 0.03,
+    "command_lifetime_s": 0.15,
+    "command_watchdog_s": 0.15,
+    "telemetry_watchdog_s": 0.3,
+    "startup_timeout_s": 0.3
+  },
+  "python": "3.12.10",
+  "platform": "Windows-11-10.0.26300-SP0",
+  "git_head": "7fe98375c04d1328f372c93d3797965d89f0c72d",
+  "working_tree_status": "M README.md\n M docs/research/TESTBED.md\n M robotics/research/contracts.py\n M robotics/research/plant_twin.py\n M tools/run_plant_twin_experiment.py\n?? config/research_scenarios/\n?? docs/research/BASELINE_SCENARIOS.md\n?? robotics/research/baseline.py\n?? robotics/research/scenarios.py\n?? tests/test_research_scenarios_baseline.py\n?? tools/compare_research_baselines.py",
+  "timestamp_utc": "2026-10-14T08:53:11.384487+00:00",
+  "dependencies": {
+    "numpy": "2.2.6",
+    "pybullet": "3.2.7"
+  },
+  "source_sha256": "8d16d4afd8021aba91d10f999847fba6689275d20664dda12906c1a053ffa172",
+  "source_files_sha256": {
+    "robotics/__init__.py": "634bf6c7497f2507055913f28f21fb297ca9401adfe1bcdae203ecf5e847b27a",
+    "robotics/adapters/__init__.py": "180dbed3d914efa10a219ac899cf1c4a6dde4e3117f0f5d1941df7a3914cc1f9",
+    "robotics/adapters/base.py": "eb7bbd09bb01a78a38500f587361a2ccaf9d8b2aecd202cd74779d60eb53fe34",
+    "robotics/adapters/kuka_iiwa.py": "0e2f6e9eb098b9b4b4403fc0ae59df0bfd53c6d214560579e67cf761647853ed",
+    "robotics/adapters/panda.py": "b4bd884f161d32da2a36bd11e2eb6efb72c232f3c08c87d19fd8b8d8ff8d2d43",
+    "robotics/adapters/xarm6.py": "1c4f322ed13bf3cb7d7a0783ea88601e9df81850b709b32dd9025ed62870c3d1",
+    "robotics/backends/__init__.py": "2770577c9053237fd136fc024fd0e536266930f5682d058101ce91b4c0e9f704",
+    "robotics/backends/base.py": "b56c1aeefb1c7c37d4c6fa4577976168f954f3fa58de4c7af53a7a05ef414de4",
+    "robotics/backends/commissioning_session.py": "2826378c1713942f09158aa5e0590842e1da281d0554dc382d92993cae8ffc13",
+    "robotics/backends/mock_backend.py": "e4bec08e9e27294889e363ffbad62bf1f20f7e2e84397069151c3bfc6cf36539",
+    "robotics/backends/physical_identity.py": "8c2d9ea5b71cd257c97a9ee1e62f7f327fc362c0dab16737f16352370278b26a",
+    "robotics/backends/physical_readiness.py": "c02ad2d416b4c7961d871699363bc6ab614690a9488faf44a970b255baa75b2e",
+    "robotics/backends/physical_state_backend.py": "da65e109f6225492cc4d53c3368029d60544660e6355ececf124b34d6b92674a",
+    "robotics/backends/physical_validation.py": "f7f352262afa8c3dc5305bb1f68aac69658930252d93b8d4e9e95fae520dd226",
+    "robotics/backends/pybullet_backend.py": "51e086cc47292994e827fd0c20bd96c020282090c921053dd197741638c38221",
+    "robotics/backends/ros2_joint_state_backend.py": "a4ab1cad996992e5d923f7687c2487912259988e2b61dd6a7369953a5f92f2e4",
+    "robotics/backends/ros2_simulation_backend.py": "61fba56579b73cf6e466d6fcbda5f9178cf0ca15d1cfb760dcad82e0e9f0df05",
+    "robotics/backends/ros2_state_mapping.py": "b55e8f9ef5705c0ac77668ab656a8535cb892d0ceee6ac239ad2243ad408be3a",
+    "robotics/collision.py": "b72a8ff18dd0d542574dfacd632fd5a6eb1702589dccf2007c6a3939adeb07be",
+    "robotics/collision_provider.py": "1eaf0ea3780ddead6208c2dddb283d2969abd819465e4df770ab2e3e52fed9bc",
+    "robotics/coordinate_transform.py": "d77024977d708a4ae4a046297e8f036ab28b8e8b12cac04ac7b446cc4217934d",
+    "robotics/differential_ik.py": "c6447a097f2aa6021a4e54944f59b494171342269bc00ae2fddb819eb247073e",
+    "robotics/execution_collision.py": "2112b549ebcc29c6dac1dac107d2b26d89e041a0cd56a7372d678d14d7b0be96",
+    "robotics/experiments.py": "d4e84296a300bfaef25ddf74ff26a98802299dd8688010c01a90112dcbd08144",
+    "robotics/gripper.py": "32afb468834a8b5d71e0a83aa7d1b1d70f9a1faa433db6c7130c6e2c7ab6ab30",
+    "robotics/inverse_kinematics.py": "d46e5bc3c15f55eef8c2caa71b548f9dda2b98fb73f1ba8bf4111b2c17b4cc32",
+    "robotics/kinematics.py": "ca2efd50152454efac3535de20ddc839395acdcd24789d85f3805309cf5945da",
+    "robotics/kinematics_provider.py": "0496b81d9b8544bf8c73a5eac7bce7fa2c70610a89625087eb685c86c1bd4394",
+    "robotics/motion_manager.py": "e0cbc91764a148830917662e1d02223dee31668f89c8e23345141e290235f161",
+    "robotics/planning.py": "cac9e1c40f80a7c60ab48d03116546a9dc7c45d7bdc88a1f12aac15ca893be8d",
+    "robotics/pybullet_model.py": "e33af4bdd47f46ed2776a641ee98e26894183e0432865a7787950e85d3b28957",
+    "robotics/research/__init__.py": "8ce1ffd4e086d46b09f85d40cf3e6a2435ddce7d974fc9a71571b88a57bc2df5",
+    "robotics/research/baseline.py": "7636f2a36db7deb883113f376e35cacb594b1d187d40429a6dab04da34b66d61",
+    "robotics/research/contracts.py": "a687ddb8be60a32ddf0e9a66a27749bf7aa4f1afba68f0815d7fcbe63eacb234",
+    "robotics/research/estimation.py": "7586cae97d5bb64db9181a0c8786c6da990f83bae2441ddc0109175dc0b665a7",
+    "robotics/research/plant_twin.py": "fb980e65f9d369932d4c02f192b88398005cfd66032e48bc0b3d31781fc95dc6",
+    "robotics/research/prediction.py": "90a3d470041933c42fe3ae9abfdd57b5f371017bc96103ce4e6409271fb05fd4",
+    "robotics/research/scenarios.py": "cc22a8adf68116b41c7064f715c4ad903ac3e761dae162984c6e6e4ec8b083b4",
+    "robotics/research/transport.py": "9533381a133b32783a80442c618c200bfec6f0e302dee731960b379ae6c32e1c",
+    "robotics/robot_controller.py": "34f81509d74ab6e7955d68075ee16e039bc0dd943d41aa87a63bbab68d959eb2",
+    "robotics/robot_model.py": "610e9319f48300df040dae61184ce6ac4ea0497deaf1bb3c8d50d53e625aa99d",
+    "robotics/robot_registry.py": "8c492f8dd556656be4185f38b632e7b79ea1991bdb44a89dbd0b69a5e25e22e5",
+    "robotics/robustness.py": "dbe79a08c74603f4af7af91dfdca7a1b1a3afb0cfeb190601b3cd270083c0cfb",
+    "robotics/ros2_control_readiness.py": "407efc1bf646404222e6236db668948dd7cdc80b1586ea8d1861b809dc50cee7",
+    "robotics/safety.py": "0773c44b14380e671ef9cc96a7e2fbbe2cc4dfbf5a32222b442871823e5c5066",
+    "robotics/simulator.py": "483dc39bf1b4c537a9da895df6c09714bbd61f260f64a858a089a75b617a6f01",
+    "robotics/state_machine.py": "f0720285e4761030e0d0e5c3631168a914ae31626d5797ea2985759d2a14d607",
+    "robotics/trajectory.py": "eb41ea82f38ae6dc7fa4be5f711ede5c553654bd4103ef9dc847c1e27a626649",
+    "robotics/workspace_mapper.py": "38ba4c12aeb945e974a29840afb1f01a5b727a269b0e1d091408a5e62cc33382",
+    "config/settings.py": "14fbe0b3309af0f285196b562bd322582d2ea17211b408a66b3373322528eadb",
+    "tools/run_plant_twin_experiment.py": "5e848248a0284c99804d25838394a5676ad432bf23b35f1b2d36b55b6bc58c6d"
+  },
+  "scenario": {
+    "scenario_id": "narrow-passage-v1",
+    "split": "development",
+    "config": {
+      "robot": "xarm6",
+      "seed": 0,
+      "physics_hz": 240,
+      "sensor_stride": 8,
+      "duration_s": 2.0,
+      "observation_delay_s": 0.08,
+      "observation_jitter_s": 0.02,
+      "command_delay_s": 0.04,
+      "command_jitter_s": 0.01,
+      "dropout_probability": 0.1,
+      "joint_noise_std_rad": 0.001,
+      "obstacle_noise_std_m": 0.003,
+      "plant_mass_scale": 1.2,
+      "plant_velocity_gain": 0.8,
+      "obstacle_origin_m": [
+        0.45,
+        -0.3,
+        0.35
+      ],
+      "obstacle_velocity_m_s": [
+        0.0,
+        0.2,
+        0.0
+      ],
+      "obstacle_radius_m": 0.03,
+      "command_lifetime_s": 0.15,
+      "command_watchdog_s": 0.15,
+      "telemetry_watchdog_s": 0.3,
+      "startup_timeout_s": 0.3
+    },
+    "frame": "nominal_home_ee",
+    "waypoints": [
+      [
+        0.0,
+        0.0,
+        0.4,
+        0.0
+      ]
+    ],
+    "occlusions": [],
+    "fixtures": [
+      [
+        0.12,
+        0.1,
+        0.0,
+        0.06
+      ],
+      [
+        -0.12,
+        0.1,
+        0.0,
+        0.06
+      ]
+    ],
+    "target_delta_first_joint_rad": 0.35,
+    "schema_version": 1
+  },
+  "comparator": {
+    "name": "fixed-horizon",
+    "horizon_s": 0.1,
+    "margin_m": 0.02,
+    "control_stride": 8,
+    "recovery_observations": 3,
+    "recovery_margin_m": 0.005,
+    "minimum_hold_s": 0.1
+  },
+  "limitations": [
+    "pose-level sensing",
+    "uncalibrated estimator",
+    "discrete collision evaluation",
+    "frozen observed obstacle in baseline",
+    "engineering comparator, no novel safety filter or physical robot"
+  ]
+}
