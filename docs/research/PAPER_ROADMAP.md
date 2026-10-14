@@ -16,6 +16,9 @@ Versioned development scenarios, observation-only whole-arm candidate queries,
 and the first fixed-horizon comparator are implemented; see
 [the baseline guide](BASELINE_SCENARIOS.md). Published-method reproduction,
 uncertainty calibration and held-out evaluation remain pending.
+The first [uncertainty calibration diagnostic](UNCERTAINTY_CALIBRATION.md) now
+measures fitting/validation coverage and exposes undercoverage under motion/delay
+shift. Reliable calibrated uncertainty is not established and remains an open task.
 
 ## 1. Research objective and intended contribution
 

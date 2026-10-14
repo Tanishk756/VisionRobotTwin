@@ -1,0 +1,7 @@
+{
+  "schema_version": 1, "scenario_id": "fit-occlusion-v1", "split": "calibration",
+  "config": {"duration_s": 3.0, "obstacle_noise_std_m": 0.005, "observation_delay_s": 0.12, "observation_jitter_s": 0.04},
+  "frame": "world",
+  "waypoints": [[0, 0.4, -0.2, 0.4], [3, 0.7, 0.25, 0.55]],
+  "occlusions": [[1.0, 1.35]]
+}

@@ -1,0 +1,327 @@
+{
+  "timestamp_utc": "2026-10-14T09:30:15.793823+00:00",
+  "git_head": "8da310e2adf8db5a74dff96e5aa86bd1f54776c4",
+  "working_tree_status": "?? config/research_calibration/\n?? robotics/research/calibration.py\n?? tests/test_obstacle_calibration.py\n?? tools/calibrate_obstacle_estimator.py",
+  "source_files_sha256": {
+    "robotics/research/__init__.py": "8ce1ffd4e086d46b09f85d40cf3e6a2435ddce7d974fc9a71571b88a57bc2df5",
+    "robotics/research/baseline.py": "7636f2a36db7deb883113f376e35cacb594b1d187d40429a6dab04da34b66d61",
+    "robotics/research/calibration.py": "4c59752daafa693117b1c9cb676fa50740606344a7cc69e4f79b1eb7d83b71c2",
+    "robotics/research/contracts.py": "a687ddb8be60a32ddf0e9a66a27749bf7aa4f1afba68f0815d7fcbe63eacb234",
+    "robotics/research/estimation.py": "7586cae97d5bb64db9181a0c8786c6da990f83bae2441ddc0109175dc0b665a7",
+    "robotics/research/plant_twin.py": "fb980e65f9d369932d4c02f192b88398005cfd66032e48bc0b3d31781fc95dc6",
+    "robotics/research/prediction.py": "90a3d470041933c42fe3ae9abfdd57b5f371017bc96103ce4e6409271fb05fd4",
+    "robotics/research/scenarios.py": "cc22a8adf68116b41c7064f715c4ad903ac3e761dae162984c6e6e4ec8b083b4",
+    "robotics/research/transport.py": "9533381a133b32783a80442c618c200bfec6f0e302dee731960b379ae6c32e1c",
+    "tools/calibrate_obstacle_estimator.py": "5b09656d4247fab434e6870b933b2398bf59e33f9338ae17c0666f122a34ec3e"
+  },
+  "python": "3.12.10",
+  "platform": "Windows-11-10.0.26300-SP0",
+  "dependencies": {
+    "numpy": "2.2.6",
+    "scipy": "1.14.1"
+  },
+  "fit_scenarios": [
+    {
+      "scenario_id": "fit-linear-v1",
+      "split": "calibration",
+      "config": {
+        "robot": "panda",
+        "seed": 0,
+        "physics_hz": 240,
+        "sensor_stride": 8,
+        "duration_s": 3.0,
+        "observation_delay_s": 0.08,
+        "observation_jitter_s": 0.02,
+        "command_delay_s": 0.04,
+        "command_jitter_s": 0.01,
+        "dropout_probability": 0.1,
+        "joint_noise_std_rad": 0.001,
+        "obstacle_noise_std_m": 0.005,
+        "plant_mass_scale": 1.2,
+        "plant_velocity_gain": 0.8,
+        "obstacle_origin_m": [
+          0.45,
+          -0.3,
+          0.35
+        ],
+        "obstacle_velocity_m_s": [
+          0.0,
+          0.2,
+          0.0
+        ],
+        "obstacle_radius_m": 0.05,
+        "command_lifetime_s": 0.15,
+        "command_watchdog_s": 0.15,
+        "telemetry_watchdog_s": 0.3,
+        "startup_timeout_s": 0.3
+      },
+      "frame": "world",
+      "waypoints": [
+        [
+          0.0,
+          0.4,
+          -0.3,
+          0.4
+        ],
+        [
+          3.0,
+          0.7,
+          0.3,
+          0.5
+        ]
+      ],
+      "occlusions": [],
+      "fixtures": [],
+      "target_delta_first_joint_rad": 0.35,
+      "schema_version": 1
+    },
+    {
+      "scenario_id": "fit-occlusion-v1",
+      "split": "calibration",
+      "config": {
+        "robot": "panda",
+        "seed": 0,
+        "physics_hz": 240,
+        "sensor_stride": 8,
+        "duration_s": 3.0,
+        "observation_delay_s": 0.12,
+        "observation_jitter_s": 0.04,
+        "command_delay_s": 0.04,
+        "command_jitter_s": 0.01,
+        "dropout_probability": 0.1,
+        "joint_noise_std_rad": 0.001,
+        "obstacle_noise_std_m": 0.005,
+        "plant_mass_scale": 1.2,
+        "plant_velocity_gain": 0.8,
+        "obstacle_origin_m": [
+          0.45,
+          -0.3,
+          0.35
+        ],
+        "obstacle_velocity_m_s": [
+          0.0,
+          0.2,
+          0.0
+        ],
+        "obstacle_radius_m": 0.05,
+        "command_lifetime_s": 0.15,
+        "command_watchdog_s": 0.15,
+        "telemetry_watchdog_s": 0.3,
+        "startup_timeout_s": 0.3
+      },
+      "frame": "world",
+      "waypoints": [
+        [
+          0.0,
+          0.4,
+          -0.2,
+          0.4
+        ],
+        [
+          3.0,
+          0.7,
+          0.25,
+          0.55
+        ]
+      ],
+      "occlusions": [
+        [
+          1.0,
+          1.35
+        ]
+      ],
+      "fixtures": [],
+      "target_delta_first_joint_rad": 0.35,
+      "schema_version": 1
+    }
+  ],
+  "validation_scenarios": [
+    {
+      "scenario_id": "validation-delay-v1",
+      "split": "calibration",
+      "config": {
+        "robot": "panda",
+        "seed": 0,
+        "physics_hz": 240,
+        "sensor_stride": 8,
+        "duration_s": 3.0,
+        "observation_delay_s": 0.18,
+        "observation_jitter_s": 0.08,
+        "command_delay_s": 0.04,
+        "command_jitter_s": 0.01,
+        "dropout_probability": 0.2,
+        "joint_noise_std_rad": 0.001,
+        "obstacle_noise_std_m": 0.008,
+        "plant_mass_scale": 1.2,
+        "plant_velocity_gain": 0.8,
+        "obstacle_origin_m": [
+          0.45,
+          -0.3,
+          0.35
+        ],
+        "obstacle_velocity_m_s": [
+          0.0,
+          0.2,
+          0.0
+        ],
+        "obstacle_radius_m": 0.05,
+        "command_lifetime_s": 0.15,
+        "command_watchdog_s": 0.15,
+        "telemetry_watchdog_s": 0.3,
+        "startup_timeout_s": 0.3
+      },
+      "frame": "world",
+      "waypoints": [
+        [
+          0.0,
+          0.4,
+          -0.3,
+          0.4
+        ],
+        [
+          0.9,
+          0.6,
+          -0.1,
+          0.45
+        ],
+        [
+          1.3,
+          0.45,
+          0.1,
+          0.5
+        ],
+        [
+          3.0,
+          0.7,
+          0.25,
+          0.4
+        ]
+      ],
+      "occlusions": [
+        [
+          1.1,
+          1.6
+        ]
+      ],
+      "fixtures": [],
+      "target_delta_first_joint_rad": 0.35,
+      "schema_version": 1
+    },
+    {
+      "scenario_id": "validation-turn-v1",
+      "split": "calibration",
+      "config": {
+        "robot": "panda",
+        "seed": 0,
+        "physics_hz": 240,
+        "sensor_stride": 8,
+        "duration_s": 3.0,
+        "observation_delay_s": 0.08,
+        "observation_jitter_s": 0.02,
+        "command_delay_s": 0.04,
+        "command_jitter_s": 0.01,
+        "dropout_probability": 0.1,
+        "joint_noise_std_rad": 0.001,
+        "obstacle_noise_std_m": 0.005,
+        "plant_mass_scale": 1.2,
+        "plant_velocity_gain": 0.8,
+        "obstacle_origin_m": [
+          0.45,
+          -0.3,
+          0.35
+        ],
+        "obstacle_velocity_m_s": [
+          0.0,
+          0.2,
+          0.0
+        ],
+        "obstacle_radius_m": 0.05,
+        "command_lifetime_s": 0.15,
+        "command_watchdog_s": 0.15,
+        "telemetry_watchdog_s": 0.3,
+        "startup_timeout_s": 0.3
+      },
+      "frame": "world",
+      "waypoints": [
+        [
+          0.0,
+          0.5,
+          -0.25,
+          0.4
+        ],
+        [
+          0.8,
+          0.5,
+          0.15,
+          0.4
+        ],
+        [
+          1.2,
+          0.7,
+          -0.05,
+          0.5
+        ],
+        [
+          2.0,
+          0.4,
+          -0.2,
+          0.45
+        ],
+        [
+          3.0,
+          0.6,
+          0.2,
+          0.4
+        ]
+      ],
+      "occlusions": [],
+      "fixtures": [],
+      "target_delta_first_joint_rad": 0.35,
+      "schema_version": 1
+    }
+  ],
+  "fit_seeds": [
+    0,
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    8,
+    9
+  ],
+  "validation_seeds": [
+    100,
+    101,
+    102,
+    103,
+    104,
+    105,
+    106,
+    107,
+    108,
+    109
+  ],
+  "horizons_s": [
+    0.0,
+    0.05,
+    0.1,
+    0.2
+  ],
+  "confidence": 0.95,
+  "estimator": {
+    "acceleration_spectral_density": 0.1,
+    "initial_velocity_std_m_s": 0.5,
+    "measurement_std_m": "scenario noise standard deviation, floored at 1e-6"
+  },
+  "method": "per-horizon fitting-frame quantile / chi-square(3) threshold; scale floored at 1",
+  "bootstrap": "1000 seed-cluster resamples, seed 739; frames/scenarios sharing a seed retained together",
+  "limitations": [
+    "pose-only sensor experiment",
+    "validation trajectories intentionally shift motion/delay",
+    "empirical covariance scaling, not conformal calibration",
+    "no image, collision probability, physical sensing or simultaneous trajectory guarantee"
+  ]
+}

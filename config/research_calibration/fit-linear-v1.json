@@ -1,0 +1,6 @@
+{
+  "schema_version": 1, "scenario_id": "fit-linear-v1", "split": "calibration",
+  "config": {"duration_s": 3.0, "obstacle_noise_std_m": 0.005},
+  "frame": "world",
+  "waypoints": [[0, 0.4, -0.3, 0.4], [3, 0.7, 0.3, 0.5]]
+}

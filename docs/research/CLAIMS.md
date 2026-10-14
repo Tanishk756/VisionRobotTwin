@@ -14,7 +14,7 @@ Last updated: 2026-10-14. [Milestone evidence](../status/2026-10-14-research-fou
 | Fixed-horizon stop comparator has tested HOLD recovery and latched faults | Verified within implementation test scope | `tests/test_research_scenarios_baseline.py`; this does not establish collision avoidance |
 | Candidate filter is novel | Unestablished | G0 review and technical distinction from closest methods |
 | Candidate filter improves safety/progress | Untested | Tuned baselines, held-out trials, uncertainty analysis |
-| Uncertainty estimates are calibrated | Untested | Disjoint calibration and coverage experiments |
+| Uncertainty estimates are calibrated | Not established; undercoverage measured under motion/delay shift | [First diagnostic](UNCERTAINTY_CALIBRATION.md): disjoint fit/validation cases; nominal 95% coverage below target |
 | Collision avoidance has formal guarantees | Unestablished | Derivation with complete assumptions and independent review |
 | System transfers to physical robots | Untested | Physical validation |
 
