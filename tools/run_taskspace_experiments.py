@@ -25,6 +25,7 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
+from robotics.robot_registry import list_available_robots
 from robotics.experiments import (
     ALL_EXPERIMENT_NAMES,
     EXPERIMENT_DEFINITIONS,
@@ -525,7 +526,7 @@ def create_experiment_arg_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--all", action="store_true", help="Execute all 5 benchmark experiments")
     parser.add_argument("--experiment", type=str, choices=ALL_EXPERIMENT_NAMES, help="Run specific experiment")
-    parser.add_argument("--robot", type=str, choices=["panda", "kuka_iiwa"], help="Filter by robot")
+    parser.add_argument("--robot", type=str, choices=list_available_robots(), help="Filter by robot")
     parser.add_argument("--controller", type=str, choices=["ik", "resolved-rate"], help="Filter by controller")
     parser.add_argument("--repeats", type=int, default=1, help="Number of deterministic repeatability runs per trial (default: 1)")
     parser.add_argument("--seed", type=int, default=42, help="Deterministic random seed")

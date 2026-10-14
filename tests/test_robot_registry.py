@@ -11,7 +11,7 @@ def test_robot_registry_default_registration():
     robots = registry.list_robot_ids()
     assert "panda" in robots
     assert "kuka_iiwa" in robots
-    assert list_available_robots() == ["panda", "kuka_iiwa"]
+    assert list_available_robots() == ["panda", "kuka_iiwa", "xarm6", "xarm6_gripper"]
 
 
 def test_robot_registry_panda_spec():

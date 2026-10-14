@@ -9,6 +9,7 @@ from robotics.robot_model import RobotModelSpec
 from robotics.adapters.base import RobotAdapter
 from robotics.adapters.panda import PandaAdapter
 from robotics.adapters.kuka_iiwa import KukaIiwaAdapter
+from robotics.adapters.xarm6 import XArm6Adapter, XArm6GripperAdapter
 
 
 class RobotRegistry:
@@ -26,6 +27,8 @@ class RobotRegistry:
 
         kuka_adapter = KukaIiwaAdapter()
         self.register_robot(kuka_adapter.spec, KukaIiwaAdapter)
+        for adapter_cls in (XArm6Adapter, XArm6GripperAdapter):
+            self.register_robot(adapter_cls().spec, adapter_cls)
 
     def register_robot(self, spec: RobotModelSpec, adapter_cls: Type[RobotAdapter]) -> None:
         """Registers a new robot specification and adapter class."""

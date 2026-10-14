@@ -11,6 +11,7 @@ import sys
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
+from robotics.robot_registry import list_available_robots
 from robotics.experiments import execute_obstacle_reach_experiment, generate_experiment_manifest
 from robotics.robustness import PROFILES, RobustnessConfig, run_robustness_trial, summarize_robustness
 
@@ -27,7 +28,7 @@ def json_safe(value):
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--robots", nargs="+", choices=["panda", "kuka_iiwa"], default=["panda", "kuka_iiwa"])
+    parser.add_argument("--robots", nargs="+", choices=list_available_robots(), default=["panda", "kuka_iiwa"])
     parser.add_argument("--controllers", nargs="+", choices=["ik", "resolved-rate"], default=["ik", "resolved-rate"])
     parser.add_argument("--profiles", nargs="+", choices=PROFILES, default=list(PROFILES))
     parser.add_argument("--seeds", type=int, nargs="+", default=[0, 1, 2])

@@ -60,6 +60,9 @@ class RobotModelSpec:
     spherical_reach_m: float = 0.855
     min_reach_m: float = 0.10
     allowed_self_collision_pairs: List[Tuple[int, int]] = field(default_factory=list)
+    gripper_open_position: float = 0.04
+    gripper_closed_position: float = 0.0
+    use_urdf_inertia: bool = True
 
 
 @dataclass(frozen=True)

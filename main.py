@@ -24,6 +24,7 @@ from vision.camera import Camera
 from vision.aruco_detector import ArUcoDetector
 from vision.pose_estimator import PoseEstimator
 from robotics.simulator import PyBulletSimulator
+from robotics.execution_collision import CollisionSafetyError
 from robotics.workspace_mapper import WorkspaceMapper
 from robotics.state_machine import RoboticStateMachine, RobotState
 from utils.logger import setup_logger, get_logger
@@ -74,7 +75,7 @@ def print_robot_list() -> None:
         spec = registry.get_robot_spec(robot_id)
         gripper_str = "Yes" if spec.capabilities.has_gripper else "No"
         pick_place_str = "Yes" if spec.capabilities.supports_pick_place else "No"
-        print(f"  - {spec.robot_id:<12} : {spec.display_name} (7-DoF Arm, Gripper: {gripper_str}, Pick/Place: {pick_place_str})")
+        print(f"  - {spec.robot_id:<12} : {spec.display_name} ({len(spec.home_joint_positions)}-DoF Arm, Gripper: {gripper_str}, Pick/Place: {pick_place_str})")
 
 
 def print_robot_info(robot_id: str) -> None:
@@ -102,7 +103,7 @@ def print_robot_info(robot_id: str) -> None:
     print(f" Supports Pick/Place: {spec.capabilities.supports_pick_place}")
     print(f" Velocity Control   : {spec.capabilities.supports_velocity_control}")
     print(f" Self Collision     : {spec.capabilities.supports_self_collision}")
-    print(f" Max Payload        : {spec.capabilities.max_payload_kg:.1f} kg")
+    print(f" Max Payload        : {spec.capabilities.max_payload_kg:.1f} kg" if spec.capabilities.max_payload_kg > 0 else " Max Payload        : Unvalidated simulation profile")
     print("=" * 60)
 
 
@@ -396,158 +397,170 @@ class VisionRobotTwinApp:
         ik_status = "IDLE"
         controller_name = getattr(self.config, "controller_type", "ik").lower()
 
-        if not self._is_paused:
-            if self.state_machine.mode == "MANUAL":
-                cmd_target, is_tracking = self.state_machine.update_manual_mode(
-                    marker_detected=(target_pose is not None),
-                    target_pos_robot=target_robot_pos,
-                )
-                commanded_cartesian_target = cmd_target
-
-                if is_tracking and target_robot_orn is not None:
-                    commanded_orientation_target = target_robot_orn
-                    self._last_commanded_target_orn = target_robot_orn.copy()
-                elif self.state_machine.state == RobotState.HOLD:
-                    commanded_orientation_target = self._last_commanded_target_orn.copy()
-                else:
-                    commanded_orientation_target = self._last_commanded_target_orn.copy()
-            else:  # AUTO MODE
-                current_ee_pos, _ = self.simulator.controller.get_end_effector_pose()
-
-                p_pick_robot = None
-                if pick_pose is not None:
-                    mapped_pick = self.workspace_mapper.map_camera_to_robot(
-                        np.array([pick_pose.x, pick_pose.y, pick_pose.z]),
-                        enforce_slew_rate=False,
+        try:
+            guard = getattr(self.simulator, "execution_guard", None)
+            if guard is not None and guard.active_fault is not None:
+                raise CollisionSafetyError(guard.active_fault.detail)
+            if not self._is_paused:
+                if self.state_machine.mode == "MANUAL":
+                    cmd_target, is_tracking = self.state_machine.update_manual_mode(
+                        marker_detected=(target_pose is not None),
+                        target_pos_robot=target_robot_pos,
                     )
-                    if mapped_pick.is_valid:
-                        p_pick_robot = mapped_pick.position
+                    commanded_cartesian_target = cmd_target
 
-                p_place_robot = None
-                if place_pose is not None:
-                    mapped_place = self.workspace_mapper.map_camera_to_robot(
-                        np.array([place_pose.x, place_pose.y, place_pose.z]),
-                        enforce_slew_rate=False,
-                    )
-                    if mapped_place.is_valid:
-                        p_place_robot = mapped_place.position
-
-                gripper_attach = (lambda: self.simulator.gripper.attach_object(self.simulator.pick_cube_id)) if self.simulator.gripper else (lambda: None)
-                gripper_detach = (lambda: self.simulator.gripper.detach_object()) if self.simulator.gripper else (lambda: None)
-
-                cmd_target, action_status = self.state_machine.update_auto_mode(
-                    current_ee_pos=current_ee_pos,
-                    marker_1_pos=p_pick_robot,
-                    marker_2_pos=p_place_robot,
-                    gripper_attach_fn=gripper_attach,
-                    gripper_detach_fn=gripper_detach,
-                    on_targets_stabilized_fn=lambda p_pick, p_place: (
-                        self.simulator.set_pick_object_position(p_pick),
-                        self.simulator.set_place_target_position(p_place),
-                    ),
-                    dt=effective_dt,
-                )
-                commanded_cartesian_target = cmd_target
-                commanded_orientation_target = self.config.robot.default_ee_orientation
-
-            # --- PHASE 5: CONTROLLER SELECTION & MOTOR COMMAND ---
-            if commanded_cartesian_target is not None:
-                self.simulator.set_target_visual_position(commanded_cartesian_target)
-
-                if self.state_machine.mode == "AUTO":
-                    # Discrete AUTO motions are exclusively owned by MotionManager
-                    if self.state_machine.state in (
-                        RobotState.APPROACH, RobotState.PICK, RobotState.LIFT,
-                        RobotState.MOVE_TO_PLACE, RobotState.PLACE, RobotState.RETURN_HOME
-                    ):
-                        goal_changed = False
-                        if self._motion_last_state != self.state_machine.state:
-                            goal_changed = True
-                        elif self._motion_last_goal_pos is None:
-                            goal_changed = True
-                        else:
-                            pos_diff = float(np.linalg.norm(np.array(commanded_cartesian_target) - self._motion_last_goal_pos))
-                            if pos_diff > 0.005:
-                                goal_changed = True
-                            elif commanded_orientation_target is not None and self._motion_last_goal_orn is not None:
-                                dot = float(np.abs(np.dot(commanded_orientation_target, self._motion_last_goal_orn)))
-                                orn_diff = float(2.0 * np.arccos(np.clip(dot, -1.0, 1.0)))
-                                if orn_diff > np.radians(2.0):
-                                    goal_changed = True
-
-                        if goal_changed:
-                            self._motion_last_state = self.state_machine.state
-                            self._motion_last_goal_pos = np.array(commanded_cartesian_target, dtype=np.float64)
-                            self._motion_last_goal_orn = np.array(commanded_orientation_target, dtype=np.float64) if commanded_orientation_target is not None else None
-                            self.simulator.motion_manager.plan_motion_to_pose(
-                                target_position=commanded_cartesian_target,
-                                target_orientation=commanded_orientation_target,
-                            )
-
-                        is_done, progress = self.simulator.motion_manager.step(effective_dt)
-                        ik_status = f"MOTION_{self.simulator.motion_manager.state_name} ({progress:.0f}%)"
+                    if is_tracking and target_robot_orn is not None:
+                        commanded_orientation_target = target_robot_orn
+                        self._last_commanded_target_orn = target_robot_orn.copy()
+                    elif self.state_machine.state == RobotState.HOLD:
+                        commanded_orientation_target = self._last_commanded_target_orn.copy()
                     else:
-                        # SEARCH / HOME states in AUTO: hold current position
-                        self.simulator.motion_manager.step(effective_dt)
-                        ik_status = f"AUTO_{self.state_machine.state_name}"
-                elif controller_name == "resolved-rate":
-                    # Execute genuine Resolved-Rate differential IK velocity path for MANUAL teleoperation
-                    ik_orn = commanded_orientation_target if self.config.control_mode == "6dof" else None
-                    if self.state_machine.state == RobotState.TRACK:
-                        q_dot, m_metrics = self.simulator.resolved_rate_controller.compute_step(
+                        commanded_orientation_target = self._last_commanded_target_orn.copy()
+                else:  # AUTO MODE
+                    current_ee_pos, _ = self.simulator.controller.get_end_effector_pose()
+
+                    p_pick_robot = None
+                    if pick_pose is not None:
+                        mapped_pick = self.workspace_mapper.map_camera_to_robot(
+                            np.array([pick_pose.x, pick_pose.y, pick_pose.z]),
+                            enforce_slew_rate=False,
+                        )
+                        if mapped_pick.is_valid:
+                            p_pick_robot = mapped_pick.position
+
+                    p_place_robot = None
+                    if place_pose is not None:
+                        mapped_place = self.workspace_mapper.map_camera_to_robot(
+                            np.array([place_pose.x, place_pose.y, place_pose.z]),
+                            enforce_slew_rate=False,
+                        )
+                        if mapped_place.is_valid:
+                            p_place_robot = mapped_place.position
+
+                    gripper_attach = (lambda: self.simulator.gripper.attach_object(self.simulator.pick_cube_id)) if self.simulator.gripper else (lambda: None)
+                    gripper_detach = (lambda: self.simulator.gripper.detach_object()) if self.simulator.gripper else (lambda: None)
+
+                    cmd_target, action_status = self.state_machine.update_auto_mode(
+                        current_ee_pos=current_ee_pos,
+                        marker_1_pos=p_pick_robot,
+                        marker_2_pos=p_place_robot,
+                        gripper_attach_fn=gripper_attach,
+                        gripper_detach_fn=gripper_detach,
+                        on_targets_stabilized_fn=lambda p_pick, p_place: (
+                            self.simulator.set_pick_object_position(p_pick),
+                            self.simulator.set_place_target_position(p_place),
+                        ),
+                        dt=effective_dt,
+                    )
+                    commanded_cartesian_target = cmd_target
+                    commanded_orientation_target = self.config.robot.default_ee_orientation
+
+                # --- PHASE 5: CONTROLLER SELECTION & MOTOR COMMAND ---
+                if commanded_cartesian_target is not None:
+                    self.simulator.set_target_visual_position(commanded_cartesian_target)
+
+                    if self.state_machine.mode == "AUTO":
+                        # Discrete AUTO motions are exclusively owned by MotionManager
+                        if self.state_machine.state in (
+                            RobotState.APPROACH, RobotState.PICK, RobotState.LIFT,
+                            RobotState.MOVE_TO_PLACE, RobotState.PLACE, RobotState.RETURN_HOME
+                        ):
+                            goal_changed = False
+                            if self._motion_last_state != self.state_machine.state:
+                                goal_changed = True
+                            elif self._motion_last_goal_pos is None:
+                                goal_changed = True
+                            else:
+                                pos_diff = float(np.linalg.norm(np.array(commanded_cartesian_target) - self._motion_last_goal_pos))
+                                if pos_diff > 0.005:
+                                    goal_changed = True
+                                elif commanded_orientation_target is not None and self._motion_last_goal_orn is not None:
+                                    dot = float(np.abs(np.dot(commanded_orientation_target, self._motion_last_goal_orn)))
+                                    orn_diff = float(2.0 * np.arccos(np.clip(dot, -1.0, 1.0)))
+                                    if orn_diff > np.radians(2.0):
+                                        goal_changed = True
+
+                            if goal_changed:
+                                self._motion_last_state = self.state_machine.state
+                                self._motion_last_goal_pos = np.array(commanded_cartesian_target, dtype=np.float64)
+                                self._motion_last_goal_orn = np.array(commanded_orientation_target, dtype=np.float64) if commanded_orientation_target is not None else None
+                                self.simulator.motion_manager.plan_motion_to_pose(
+                                    target_position=commanded_cartesian_target,
+                                    target_orientation=commanded_orientation_target,
+                                )
+
+                            is_done, progress = self.simulator.motion_manager.step(effective_dt)
+                            ik_status = f"MOTION_{self.simulator.motion_manager.state_name} ({progress:.0f}%)"
+                        else:
+                            # SEARCH / HOME states in AUTO: hold current position
+                            self.simulator.motion_manager.step(effective_dt)
+                            ik_status = f"AUTO_{self.state_machine.state_name}"
+                    elif controller_name == "resolved-rate":
+                        # Execute genuine Resolved-Rate differential IK velocity path for MANUAL teleoperation
+                        ik_orn = commanded_orientation_target if self.config.control_mode == "6dof" else None
+                        if self.state_machine.state == RobotState.TRACK:
+                            q_dot, m_metrics = self.simulator.resolved_rate_controller.compute_step(
+                                target_position=commanded_cartesian_target,
+                                target_orientation=ik_orn,
+                                dt=effective_dt,
+                            )
+                            self.simulator.controller.set_arm_joint_velocities(q_dot)
+                            s_state = "WARNING" if m_metrics.near_singularity else "NORMAL"
+                            ik_status = f"RR_ACTIVE ({s_state})"
+                        else:
+                            # Tracking lost or search/hold: command safe zero velocities to avoid drift
+                            self.simulator.controller.set_arm_joint_velocities(
+                                [0.0] * len(self.simulator.controller.arm_joint_indices)
+                            )
+                            ik_status = "RR_ZERO_HOLD"
+                    else:
+                        # Execute standard IK position-control path with rate limiting for MANUAL teleoperation
+                        ik_orn = commanded_orientation_target if self.config.control_mode == "6dof" else None
+                        ik_res = self.simulator.ik_solver.solve(
                             target_position=commanded_cartesian_target,
                             target_orientation=ik_orn,
-                            dt=effective_dt,
                         )
-                        self.simulator.controller.set_arm_joint_velocities(q_dot)
-                        s_state = "WARNING" if m_metrics.near_singularity else "NORMAL"
-                        ik_status = f"RR_ACTIVE ({s_state})"
-                    else:
-                        # Tracking lost or search/hold: command safe zero velocities to avoid drift
+                        ik_status = ik_res.status_message
+                        if ik_res.success:
+                            self.simulator.controller.set_arm_joint_positions(
+                                ik_res.joint_positions,
+                                dt=effective_dt,
+                                enforce_velocity_limits=True,
+                            )
+                else:
+                    if self.state_machine.mode == "AUTO":
+                        self.simulator.motion_manager.step(effective_dt)
+                        ik_status = "AUTO_IDLE"
+                    elif controller_name == "resolved-rate":
                         self.simulator.controller.set_arm_joint_velocities(
                             [0.0] * len(self.simulator.controller.arm_joint_indices)
                         )
-                        ik_status = "RR_ZERO_HOLD"
-                else:
-                    # Execute standard IK position-control path with rate limiting for MANUAL teleoperation
-                    ik_orn = commanded_orientation_target if self.config.control_mode == "6dof" else None
-                    ik_res = self.simulator.ik_solver.solve(
-                        target_position=commanded_cartesian_target,
-                        target_orientation=ik_orn,
-                    )
-                    ik_status = ik_res.status_message
-                    if ik_res.success:
-                        self.simulator.controller.set_arm_joint_positions(
-                            ik_res.joint_positions,
-                            dt=effective_dt,
-                            enforce_velocity_limits=True,
-                        )
+                        ik_status = "RR_IDLE"
             else:
-                if self.state_machine.mode == "AUTO":
-                    self.simulator.motion_manager.step(effective_dt)
-                    ik_status = "AUTO_IDLE"
-                elif controller_name == "resolved-rate":
+                # Paused (HOLD) state
+                if controller_name == "resolved-rate":
                     self.simulator.controller.set_arm_joint_velocities(
                         [0.0] * len(self.simulator.controller.arm_joint_indices)
                     )
-                    ik_status = "RR_IDLE"
-        else:
-            # Paused (HOLD) state
-            if controller_name == "resolved-rate":
-                self.simulator.controller.set_arm_joint_velocities(
-                    [0.0] * len(self.simulator.controller.arm_joint_indices)
-                )
-            elif self._paused_joint_positions is not None:
-                self.simulator.controller.set_arm_joint_positions(
-                    self._paused_joint_positions, dt=effective_dt, enforce_velocity_limits=False
-                )
-            ik_status = "HOLD (PAUSED)"
-            ee_frozen_pos, _ = self.simulator.controller.get_end_effector_pose()
-            commanded_cartesian_target = ee_frozen_pos
-            commanded_orientation_target = self._last_commanded_target_orn.copy()
+                elif self._paused_joint_positions is not None:
+                    self.simulator.controller.set_arm_joint_positions(
+                        self._paused_joint_positions, dt=effective_dt, enforce_velocity_limits=False
+                    )
+                ik_status = "HOLD (PAUSED)"
+                ee_frozen_pos, _ = self.simulator.controller.get_end_effector_pose()
+                commanded_cartesian_target = ee_frozen_pos
+                commanded_orientation_target = self._last_commanded_target_orn.copy()
+
+        except CollisionSafetyError as err:
+            self.state_machine.transition_to(RobotState.ERROR, str(err))
+            ik_status = "COLLISION_STOP (R to reset when clear)"
 
         # --- PHASE 6: SIMULATION PHYSICS STEPPING & TELEMETRY ---
         substeps = self.simulator.step(wall_dt=effective_dt)
+        guard = getattr(self.simulator, "execution_guard", None)
+        if guard is not None and guard.active_fault is not None:
+            self.state_machine.transition_to(RobotState.ERROR, guard.active_fault.detail)
+            ik_status = "COLLISION_STOP (R to reset when clear)"
         self.sim_fps_counter.update()
 
         ee_pos, ee_orn = self.simulator.controller.get_end_effector_pose()
@@ -563,6 +576,8 @@ class VisionRobotTwinApp:
                 col_state = "SELF_COLLISION"
             elif col_res.env_collision:
                 col_state = "ENV_COLLISION"
+            elif col_res.clearance_violation:
+                col_state = "CLEARANCE_VIOLATION"
             elif col_res.clearance_violation:
                 col_state = "CLEARANCE_VIOLATION"
 
@@ -732,10 +747,15 @@ class VisionRobotTwinApp:
             self.pose_filter.reset()
             self.workspace_mapper.reset()
             # Safely command zero velocity before position reset
-            self.simulator.controller.set_arm_joint_velocities([0.0] * len(self.simulator.controller.arm_joint_indices))
+            self.simulator.controller.backend.halt_motion()
             if hasattr(self.simulator, "resolved_rate_controller"):
                 self.simulator.resolved_rate_controller.reset()
-            self.simulator.controller.reset_to_home()
+            try:
+                self.simulator.controller.set_arm_joint_positions(
+                    self.simulator.robot_spec.home_joint_positions, enforce_velocity_limits=False)
+            except CollisionSafetyError as err:
+                self.logger.warning(f"Home motion refused: {err}")
+                return
             self.state_machine.transition_to(RobotState.HOME, "User pressed Home")
 
         elif key == ord(" "):  # Space: Hold / Resume
@@ -743,7 +763,7 @@ class VisionRobotTwinApp:
             if self._is_paused:
                 self._paused_joint_positions = self.simulator.controller.get_current_joint_positions()
                 # Zero out velocity actuator command immediately
-                self.simulator.controller.set_arm_joint_velocities([0.0] * len(self.simulator.controller.arm_joint_indices))
+                self.simulator.controller.backend.halt_motion()
             else:
                 self._paused_joint_positions = None
             self.logger.info(f"{'Paused (HOLD)' if self._is_paused else 'Resumed tracking'}.")
@@ -754,26 +774,46 @@ class VisionRobotTwinApp:
             self.state_machine.set_mode("MANUAL")
 
         elif char == "a":  # Auto Mode
-            if not self.simulator.robot_spec.capabilities.has_gripper:
-                self.logger.warning(f"Robot '{self.simulator.robot_spec.robot_id}' does not have a gripper; autonomous pick/place is unavailable.")
+            if not self.simulator.robot_spec.capabilities.supports_pick_place:
+                self.logger.warning(f"Robot '{self.simulator.robot_spec.robot_id}' does not support validated automatic pick/place.")
                 return
             self.pose_filter.reset()
             self.workspace_mapper.reset()
             self.state_machine.set_mode("AUTO")
 
         elif char == "r":  # Reset
+            guard = getattr(self.simulator, "execution_guard", None)
+            if guard is not None and guard.active_fault is not None:
+                try:
+                    guard.reset_fault()
+                except Exception as err:
+                    self.logger.warning(f"Collision reset refused: {err}")
+                    return
             self.logger.info("Resetting simulation, controllers, and tracking filters.")
-            self.simulator.controller.set_arm_joint_velocities([0.0] * len(self.simulator.controller.arm_joint_indices))
+            self.simulator.controller.backend.halt_motion()
             if hasattr(self.simulator, "resolved_rate_controller"):
                 self.simulator.resolved_rate_controller.reset()
             if hasattr(self.simulator, "motion_manager"):
                 self.simulator.motion_manager.reset()
-            self.simulator.controller.reset_to_home()
+            try:
+                self.simulator.controller.set_arm_joint_positions(
+                    self.simulator.robot_spec.home_joint_positions, enforce_velocity_limits=False)
+            except CollisionSafetyError as err:
+                self.logger.warning(f"Home motion refused: {err}")
+                return
             if self.simulator.gripper:
                 self.simulator.gripper.detach_object()
             self.pose_filter.reset()
             self.workspace_mapper.reset()
             self.state_machine.reset()
+
+        elif char in ("o", "g"):
+            guard = getattr(self.simulator, "execution_guard", None)
+            if self.simulator.gripper and (guard is None or guard.active_fault is None):
+                if char == "o":
+                    self.simulator.gripper.open()
+                else:
+                    self.simulator.gripper.close()
 
         elif char == "t":  # Toggle Trajectory
             enabled = self.simulator.toggle_trajectory()
@@ -893,8 +933,8 @@ def main() -> int:
         print(f"Error: {e}", file=sys.stderr)
         return 1
 
-    if args.mode == "auto" and not spec.capabilities.has_gripper:
-        print(f"Error: Robot '{args.robot}' does not provide a gripper; autonomous pick/place is unavailable.", file=sys.stderr)
+    if args.mode == "auto" and not spec.capabilities.supports_pick_place:
+        print(f"Error: Robot '{args.robot}' does not support validated automatic pick/place.", file=sys.stderr)
         return 1
 
     logger = setup_logger(debug=args.debug)

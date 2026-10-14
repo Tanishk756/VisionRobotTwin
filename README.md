@@ -1,6 +1,6 @@
 # VisionRobotTwin: Multi-Manipulator Vision-Guided Robotics Research Platform
 
-> **Real-Time Vision-Guided Robotic Manipulation Digital Twin supporting Franka Emika Panda & KUKA LBR iiwa with Generic Kinematics, Resolved-Rate Control, Singularity Monitoring, Collision Planning, and Cross-Robot Benchmarking**
+> **Real-Time Vision-Guided Robotic Manipulation Digital Twin supporting Franka Emika Panda, KUKA LBR iiwa & xArm6 with Generic Kinematics, Resolved-Rate Control, Singularity Monitoring, Collision Planning, and Cross-Robot Benchmarking**
 
 [![Python 3.10+](https://img.shields.io/badge/Python-3.10%20%7C%203.11%20%7C%203.12-blue.svg)](https://www.python.org/)
 [![Release: v1.2.0](https://img.shields.io/badge/Release-v1.2.0-brightgreen.svg)](https://github.com/Tanishk756/VisionRobotTwin/releases/tag/v1.2.0)
@@ -18,7 +18,7 @@
 ## 📌 Overview
 
 **VisionRobotTwin** is a robot-agnostic vision-guided manipulation and digital-twin research framework in Python, OpenCV, and PyBullet supporting:
-- **Franka Emika Panda** and **KUKA LBR iiwa** (7-DoF manipulators)
+- **Franka Emika Panda** and **KUKA LBR iiwa** (7 joints), plus **xArm6** with or without a gripper (6 joints)
 - **Generic Forward Kinematics (FK)** and **Inverse Kinematics (IK)** with measured FK residuals
 - **Geometric Spatial Jacobian** computation
 - **Resolved-rate Cartesian velocity control** with adaptive Damped Least-Squares (DLS)
@@ -36,16 +36,39 @@ The platform natively supports multiple 7-DoF industrial manipulators with stron
 
 ## 🤖 Supported Robot Matrix & Capabilities
 
-| Capability | Franka Emika Panda | KUKA LBR iiwa |
-| :--- | :---: | :---: |
-| **7-DoF Arm** | ✅ YES | ✅ YES |
-| **Vision Target Tracking** | ✅ YES | ✅ YES |
-| **Generic IK** | ✅ YES | ✅ YES |
-| **Resolved-Rate Control** | ✅ YES | ✅ YES |
-| **Collision Planning** | ✅ YES | ✅ YES |
-| **Gripper** | ✅ YES (2-Finger Parallel) | ❌ NO (Bare Flange) |
-| **Autonomous Pick / Place** | ✅ YES | ❌ NO (Disabled Cleanly) |
-| **URDF Source** | `pybullet_data/franka_panda/panda.urdf` | `pybullet_data/kuka_iiwa/model.urdf` |
+| Capability | Panda | KUKA iiwa | xArm6 | xArm6 with gripper |
+| :--- | :---: | :---: | :---: | :---: |
+| Arm joints | 7 | 7 | 6 | 6 |
+| IK / resolved-rate control | Yes | Yes | Yes | Yes |
+| Collision planning / execution monitoring | Yes | Yes | Yes | Yes |
+| Gripper | Parallel fingers | None | None | Revolute linkage |
+| Automatic pick/place | Virtual grasp | Disabled | Disabled | Disabled pending TCP validation |
+| Control frame | Grasp target | Flange | Flange | Flange |
+
+The xArm profiles use models bundled with `pybullet_data`; no model download is
+needed. Their invalid supplied inertia tensors are replaced by PyBullet's
+geometry-derived inertia. These are simulation profiles, without hardware
+validation or a validated payload rating. The gripper profile controls its six
+linkage joints; automatic grasping remains disabled until its tool center point
+and grasp behavior are validated.
+
+```powershell
+python main.py --list-robots
+python main.py --robot xarm6 --synthetic
+python main.py --robot xarm6_gripper --synthetic --controller resolved-rate
+```
+
+Validation results: [xArm6 and execution monitor report](docs/status/2026-10-14-xarm6-and-execution-monitor.md).
+
+Press **G** to close or **O** to open a supported gripper. Runtime arm commands
+are checked against sampled collision paths; velocity commands use a 100 ms
+lookahead. Each simulation physics step checks measured clearance before and
+after integration. A fault stops arm commands, holds the gripper, and remains
+latched. **R** resets only after the current collision condition is clear;
+home commands also pass through the collision guard. This software monitor is
+not a continuous collision guarantee or a hardware safety controller. Sampling
+and physics checks add computation time. Isolated experiments can explicitly
+set `AppConfig.execution_collision_checking=False`.
 
 ---
 

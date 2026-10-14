@@ -37,12 +37,16 @@ class VirtualGripper:
         finger_joint_indices: List[int],
         ee_link_index: int,
         max_grasp_distance_m: float = 0.055,
+        open_position: float = 0.04,
+        closed_position: float = 0.0,
     ):
         self.client_id = physics_client_id
         self.robot_id = robot_id
         self.finger_indices = finger_joint_indices
         self.ee_link_index = ee_link_index
         self.max_grasp_distance_m = max_grasp_distance_m
+        self.open_position = open_position
+        self.closed_position = closed_position
 
         self._active_constraint_id: Optional[int] = None
         self._grasped_body_id: Optional[int] = None
@@ -53,9 +57,10 @@ class VirtualGripper:
         """Returns True if a body is currently attached via grasp constraint."""
         return self._active_constraint_id is not None
 
-    def open(self, target_width: float = 0.04) -> None:
+    def open(self, target_width: Optional[float] = None) -> None:
         """Opens the gripper fingers."""
         self._is_closed = False
+        target_width = self.open_position if target_width is None else target_width
         for joint_idx in self.finger_indices:
             p.setJointMotorControl2(
                 bodyIndex=self.robot_id,
@@ -66,9 +71,10 @@ class VirtualGripper:
                 physicsClientId=self.client_id,
             )
 
-    def close(self, target_width: float = 0.0) -> None:
+    def close(self, target_width: Optional[float] = None) -> None:
         """Closes the gripper fingers."""
         self._is_closed = True
+        target_width = self.closed_position if target_width is None else target_width
         for joint_idx in self.finger_indices:
             p.setJointMotorControl2(
                 bodyIndex=self.robot_id,
@@ -78,6 +84,14 @@ class VirtualGripper:
                 force=40.0,
                 physicsClientId=self.client_id,
             )
+
+    def halt_motion(self) -> None:
+        """Hold every finger at its measured position during an execution fault."""
+        for index in self.finger_indices:
+            position = p.getJointState(self.robot_id, index, physicsClientId=self.client_id)[0]
+            p.setJointMotorControl2(self.robot_id, index, p.POSITION_CONTROL,
+                                   targetPosition=position, force=40.0,
+                                   physicsClientId=self.client_id)
 
     def attach_object(self, object_body_id: int) -> GraspResult:
         """Attaches a rigid kinematic constraint only if physically within grasp threshold.

@@ -1,0 +1,70 @@
+{
+  "version": "1.3.0-dev",
+  "git_commit_sha": "f490df175d97f355b2617500c4d8b6e44944a027",
+  "timestamp_utc": "2026-10-14T06:52:38.217112+00:00",
+  "environment": {
+    "python_version": "3.12.10",
+    "opencv_version": "5.0.0",
+    "numpy_version": "2.2.6",
+    "pybullet_package_version": "3.2.7",
+    "pybullet_api_version": "202010061",
+    "os": "Windows",
+    "architecture": "AMD64"
+  },
+  "provenance": {
+    "working_tree_dirty": true,
+    "actual_head_commit_sha": "f490df175d97f355b2617500c4d8b6e44944a027",
+    "runtime_source_sha256": "9ff64235690db0a976769523ba7453056cabfc26bc552ee9346b6ee6b33e9a83",
+    "pose_frame": "world_urdf_link",
+    "resolved_rate_feedforward": true
+  },
+  "execution": {
+    "robots": [
+      "xarm6",
+      "xarm6_gripper"
+    ],
+    "controllers": [
+      "ik",
+      "resolved-rate"
+    ],
+    "random_seeds": [
+      0
+    ],
+    "profiles": [
+      "nominal",
+      "pose_noise",
+      "detection_dropout"
+    ],
+    "physics_frequency_hz": 240
+  },
+  "suite": "seeded_robustness_v1",
+  "robustness": {
+    "config": {
+      "duration_s": 1.0,
+      "settle_s": 0.5,
+      "physics_hz": 240,
+      "start_jitter_rad": 0.03,
+      "position_noise_std_m": 0.003,
+      "orientation_noise_std_rad": 0.01,
+      "telemetry_delay_s": 0.2,
+      "environment_clearance_m": 0.01,
+      "self_clearance_m": 0.0,
+      "goal_tolerance_m": 0.01,
+      "goal_orientation_tolerance_deg": 10.0
+    },
+    "seeds": [
+      0
+    ],
+    "profiles": [
+      "nominal",
+      "pose_noise",
+      "detection_dropout"
+    ],
+    "planning_clearance_buffer_m": 0.005,
+    "planning_collision_resolution_rad": 0.02,
+    "sensor_injection": "pose-level Gaussian noise and contiguous detection loss; not camera pixels",
+    "watchdog_clock": "simulation time with explicit polling each physics step",
+    "transport_stop_model": "privileged software halt remains available during injected transport faults",
+    "reference_path": "quintic translation from perturbed home FK; fixed start orientation; seeded goal offset"
+  }
+}

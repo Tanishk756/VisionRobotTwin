@@ -187,7 +187,7 @@ class PyBulletSimulator:
         robot_name = getattr(self.config, "robot_name", "panda")
         self.robot_spec = registry.get_robot_spec(robot_name)
 
-        flags = p.URDF_USE_INERTIA_FROM_FILE
+        flags = p.URDF_USE_INERTIA_FROM_FILE if self.robot_spec.use_urdf_inertia else 0
         self.robot_id = p.loadURDF(
             self.robot_spec.urdf_path,
             basePosition=self.robot_spec.base_position,
@@ -256,6 +256,12 @@ class PyBulletSimulator:
             self_clearance_m=self.config.self_clearance_m,
         )
         self.collision_checker = self.collision_provider
+        self.execution_guard = None
+        if self.config.execution_collision_checking:
+            from robotics.execution_collision import CollisionGuardBackend
+            self.execution_guard = CollisionGuardBackend(self.controller.backend, self.collision_provider,
+                self.resolved_model, velocity_horizon_s=self.config.collision_velocity_horizon_s)
+            self.controller.backend = self.execution_guard
 
         from robotics.differential_ik import ResolvedRateController
         self.resolved_rate_controller = ResolvedRateController(
@@ -281,6 +287,8 @@ class PyBulletSimulator:
                 finger_joint_indices=self.controller.finger_joint_indices,
                 ee_link_index=self.controller.ee_link_index,
                 max_grasp_distance_m=self.config.state_machine.grasp_distance_threshold_m,
+                open_position=self.robot_spec.gripper_open_position,
+                closed_position=self.robot_spec.gripper_closed_position,
             )
         else:
             self.gripper = None
@@ -398,13 +406,22 @@ class PyBulletSimulator:
             Number of physics substeps actually computed.
         """
         if wall_dt is None:
-            p.stepSimulation(physicsClientId=self.client_id)
+            self._monitored_physics_step()
             return 1
 
         return self.sim_clock.step(
             wall_dt=wall_dt,
-            step_fn=lambda: p.stepSimulation(physicsClientId=self.client_id),
+            step_fn=self._monitored_physics_step,
         )
+
+    def _monitored_physics_step(self):
+        if self.execution_guard is not None:
+            if not self.execution_guard.monitor() and self.gripper is not None:
+                self.gripper.halt_motion()
+        p.stepSimulation(physicsClientId=self.client_id)
+        if self.execution_guard is not None:
+            if not self.execution_guard.monitor() and self.gripper is not None:
+                self.gripper.halt_motion()
 
     def render_rgb(self, width: int = 640, height: int = 480) -> np.ndarray:
         """Captures synthetic RGB frame from PyBullet simulation camera.
